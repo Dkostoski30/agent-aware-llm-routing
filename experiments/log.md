@@ -13,6 +13,30 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-25 · P0.0 prep · green
+Command: `df -T ~/thesis` · `nvidia-smi` · `free -h` · `git ls-files --eol` · `ssh -T git@github.com` · `git ls-remote origin` · `curl -s -o /dev/null -w '%{http_code}' https://github.com/Dkostoski30/agent-aware-llm-routing`
+Result:
+- Repo at `~/thesis` on ext4 in `Ubuntu-24.04`. Line endings all LF, all files mode 100644.
+- GPU still visible after the move: RTX 3050 Laptop, driver 621.01, 36 MiB / 4096 MiB used.
+- `ssh -T`: "Hi Dkostoski30! You've successfully authenticated".
+- `git ls-remote origin`: `refs/heads/master` = `2a781a7`, same as local. Anonymous HTTP returns 404, so the repo is private.
+Notes:
+- Repo created with `git clone /mnt/c/Users/kosto/Desktop/dipl/thesis ~/thesis`. A plain `cp -r`
+  of the kit fails: git object directories are read-only, so `cp` recreates them without write
+  permission before writing the objects into them.
+- Remote is `git@github.com:Dkostoski30/agent-aware-llm-routing.git`. Auth is an ed25519 SSH key in
+  `~/.ssh/id_ed25519`, added to GitHub by hand: one manual step per machine, kept out of the repo
+  because it is a secret. No `gh` needed. The GitHub repo already exists, so P0.0 pushes to it
+  instead of running `gh repo create`.
+- Git identity set in the repo: `Daniel Kostoski <kostoskid66@gmail.com>`.
+- Default WSL distro is now `Ubuntu-24.04` (corrects the P0.1 note below).
+- `windows/.wslconfig` kept on purpose, although the P0.0 card says to copy the kit without
+  `windows/`: it is the repo's only record of the locked memory/swap setting (rule 9).
+- `.idea/` is tracked by the Initial commit; untracking it (`.gitignore` + `git rm -r --cached .idea`)
+  is part of P0.0.
+- `user__n_pass` (plaintext Linux login) exists only in the Windows copy, was never committed, and
+  must stay out of the repo.
+
 ### 2026-10-24 · P0.1 · green
 Command: `wsl -d Ubuntu-24.04 nvidia-smi` · `wsl --version` · `nvidia-smi` (Windows) · `free -h` and `ls -l /dev/dxg` inside WSL · `powercfg /q SCHEME_CURRENT SUB_SLEEP STANDBYIDLE`
 Result:
