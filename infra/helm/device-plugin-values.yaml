@@ -1,0 +1,10 @@
+# Values for the NVIDIA device plugin chart 0.20.1 (P0.6), on top of the chart defaults.
+
+# The plugin reads the GPU through NVML; under WSL2 the NVML library comes from /usr/lib/wsl/lib, which only the
+# nvidia runtime mounts into the plugin's pod.
+runtimeClassName: nvidia
+
+# The default affinity requires a node label set by Node Feature Discovery from the PCI bus (or by GPU Feature
+# Discovery). WSL2 exposes the GPU through /dev/dxg, not as a PCI device, so no label ever appears; on this
+# single-node cluster the plugin runs on the one node without a selector. null removes the default.
+affinity: null

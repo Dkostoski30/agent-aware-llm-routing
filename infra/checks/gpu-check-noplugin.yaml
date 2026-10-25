@@ -1,0 +1,19 @@
+# GPU check without the device plugin (ladder step 3): no nvidia.com/gpu request; the nvidia runtime gives the
+# pod every GPU named in NVIDIA_VISIBLE_DEVICES. Run by make gpu-check when the node has no allocatable GPU (P0.6).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test
+spec:
+  runtimeClassName: nvidia
+  restartPolicy: Never
+  containers:
+    - name: nbody
+      # The tag floats; the digest is the image that ran in P0.2 (experiments/log.md).
+      image: nvcr.io/nvidia/k8s/cuda-sample:nbody@sha256:59261e419d6d48a772aad5bb213f9f1588fcdb042b115ceb7166c89a51f03363
+      # command replaces the image ENTRYPOINT (/cuda-samples/sample, a symlink to nbody); nbody is not on PATH.
+      command: ["/cuda-samples/nbody", "-gpu", "-benchmark"]
+      env:
+        # This image already sets it; set here so the check does not depend on the image, as vLLM pods won't.
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: all
