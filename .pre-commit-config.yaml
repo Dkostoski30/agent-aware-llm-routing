@@ -44,3 +44,4 @@ repos:
         language: system
         files: ^ui/.*\.ts$
         pass_filenames: false
+
