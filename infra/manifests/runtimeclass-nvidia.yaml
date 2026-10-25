@@ -1,0 +1,7 @@
+# Pods with runtimeClassName nvidia run under nvidia-container-runtime, which injects /dev/dxg and the WSL GPU
+# libraries (P0.6). The handler is the runtime name k3s adds to its containerd config.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
