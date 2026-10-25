@@ -13,6 +13,32 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-25 · P0.2 · green
+Command: `make docker-gpu` (twice, `wsl.exe --shutdown` in between) · `docker run --rm --gpus all nvcr.io/nvidia/k8s/cuda-sample:nbody nbody -gpu -benchmark`
+Result:
+- nbody: `Compute 8.6 CUDA device: [NVIDIA GeForce RTX 3050 Laptop GPU]`, 16384 bodies, 10 iterations in 16.165 ms,
+  **3321.221 single-precision GFLOP/s**.
+- Image digest: `nvcr.io/nvidia/k8s/cuda-sample@sha256:59261e419d6d48a772aad5bb213f9f1588fcdb042b115ceb7166c89a51f03363`
+  (the `nbody` tag is not pinned; the digest records what ran).
+- Second `make docker-gpu`: no apt install, no group change, every package at its pin (docker-ce 29.9.2,
+  containerd 2.4.2, buildx 0.38.1, Toolkit 1.20.1), runtimes `io.containerd.runc.v2 nvidia runc`.
+  Docker was not restarted: started 23:32:28 at WSL boot, `daemon.json` rewritten at 23:37:12 with
+  identical content.
+- `command -v docker` -> `/usr/bin/docker`; the user is in group `docker` after the WSL restart.
+Notes:
+- Pins are the newest versions available on 2026-10-25 (user decision), not the two-week rule used for
+  the dev tools. No `apt-mark hold` (user decision); rerunning the script moves packages back to their pins.
+- Only Engine + buildx; compose and rootless-extras left out (Kubernetes, not Compose).
+- Neither Docker's nor NVIDIA's install page lists its key fingerprint. The script pins the fingerprints
+  of the keys served over HTTPS on 2026-10-25 (Docker 9DC8...CD88, NVIDIA C95B...ECB0) and stops if they change.
+- systemd was already on (`/etc/wsl.conf`), so that step of the script did nothing here.
+- Docker Desktop stays installed on Windows with autostart off; its `docker-desktop` distro shares the
+  WSL2 VM's memory. The script warns if it is running.
+- `wsl --shutdown` only exists on Windows; inside Ubuntu it is `wsl.exe --shutdown`. The script's
+  messages say so after the first run hit this.
+- `nvidia-ctk` rewrites `daemon.json` on every run and prints INFO lines, and gpg printed keybox messages
+  from its temporary home: both made quiet after the second run (`--quiet`). Output-only change, not re-run.
+
 ### 2026-10-25 · P0.0 · green
 Command: `bash infra/bootstrap.sh` (twice) · `make lint` · `make test`
 Result:
