@@ -1,0 +1,24 @@
+# Profile "demo": one larger model for the practical demo, where tool-use quality matters more than replica count (D8, D11).
+model:
+  # Much better at multi-step tool use than the 0.6B; whether it fits is checked in P0.3, fallback Qwen/Qwen3-1.7B (D8).
+  name: Qwen/Qwen3-4B-AWQ
+  # A single pod can take most of the VRAM; the remaining 15% is left for the Windows desktop and CUDA context.
+  gpu_memory_utilization: 0.85
+  # The 4B weights leave less room for the KV cache, so the context limit is halved compared to the 0.6B (P0.3).
+  max_model_len: 4096
+  # vLLM parser that matches Qwen3's tool-call output format.
+  tool_call_parser: hermes
+# Only one 4B pod fits on the 4GB GPU (D8).
+replicas: 1
+# Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
+routing:
+  # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).
+  affinity: false
+  # Moves a run off its pod only under sustained overload (P3.5).
+  overload_guard: false
+  # Lets calls of one parallel group spill to other pods under overload (P3.6).
+  parallel_spill: false
+  # Serves runs close to finishing first (P4.1).
+  priority: false
+  # Sends new runs to the newest pod right after scale-up (P4.2).
+  warmup: false

@@ -1,0 +1,24 @@
+# Profile "sim": simulated pods (llm-d-inference-sim) calibrated from the real GPU, for autoscaling at scale (D4, D5, D11).
+model:
+  # Same model as "real": the simulator is calibrated from it, so the results stay comparable (D4).
+  name: Qwen/Qwen3-0.6B-GPTQ-Int8
+  # Same as "real", so a simulated pod has the same KV-cache budget as a real one.
+  gpu_memory_utilization: 0.42
+  # Same as "real", so the same traces fit within the context limit.
+  max_model_len: 8192
+  # Same as "real", so the agent sees the same tool-call format.
+  tool_call_parser: hermes
+# Starts at the same size as "real"; autoscaling changes the count from here.
+replicas: 2
+# Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
+routing:
+  # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).
+  affinity: false
+  # Moves a run off its pod only under sustained overload (P3.5).
+  overload_guard: false
+  # Lets calls of one parallel group spill to other pods under overload (P3.6).
+  parallel_spill: false
+  # Serves runs close to finishing first (P4.1).
+  priority: false
+  # Sends new runs to the newest pod right after scale-up (P4.2).
+  warmup: false

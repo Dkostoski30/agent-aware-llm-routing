@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "run_id": "run-7f3a9c",
+  "task_type": "csv_analysis",
+  "step": 3,
+  "expected_steps": 7,
+  "gap_before_ms": 42,
+  "completion_tokens": 96
+}

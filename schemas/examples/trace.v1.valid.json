@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "run_id": "run-7f3a9c",
+  "task_type": "csv_analysis",
+  "step": 3,
+  "expected_steps": 7,
+  "parallel_group": "read-docs-1",
+  "gap_before_ms": 42,
+  "prompt_tokens": 1830,
+  "completion_tokens": 96,
+  "ts_start": 1793102400123,
+  "ttft_ms": 85,
+  "duration_ms": 640,
+  "pod": "vllm-0"
+}

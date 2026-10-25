@@ -1,0 +1,46 @@
+# Run on every file with `make lint`. Python tools come from uv.lock, Go and TypeScript tools
+# from infra/bootstrap.sh and ui/, so each tool has exactly one pinned version.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run --locked ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff-format
+        entry: uv run --locked ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run --locked mypy
+        language: system
+        types_or: [python, pyi]
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'cd gateway && golangci-lint run ./...'
+        language: system
+        files: ^gateway/.*\.go$
+        pass_filenames: false
+      - id: eslint
+        name: eslint (ui)
+        entry: bash -c 'cd ui && npx --no-install eslint .'
+        language: system
+        files: ^ui/.*\.ts$
+        pass_filenames: false
+      - id: tsc
+        name: tsc --strict (ui)
+        entry: bash -c 'cd ui && npx --no-install tsc --noEmit --strict -p tsconfig.json'
+        language: system
+        files: ^ui/.*\.ts$
+        pass_filenames: false

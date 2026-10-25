@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/trace.v1.json",
+  "title": "Trace line v1",
+  "description": "One JSON line per LLM call (D9, D12). Measurement fields are filled by the recorder and absent in traces made only for replay.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "description": "Version of this schema; a reader rejects lines of a version it does not know.",
+      "const": 1
+    },
+    "run_id": {
+      "description": "Same value as the x-run-id header of the call.",
+      "type": "string",
+      "minLength": 1
+    },
+    "task_type": {
+      "description": "Kind of agent task; expected_steps is derived per task type.",
+      "type": "string",
+      "minLength": 1
+    },
+    "step": {
+      "description": "1-based index of the call within the run.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "expected_steps": {
+      "description": "Number of calls this task type usually needs (D1).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "parallel_group": {
+      "description": "Same value as the x-parallel-group header; absent for sequential calls.",
+      "type": "string",
+      "minLength": 1
+    },
+    "gap_before_ms": {
+      "description": "Time between the end of the previous call of the run and the start of this one (tool time, D9); 0 for the first call.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "prompt_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completion_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_start": {
+      "description": "Start of the call in milliseconds since the Unix epoch.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "ttft_ms": {
+      "description": "Time to first token.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_ms": {
+      "description": "Time from sending the request to receiving the full response.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "pod": {
+      "description": "Name of the pod that served the call.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "task_type",
+    "step",
+    "expected_steps",
+    "gap_before_ms",
+    "prompt_tokens",
+    "completion_tokens"
+  ],
+  "additionalProperties": false
+}
