@@ -42,7 +42,7 @@ Setup: Windows + WSL2, RTX 3050 4GB, Ryzen 7, 16GB RAM, €0, code written with 
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | Calls carry `run-id`, `step`, `expected-steps`, `parallel-group`; the runtime sends an end-of-run signal. `expected-steps` comes from recorded runs per task type; `max-steps` stays only as a safety cap. | Agents often finish long before `max-steps`; progress and remaining work based on it would be wrong. |
+| D1 | Calls carry headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`; the runtime sends an end-of-run signal. `expected-steps` comes from recorded runs per task type; `max-steps` stays only as a safety cap. | Agents often finish long before `max-steps`; progress and remaining work based on it would be wrong. |
 | D2 | A shared **run tracker** module (used by both the agent runtime and the replayer) keeps run state and exports remaining work Σ(expected-steps − step) over active runs as a Prometheus metric. | Autoscaling no longer depends on the plugin, so it's built in parallel with routing. |
 | D3 | Progress priority: the plugin (or runtime) sets a per-request priority and vLLM's priority scheduling enforces it, if the P4.1 spike confirms it works through the gateway. | Simplest correct enforcement point; the queue lives in vLLM. |
 | D4 | The simulator models cold start (measured model load time) and cached vs uncached prefill. | Without it, autoscaling and affinity results look unrealistically good. |
