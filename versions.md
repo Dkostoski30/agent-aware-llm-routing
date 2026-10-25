@@ -21,6 +21,7 @@ Every version used in the thesis. Fill in as you install. Never upgrade during t
 | WSL distro used for all work | `Ubuntu-24.04` (Linux user `kosto`) |
 | GPU memory reported in WSL | 4096 MiB total, 127 MiB used at idle |
 | Free space on C: | 140.5 GB (requirement: 60 GB) |
+| Docker Desktop (Windows) | Installed, not used; "Start Docker Desktop when you sign in" off, so its `docker-desktop` distro does not take memory from the WSL2 VM (P0.2) |
 
 ## Dev tools (installed by `infra/bootstrap.sh`)
 
@@ -57,10 +58,15 @@ apt packages come from Ubuntu 24.04 and are recorded here, not pinned: Ubuntu dr
 
 ## Container and cluster
 
+Docker and the Toolkit are pinned in `infra/install-docker-gpu.sh` (apt, exact versions). Unlike the dev tools,
+these are the newest versions available on 2026-10-25, without the two-week rule.
+
 | Component | Version / tag |
 |---|---|
-| Docker Engine | |
-| NVIDIA Container Toolkit | |
+| Docker Engine (docker-ce, docker-ce-cli) | 5:29.9.2-1~ubuntu.24.04~noble |
+| containerd.io | 2.4.2-3~ubuntu.24.04~noble |
+| docker-buildx-plugin | 0.38.1-1~ubuntu.24.04~noble |
+| NVIDIA Container Toolkit (nvidia-container-toolkit, -base, libnvidia-container1, libnvidia-container-tools) | 1.20.1-1 |
 | k3s | |
 | NVIDIA device plugin (Helm chart) | |
 | vLLM image (`vllm/vllm-openai`) | |

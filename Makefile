@@ -1,4 +1,4 @@
-.PHONY: test lint up down smoke replay experiment
+.PHONY: test lint docker-gpu up down smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -7,6 +7,10 @@ test:
 
 lint:
 	uv run --locked pre-commit run --all-files
+
+# Docker Engine + NVIDIA Container Toolkit inside WSL2 (P0.2).
+docker-gpu:
+	bash infra/install-docker-gpu.sh
 
 up:
 	@echo "not implemented yet: P1.0"; exit 1
