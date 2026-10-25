@@ -13,6 +13,36 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P0.6 · green (ladder step 1)
+Command: `make k3s && make gpu-check`
+Result:
+- `make k3s`: k3s v1.36.5+k3s1 installed, nvidia runtime found in the k3s containerd config, RuntimeClass
+  `nvidia` applied, device plugin chart 0.20.1 deployed, `node reports allocatable nvidia.com/gpu: 1`.
+- `make gpu-check`: plugin variant (`nvidia.com/gpu: 1` limit), pod Succeeded after 6 s (image already pulled):
+  `Compute 8.6 CUDA device: [NVIDIA GeForce RTX 3050 Laptop GPU]`, 16384 bodies, 10 iterations in 16.144 ms,
+  **3325.434 single-precision GFLOP/s** (P0.2 in Docker: 3321.221, same within noise (one run each)).
+Notes:
+- **Ladder step 1 worked**: k3s + NVIDIA Container Toolkit + device plugin. The plugin detects WSL2 and reports
+  one device `all` backed by `/dev/dxg`, so the node shows exactly one GPU. The no-plugin variant (step 3)
+  was not needed and was not run. P0.7 needs 2 GPU slots for 2 pods: time-slicing on top of this, or step 3.
+- Proof of step 1 is the allocatable `nvidia.com/gpu: 1`, not nbody alone: the image sets
+  `NVIDIA_VISIBLE_DEVICES=all` itself, so with `runtimeClassName: nvidia` it would get the GPU without the plugin.
+- The chart's default affinity needs a PCI/NFD node label that never appears under WSL2 (no PCI GPU), so the
+  values set `affinity: null`; without it the plugin pod is never scheduled.
+- k3s already ships an identical `RuntimeClass nvidia` (packaged addon); ours is applied server-side so the
+  cluster does not silently depend on that addon.
+- The card's `command: ["nbody", ...]` failed (`exec: "nbody": executable file not found in $PATH`,
+  exit 128): in Kubernetes `command` replaces the ENTRYPOINT (`/cuda-samples/sample`, a symlink to
+  `/cuda-samples/nbody`), while in P0.2's `docker run` the words after the image were only arguments to it.
+  Fixed to `command: ["/cuda-samples/nbody", "-gpu", "-benchmark"]`.
+- Departures from the card: (1) the kubeconfig mode is set as `write-kubeconfig-mode: "0644"` in
+  `/etc/rancher/k3s/config.yaml` instead of the card's `--write-kubeconfig-mode 644` install flag, so changing
+  it does not need a reinstall; (2) Traefik is disabled, which the card did not ask for (P1.2 brings its own
+  gateway); ServiceLB kept for LoadBalancer Services.
+- k3s pinned to the `stable` channel (v1.36.5), not the newest release (v1.37.1).
+- The first pull of the nbody image into k3s's containerd took 1m13s (122 MB): k3s does not share Docker's
+  image store.
+
 ### 2026-10-25 · P0.2 · green
 Command: `make docker-gpu` (twice, `wsl.exe --shutdown` in between) · `docker run --rm --gpus all nvcr.io/nvidia/k8s/cuda-sample:nbody nbody -gpu -benchmark`
 Result:

@@ -67,8 +67,9 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | containerd.io | 2.4.2-3~ubuntu.24.04~noble |
 | docker-buildx-plugin | 0.38.1-1~ubuntu.24.04~noble |
 | NVIDIA Container Toolkit (nvidia-container-toolkit, -base, libnvidia-container1, libnvidia-container-tools) | 1.20.1-1 |
-| k3s | |
-| NVIDIA device plugin (Helm chart) | |
+| k3s | v1.36.5+k3s1 (the `stable` channel on 2026-10-26; `latest` was v1.37.1+k3s1). Pinned in `infra/install-k3s.sh` |
+| kubectl | the symlink k3s creates (`/usr/local/bin/kubectl -> k3s`); same version as k3s |
+| NVIDIA device plugin (Helm chart `nvidia-device-plugin`) | 0.20.1, image `nvcr.io/nvidia/k8s-device-plugin:v0.20.1` (newest; reports the WSL2 GPU as one device `all` on `/dev/dxg`). Pinned in `infra/install-k3s.sh` |
 | vLLM image (`vllm/vllm-openai`) | |
 | Gateway (Envoy Gateway or kgateway) | |
 | Gateway API Inference Extension | |

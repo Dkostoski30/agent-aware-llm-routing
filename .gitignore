@@ -15,3 +15,5 @@ gateway/bin/
 node_modules/
 ui/dist/
 ui/.angular/
+
+graphify-out/
