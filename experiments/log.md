@@ -13,6 +13,32 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-25 · P0.0 · green
+Command: `bash infra/bootstrap.sh` (twice) · `make lint` · `make test`
+Result:
+- Second bootstrap run installed nothing, printed every version, exit 0: git 2.43.0, make 4.3, jq 1.7,
+  yq 4.54.1, Python 3.12.3, uv 0.13.0, Node.js 24.21.0 (npm 11.19.0, bundled), Angular CLI 22.2.2,
+  Go 1.27.2, golangci-lint 2.14.0, Helm 4.3.0, k9s 0.51.0, hf 2.2.0. Full list in `versions.md`.
+- `make lint`: all hooks pass; golangci-lint, eslint and tsc skipped (no `gateway/` or `ui/` yet), exit 0.
+- `make test`: 57 passed (schema tests: valid examples accepted, invalid rejected, one rule per case), exit 0.
+Notes:
+- Headers keep the `x-` prefix (`x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`), as in the
+  card. CLAUDE.md still says `run-id`, `step`, ...; it gets aligned in a separate commit.
+- `x-step` and `x-expected-steps` are validated as digit strings (`^[1-9][0-9]*$`), not integers as the
+  card says: HTTP header values are always strings on the wire. Readers parse them into integers.
+- Header names are case-insensitive in HTTP (Go's `net/http` sends `X-Run-Id`), so readers lowercase
+  them before validating; written into the schema description after review.
+- `types-jsonschema` added beyond the card's tool list, approved: jsonschema ships no type information,
+  so `mypy --strict` fails without it.
+- `docs/task-cards/05-P0.3-vllm-single.md` is outside the card's files but in this commit: the
+  trailing-whitespace hook strips one space from it, and without that `make lint` fails on a fresh clone.
+- Fresh-eyes review done in a separate session. Fixed: case-insensitive header names (above) and a test
+  docstring that claimed every example file is checked. Left as is: a test that only checks both example
+  files exist (the accept/reject tests would fail anyway), and `pre-commit-hooks` pinned by tag `v6.0.0`,
+  not by commit hash.
+- Open for P1.3: agent calls are non-streaming (D6), so `ttft_ms` in the trace can't be measured by the
+  client and has to come from vLLM or the gateway.
+
 ### 2026-10-25 · P0.0 prep · green
 Command: `df -T ~/thesis` · `nvidia-smi` · `free -h` · `git ls-files --eol` · `ssh -T git@github.com` · `git ls-remote origin` · `curl -s -o /dev/null -w '%{http_code}' https://github.com/Dkostoski30/agent-aware-llm-routing`
 Result:

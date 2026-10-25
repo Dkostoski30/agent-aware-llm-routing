@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/headers.v1.json",
+  "title": "Agent call headers v1",
+  "description": "The x-* headers on every agent LLM call (D1), validated as the strings sent on the wire. HTTP header names are case-insensitive, so readers lowercase them before validating. Other HTTP headers are not part of this object.",
+  "type": "object",
+  "properties": {
+    "x-run-id": {
+      "description": "Identifies one agent task; every call of the task carries the same value.",
+      "type": "string",
+      "minLength": 1
+    },
+    "x-step": {
+      "description": "1-based index of this call within the run, as a decimal string without leading zeros.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "x-expected-steps": {
+      "description": "Number of calls this task type usually needs, from recorded runs (D1), as a decimal string without leading zeros.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "x-parallel-group": {
+      "description": "Shared by calls of the same run that are sent in parallel; absent for sequential calls.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": ["x-run-id", "x-step", "x-expected-steps"],
+  "additionalProperties": false
+}

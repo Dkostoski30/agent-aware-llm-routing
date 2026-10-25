@@ -1,0 +1,17 @@
+# IDE settings are per machine.
+.idea/
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Go
+gateway/bin/
+
+# Node / Angular
+node_modules/
+ui/dist/
+ui/.angular/

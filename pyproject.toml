@@ -1,0 +1,38 @@
+[project]
+name = "thesis"
+version = "0.1.0"
+description = "LLM call routing and vLLM autoscaling on Kubernetes (FCSE bachelor thesis)"
+# The Python that Ubuntu 24.04 ships; uv uses it instead of downloading another one.
+requires-python = "==3.12.*"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "jsonschema==4.26.0",
+    "mypy==2.4.0",
+    "pre-commit==4.6.2",
+    "pytest==9.1.1",
+    "ruff==0.17.0",
+    "types-jsonschema==4.26.0.20261006",
+]
+
+[tool.uv]
+# The repo is a set of components, not one installable package.
+package = false
+
+[tool.pytest.ini_options]
+# Test files in different components may share a basename (e.g. test_config.py) without clashing.
+addopts = ["--import-mode=importlib", "--strict-markers"]
+
+[tool.ruff]
+target-version = "py312"
+# Wide enough for descriptive names in table-driven tests without wrapping every case.
+line-length = 100
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, simplify and ruff's own rules.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

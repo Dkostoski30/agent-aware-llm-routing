@@ -24,22 +24,36 @@ Every version used in the thesis. Fill in as you install. Never upgrade during t
 
 ## Dev tools (installed by `infra/bootstrap.sh`)
 
-| Tool | Version |
-|---|---|
-| git | |
-| make | |
-| jq | |
-| Python | |
-| uv | |
-| Node.js | |
-| Angular CLI | |
-| Go | |
-| golangci-lint | |
-| pre-commit | |
-| ruff | |
-| mypy | |
-| Helm | |
-| k9s | |
+Pinned in `infra/bootstrap.sh` (downloads, checksum-verified) and `pyproject.toml` / `uv.lock` (Python dev tools).
+Each pin is the newest release that was at least two weeks old on 2026-10-25.
+apt packages come from Ubuntu 24.04 and are recorded here, not pinned: Ubuntu drops old versions from the archive after security updates.
+
+| Tool | Version | Source |
+|---|---|---|
+| git | 1:2.43.0-1ubuntu7.4 | apt |
+| make | 4.3-4.1build2 | apt |
+| jq | 1.7.1-3ubuntu0.24.04.2 | apt |
+| build-essential | 12.10ubuntu1 | apt |
+| curl | 8.5.0-2ubuntu10.16 | apt |
+| ca-certificates | 20260816ubuntu0.24.04.1 | apt |
+| Python | 3.12.3 | Ubuntu 24.04 system Python |
+| yq (mikefarah) | 4.54.1 | GitHub release |
+| uv | 0.13.0 | GitHub release |
+| nvm | 0.40.8 | git tag |
+| Node.js | 24.21.0 (LTS "Krypton") | nvm |
+| Angular CLI | 22.2.2 | npm |
+| Go | 1.27.2 | go.dev |
+| golangci-lint | 2.14.0 | GitHub release |
+| Helm | 4.3.0 | get.helm.sh |
+| k9s | 0.51.0 | GitHub release |
+| hf CLI (huggingface_hub) | 2.2.0 | uv tool |
+| pre-commit | 4.6.2 | uv.lock |
+| pre-commit-hooks | v6.0.0 | `.pre-commit-config.yaml` |
+| ruff | 0.17.0 | uv.lock |
+| mypy | 2.4.0 | uv.lock |
+| types-jsonschema | 4.26.0.20261006 | uv.lock |
+| pytest | 9.1.1 | uv.lock |
+| jsonschema | 4.26.0 | uv.lock |
 
 ## Container and cluster
 
