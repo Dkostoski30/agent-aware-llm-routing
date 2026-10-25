@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu up down smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check up down smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -11,6 +11,35 @@ lint:
 # Docker Engine + NVIDIA Container Toolkit inside WSL2 (P0.2).
 docker-gpu:
 	bash infra/install-docker-gpu.sh
+
+# k3s + nvidia RuntimeClass + NVIDIA device plugin (P0.6).
+k3s:
+	bash infra/install-k3s.sh
+
+# The first run pulls the nbody image into k3s's containerd (separate from Docker's); 300 s covers that pull
+# on a slow connection, a cached run finishes in seconds.
+GPU_CHECK_TIMEOUT_SECONDS := 300
+
+# Runs nbody in a pod: through the device plugin if the node advertises nvidia.com/gpu (ladder step 1),
+# otherwise through the nvidia runtime alone (ladder step 3, PLAN.md section 4). Exits 0 only if the pod succeeded.
+gpu-check:
+	@set -eu; \
+	gpus=$$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}'); \
+	if [ "$${gpus:-0}" -ge 1 ]; then manifest=infra/checks/gpu-check-plugin.yaml; \
+	else manifest=infra/checks/gpu-check-noplugin.yaml; fi; \
+	echo "gpu-check: allocatable nvidia.com/gpu=$${gpus:-0}, using $$manifest"; \
+	kubectl delete pod gpu-test --ignore-not-found --wait; \
+	kubectl apply -f "$$manifest"; \
+	phase=Pending; waited=0; \
+	while [ "$$phase" != Succeeded ] && [ "$$phase" != Failed ] && [ $$waited -lt $(GPU_CHECK_TIMEOUT_SECONDS) ]; do \
+		sleep 2; waited=$$((waited + 2)); \
+		phase=$$(kubectl get pod gpu-test -o jsonpath='{.status.phase}'); \
+	done; \
+	echo "gpu-check: pod phase $$phase after $${waited}s"; \
+	if [ "$$phase" = Succeeded ] || [ "$$phase" = Failed ]; then kubectl logs pod/gpu-test; \
+	else kubectl describe pod gpu-test; fi; \
+	kubectl delete pod gpu-test --wait=false; \
+	[ "$$phase" = Succeeded ]
 
 up:
 	@echo "not implemented yet: P1.0"; exit 1
