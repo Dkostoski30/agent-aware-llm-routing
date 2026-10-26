@@ -8,3 +8,17 @@ runtimeClassName: nvidia
 # Discovery). WSL2 exposes the GPU through /dev/dxg, not as a PCI device, so no label ever appears; on this
 # single-node cluster the plugin runs on the one node without a selector. null removes the default.
 affinity: null
+
+# Time-slicing (P0.7): the one GPU is advertised as 2 nvidia.com/gpu slots, one per vLLM pod. Slots share compute
+# by time and memory not at all; each pod's share of memory is set by gpu_memory_utilization in config/.
+# 2 matches replicas in config/real.yaml, the most 0.6B pods that fit in 4GB (D8).
+config:
+  default: default
+  map:
+    default: |-
+      version: v1
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 2

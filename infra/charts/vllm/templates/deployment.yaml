@@ -1,0 +1,82 @@
+{{- if not (has .Values.gpuAccess (list "plugin" "runtime")) }}
+{{- fail (printf "gpuAccess must be plugin or runtime, got %q" .Values.gpuAccess) }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+spec:
+  replicas: {{ required "replicas from the profile" .Values.replicas }}
+  # A rolling update would start a third pod while two hold the GPU; it can never fit, so the rollout would hang.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+    spec:
+      runtimeClassName: nvidia
+      # Kubernetes would add VLLM_PORT=tcp://<ip>:8000 for the Service "vllm", and vLLM reads VLLM_PORT as its own
+      # setting and exits (P0.7). Nothing in the pod uses these service variables.
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          # Same flags as infra/local/vllm-common.sh, so a pod behaves like the containers measured in P0.3-P0.5.
+          args:
+            - --model={{ required "model.name from the profile" .Values.model.name }}
+            - --revision={{ required "model.revision from the profile" .Values.model.revision }}
+            - --tokenizer-revision={{ .Values.model.revision }}
+            - --gpu-memory-utilization={{ required "model.gpu_memory_utilization from the profile" .Values.model.gpu_memory_utilization }}
+            - --kv-cache-memory={{ required "model.kv_cache_memory_bytes from the profile" .Values.model.kv_cache_memory_bytes | int64 }}
+            - --max-model-len={{ required "model.max_model_len from the profile" .Values.model.max_model_len }}
+            - --tool-call-parser={{ required "model.tool_call_parser from the profile" .Values.model.tool_call_parser }}
+            - --enable-auto-tool-choice
+            - --enable-prefix-caching
+            - --enforce-eager
+          env:
+            - name: HF_HOME
+              value: /hf
+            # The model is already in the host cache (make vllm-run downloaded it); a pod never downloads.
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            {{- if eq .Values.gpuAccess "runtime" }}
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ required "pod.readiness_initial_delay_seconds from the profile" .Values.pod.readiness_initial_delay_seconds }}
+            # A pod joins the Service within 5 s of finishing its load; one probe every 5 s costs nothing.
+            periodSeconds: 5
+          {{- if eq .Values.gpuAccess "plugin" }}
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          {{- end }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /hf
+              readOnly: true
+            # vLLM's API server and engine exchange tensors through shared memory; the default 64 MB is too small.
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: {{ required "hfCacheHostPath" .Values.hfCacheHostPath }}
+            type: Directory
+        - name: shm
+          emptyDir:
+            medium: Memory

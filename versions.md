@@ -69,7 +69,8 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | NVIDIA Container Toolkit (nvidia-container-toolkit, -base, libnvidia-container1, libnvidia-container-tools) | 1.20.1-1 |
 | k3s | v1.36.5+k3s1 (the `stable` channel on 2026-10-26; `latest` was v1.37.1+k3s1). Pinned in `infra/install-k3s.sh` |
 | kubectl | the symlink k3s creates (`/usr/local/bin/kubectl -> k3s`); same version as k3s |
-| NVIDIA device plugin (Helm chart `nvidia-device-plugin`) | 0.20.1, image `nvcr.io/nvidia/k8s-device-plugin:v0.20.1` (newest; reports the WSL2 GPU as one device `all` on `/dev/dxg`). Pinned in `infra/install-k3s.sh` |
+| NVIDIA device plugin (Helm chart `nvidia-device-plugin`) | 0.20.1, image `nvcr.io/nvidia/k8s-device-plugin:v0.20.1` (newest; reports the WSL2 GPU as one device `all` on `/dev/dxg`). Pinned in `infra/install-k3s.sh`. Time-slicing with 2 replicas since P0.7 (`infra/helm/device-plugin-values.yaml`): the node shows `nvidia.com/gpu: 2` |
+| vLLM chart | local, `infra/charts/vllm` 0.1.0 (P0.7) |
 | vLLM image (`vllm/vllm-openai`) | v0.31.0, digest `sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3` (released 2026-10-05; the newest release at least two weeks old on 2026-10-26, v0.32.0 was 8 days old). Pinned in `infra/local/vllm-common.sh` and `infra/charts/vllm/values.yaml` |
 | Gateway (Envoy Gateway or kgateway) | |
 | Gateway API Inference Extension | |

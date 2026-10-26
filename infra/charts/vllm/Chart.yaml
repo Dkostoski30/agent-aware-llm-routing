@@ -1,0 +1,6 @@
+# Local chart for the vLLM pods behind one Service (P0.7). Not published; versioned with the repo.
+apiVersion: v2
+name: vllm
+description: vLLM replicas on the shared GPU behind one ClusterIP Service
+type: application
+version: 0.1.0
