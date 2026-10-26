@@ -13,6 +13,21 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P0.5 · green
+Command: `make vllm-run PROFILE=real` · `make prefix-check`
+Result:
+- Metric names in vLLM 0.31.0: `vllm:prefix_cache_queries_total`, `vllm:prefix_cache_hits_total` (both in tokens,
+  label `engine="0"`), plus `vllm:external_prefix_cache_{queries,hits}_total` (KV connector, 0 here).
+- ~1980-token prompt sent twice: hits added by the first request **0**, by the second **1968** (all but the last
+  partial 16-token block).
+- **TTFT first 0.524 s, second 0.081 s** (6.5× lower). TTFT = total time of a `max_tokens: 1` request.
+Notes:
+- First run used 150 prompt lines (~3385 tokens, hits 3376, TTFT 0.758 s -> 0.089 s); the script's per-line
+  estimate was wrong (22 tokens per line, not 14), so it now uses 90 lines for the card's ~2000 tokens.
+- The run marker at the start of the prompt makes every run start uncached, so the check can be rerun.
+- The check fails unless the second request adds more hits than the first, not just "hits went up": the first
+  request could hit shared chat-template blocks.
+
 ### 2026-10-26 · P0.4 · green (attempt 2)
 Command: `make vllm-pair` · `make concurrency-check ARGS="--ports 8001 8002 --concurrency 4 --minutes 10"`
 Result:
