@@ -18,6 +18,12 @@ model:
   tool_call_parser: hermes
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).
 replicas: 2
+# Kubernetes pod settings for the vLLM chart (P0.7).
+pod:
+  # vLLM became healthy 114-160 s in Docker (P0.3, P0.4), almost all of it Python and process startup, not weights.
+  # Probes start just before that, so a loading pod does not fill its events with failed probes; a slower pod
+  # just becomes Ready a few probes later.
+  readiness_initial_delay_seconds: 120
 # Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
 routing:
   # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).

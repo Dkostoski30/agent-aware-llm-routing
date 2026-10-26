@@ -1,0 +1,15 @@
+# One address for all vLLM pods; kube-proxy spreads connections over the Ready ones.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -1,0 +1,18 @@
+# Defaults for the parts that are not in config/<profile>.yaml. make vllm-deploy renders the profile's model,
+# replicas and pod settings on top of these, so nothing model-specific is set here (D11).
+
+# Same image as the local containers (infra/local/vllm-common.sh). make vllm-deploy pulls it into k3s first, so
+# IfNotPresent never pulls during a pod start.
+image: vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+
+# How a pod gets the GPU (PLAN.md section 4). "plugin": ladder step 1, which worked in P0.6; each pod requests one
+# of the time-sliced nvidia.com/gpu slots. "runtime": ladder step 3, no GPU request, the nvidia runtime alone.
+gpuAccess: plugin
+
+# Where the HF cache filled by make vllm-run lives on the node; set by make vllm-deploy to $HOME/.cache/huggingface.
+hfCacheHostPath: ""
+
+# Filled from config/<profile>.yaml by make vllm-deploy.
+replicas: 0
+model: {}
+pod: {}

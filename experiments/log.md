@@ -13,6 +13,30 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P0.7 · green · Gate 0 green
+Command: `make k3s` · `make vllm-deploy PROFILE=real` · `kubectl get pods` · `make service-check`
+Result:
+- `make k3s`: device plugin with time-slicing, node reports `allocatable nvidia.com/gpu: 2`.
+- `kubectl get pods`: `vllm-5fff45f674-5qvc7` and `vllm-5fff45f674-csj8f`, both `1/1 Running`, 0 restarts.
+- `make service-check` through ClusterIP `10.43.129.213:8000`: chat answer and tool call
+  `get_weather({"city": "Ohrid"})` OK; chat requests per pod **9 and 13** (2 from chat-check + 20 spread requests).
+- Gate 0: two vLLM pods on the GPU answer through a Service (this entry), prefix caching visible (P0.5).
+Notes:
+- Getting the image into k3s, attempt 1 (`docker save | k3s ctr images import -`): after 23 min **k3s crashed**
+  (`level=fatal msg="Transaction commit failed"`, then systemd restarted it). The 32 GB of image writes starved
+  k3s's SQLite datastore on the same disk: 102 "Slow SQL" warnings during the import vs 13 in the two hours
+  before; no journal gap long enough for a laptop sleep before the crash. Replaced (user decision) by
+  `sudo k3s crictl pull`, k3s pulling the image itself; it was already complete when the deploy ran.
+- First rollout: both pods in CrashLoopBackOff, `ValueError: VLLM_PORT 'tcp://10.43.129.213:8000' appears to be
+  a URI`. Kubernetes injects `<SERVICE>_PORT` variables for every Service, and for the Service `vllm` that is
+  `VLLM_PORT`, which vLLM reads as its own setting. Fixed with `enableServiceLinks: false` in the pod spec.
+- `make vllm-deploy` waits with `kubectl rollout status` (prints each pod as it becomes Ready) instead of a silent
+  `helm --wait`; the Deployment uses `Recreate`, since a rolling update's third pod could never get a GPU slot.
+- Pods mount `~/.cache/huggingface` read-only with `HF_HUB_OFFLINE=1`; the model must be downloaded by
+  `make vllm-run` first.
+- `service_check.sh` calls the ClusterIP from the host (the host is the node) instead of `kubectl port-forward`,
+  which tunnels to one pod (user decision). Readiness delay and the KV size come from `config/` (user decision).
+
 ### 2026-10-26 · P0.5 · green
 Command: `make vllm-run PROFILE=real` · `make prefix-check`
 Result:
