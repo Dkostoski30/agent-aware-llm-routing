@@ -18,7 +18,7 @@ Interfaces / outputs:
 <config keys, headers, metric names, file formats, commands this task creates or must respect>
 
 Notes:
-<decisions that apply (D1–D12), known pitfalls, links>
+<decisions that apply (D1–D13), known pitfalls, links>
 
 Done when (I run this myself):
 <command>

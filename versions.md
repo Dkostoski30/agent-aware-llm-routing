@@ -77,6 +77,7 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | KEDA | |
 | kube-prometheus-stack | |
 | Redis | |
+| SQLite (Python `sqlite3`, app backend) | |
 | llm-d-inference-sim | |
 
 ## Models
