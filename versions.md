@@ -75,7 +75,7 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | Gateway (Envoy Gateway or kgateway) | |
 | Gateway API Inference Extension | |
 | KEDA | |
-| kube-prometheus-stack | |
+| kube-prometheus-stack (Helm chart) | 92.3.0 (2026-10-10, the newest release at least two weeks old on 2026-10-26): Prometheus Operator v0.94.1, Prometheus v3.15.0, Grafana 13.2.3, kube-state-metrics v2.20.0, k8s-sidecar 2.14.1. Pinned in `infra/install-monitoring.sh` |
 | Redis | |
 | SQLite (Python `sqlite3`, app backend) | |
 | llm-d-inference-sim | |

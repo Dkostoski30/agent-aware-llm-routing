@@ -1,0 +1,15 @@
+# Grafana's sidecar loads every ConfigMap labelled grafana_dashboard=1, in any namespace (P1.1).
+# The dashboard refreshes once per scrape interval (config/<profile>.yaml): Prometheus has no newer points before.
+{{- $interval := required "monitoring.scrape_interval_seconds comes from config/<profile>.yaml" .Values.monitoring.scrape_interval_seconds }}
+{{- $dashboard := .Files.Get "dashboards/vllm.json" | fromJson }}
+{{- $_ := set $dashboard "refresh" (printf "%vs" $interval) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-dashboard
+  labels:
+    app.kubernetes.io/name: vllm
+    grafana_dashboard: "1"
+data:
+  vllm.json: |-
+{{ $dashboard | toPrettyJson | indent 4 }}

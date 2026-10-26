@@ -1,0 +1,38 @@
+# Values for kube-prometheus-stack 92.3.0 (P1.1), on top of the chart defaults. The scrape interval is not here:
+# install-monitoring.sh sets it from config/<profile>.yaml (D11).
+
+# Alerts are not part of the thesis; without rules and Alertmanager, Prometheus also evaluates nothing in the background.
+alertmanager:
+  enabled: false
+defaultRules:
+  create: false
+
+# Host metrics are not measured; turning node-exporter off saves its pod on the 9.7 GiB WSL VM.
+nodeExporter:
+  enabled: false
+
+# k3s runs etcd (here SQLite), the scheduler, the controller manager and kube-proxy inside one k3s process without
+# their own metrics endpoints, so these scrape targets would only ever be down.
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+grafana:
+  # The default dashboards read node-exporter metrics, which are off; the thesis ships its own (infra/charts/vllm).
+  defaultDashboardsEnabled: false
+  # The demo shows dashboards without a login; anonymous users can view but not edit.
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+
+prometheus:
+  prometheusSpec:
+    # By default Prometheus only picks up PodMonitors labelled with this release; the vLLM PodMonitor belongs to
+    # the vllm release, so every PodMonitor in the cluster is selected instead.
+    podMonitorSelectorNilUsesHelmValues: false

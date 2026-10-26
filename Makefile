@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check up down smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check up down grafana smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -73,8 +73,8 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # vLLM pods behind the Service vllm, values rendered from config/$(PROFILE).yaml (P0.7). k3s does not share
 # Docker's image store, so k3s pulls the image itself once (~9 GB). Copying it from Docker (docker save | ctr import)
 # crashed k3s: the 32 GB burst of writes starved k3s's SQLite datastore until a commit failed (experiments/log.md).
-# Needs the model in ~/.cache/huggingface (make vllm-run PROFILE=$(PROFILE) downloads it) and the vLLM containers
-# stopped.
+# Needs the model in ~/.cache/huggingface (infra/download-model.sh), the PodMonitor CRD (infra/install-monitoring.sh),
+# both run by make up, and the vLLM containers stopped.
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
@@ -84,7 +84,7 @@ vllm-deploy:
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
 	fi; \
-	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod}' config/$(PROFILE).yaml | \
+	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - \
 			--set hfCacheHostPath=$$HOME/.cache/huggingface; \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
@@ -95,11 +95,23 @@ vllm-deploy:
 service-check:
 	bash infra/checks/service_check.sh
 
+# The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
+# the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 up:
-	@echo "not implemented yet: P1.0"; exit 1
+	$(MAKE) vllm-stop
+	bash infra/install-k3s.sh
+	bash infra/install-monitoring.sh $(or $(PROFILE),real)
+	bash infra/download-model.sh $(or $(PROFILE),real)
+	$(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real)
 
+# Uninstalls what make up installs and stops k3s; keeps the k3s install, its images and the model cache (P1.0).
 down:
-	@echo "not implemented yet: P1.0"; exit 1
+	bash infra/down.sh
+
+# Grafana on http://localhost:3000 until Ctrl+C, also from a Windows browser through WSL's localhost forwarding;
+# anonymous users see the dashboards without a login (P1.1).
+grafana:
+	kubectl port-forward --namespace monitoring svc/monitoring-grafana 3000:80
 
 smoke:
 	@echo "not implemented yet: P1.5"; exit 1
