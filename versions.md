@@ -70,7 +70,7 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | k3s | v1.36.5+k3s1 (the `stable` channel on 2026-10-26; `latest` was v1.37.1+k3s1). Pinned in `infra/install-k3s.sh` |
 | kubectl | the symlink k3s creates (`/usr/local/bin/kubectl -> k3s`); same version as k3s |
 | NVIDIA device plugin (Helm chart `nvidia-device-plugin`) | 0.20.1, image `nvcr.io/nvidia/k8s-device-plugin:v0.20.1` (newest; reports the WSL2 GPU as one device `all` on `/dev/dxg`). Pinned in `infra/install-k3s.sh` |
-| vLLM image (`vllm/vllm-openai`) | |
+| vLLM image (`vllm/vllm-openai`) | v0.31.0, digest `sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3` (released 2026-10-05; the newest release at least two weeks old on 2026-10-26, v0.32.0 was 8 days old). Pinned in `infra/local/vllm-common.sh` and `infra/charts/vllm/values.yaml` |
 | Gateway (Envoy Gateway or kgateway) | |
 | Gateway API Inference Extension | |
 | KEDA | |
@@ -82,14 +82,19 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 
 | Model | Hugging Face revision (commit) | Size on disk | Use |
 |---|---|---|---|
-| Qwen/Qwen3-0.6B-GPTQ-Int8 | | | Experiments, infrastructure demo |
-| Qwen/Qwen3-4B-AWQ | | | Practical demo, if it fits |
-| Qwen/Qwen3-1.7B | | | Practical demo fallback |
+| Qwen/Qwen3-0.6B-GPTQ-Int8 | `d3f20e7e71825fe57ad32705b396e9e156279107` | 0.71 GiB | Experiments, infrastructure demo |
+| Qwen/Qwen3-1.7B-GPTQ-Int8 | `382fed3fa21d1a7e837b42a500564a0c4be4f060` | 2.07 GB | Practical demo (D8, after the 4B did not fit) |
+| Qwen/Qwen3-4B-AWQ | `74d4bd2bd4bff9cafc9345221320bffb08b406a3` | 2.5 GiB in VRAM | Not used: does not fit (P0.3) |
+| Qwen/Qwen3-1.7B | `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e` | 4.06 GB | Not used: FP16 weights alone exceed what is free on the GPU |
+
+Revisions are pinned in `config/<profile>.yaml` (`model.revision`) and passed to vLLM as `--revision` and
+`--tokenizer-revision`.
 
 ## Measurements
 
 | Task | Config | VRAM per pod | Host RAM per pod | Notes |
 |---|---|---|---|---|
-| P0.3 | 0.6B, 1 container | | | |
-| P0.3 | 4B AWQ, 1 container, max-model-len 4096 | | | Fits: yes / no |
+| P0.3 | 0.6B, 1 container, util 0.42, max-model-len 4096 | 2271 MiB whole GPU (558 MiB idle) | 3.42 GiB | Weights 0.74 GiB, KV 0.62 GiB = 5840 tokens. 8192 did not fit (needs 0.88 GiB KV) |
+| P0.3 | 4B AWQ, 1 container, max-model-len 4096 | - | - | **Fits: no.** util 0.85 refused (3.22 GiB free); util 0.78: weights 2.5 GiB, KV 0.18 GiB = max 1312 tokens |
+| P0.3 | 1.7B GPTQ-Int8, 1 container, util 0.78, max-model-len 4096 | 3213 MiB whole GPU | 3.85 GiB | Weights 1.92 GiB, KV 0.86 GiB = 8016 tokens |
 | P0.4 | 0.6B, 2 containers at 0.42 | | | |

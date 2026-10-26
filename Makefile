@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check up down smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check up down smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -40,6 +40,15 @@ gpu-check:
 	else kubectl describe pod gpu-test; fi; \
 	kubectl delete pod gpu-test --wait=false; \
 	[ "$$phase" = Succeeded ]
+
+# One vLLM container in the foreground on port 8000, model from config/$(PROFILE).yaml (P0.3).
+vllm-run:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-run PROFILE=real|demo"; exit 2; fi
+	bash infra/local/vllm-run.sh $(PROFILE)
+
+# Chat answer + tool call against a running vLLM server; BASE_URL defaults to the vllm-run port (P0.3).
+chat-check:
+	bash infra/checks/chat_check.sh $(BASE_URL)
 
 up:
 	@echo "not implemented yet: P1.0"; exit 1

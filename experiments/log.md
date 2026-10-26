@@ -13,6 +13,34 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P0.3 · green (demo model changed)
+Command: `make vllm-run PROFILE=real` · `make chat-check` · `make vllm-run PROFILE=demo` · `make chat-check`
+Result:
+- 0.6B: answer "Kubernetes is a system for automating the deployment, scaling, and management of containerized
+  applications."; tool call `get_weather({"city": "Ohrid"})`. VRAM 2271 MiB whole GPU, RAM 3.42 GiB.
+- **4B AWQ does not fit.** util 0.85: refused at startup (only 3.22 of 4.0 GiB free next to the desktop and the
+  CUDA context). util 0.78: weights 2.5 GiB, KV 0.18 GiB, max context **1312 tokens** (4096 needs 0.56 GiB).
+- The D8 fallback `Qwen/Qwen3-1.7B` is FP16, 4.06 GB of weights: cannot fit either. Demo model is now
+  **Qwen/Qwen3-1.7B-GPTQ-Int8** (user decision): weights 1.92 GiB, KV 0.86 GiB = 8016 tokens at util 0.78,
+  chat + tool call OK, VRAM 3213 MiB, RAM 3.85 GiB. After the P0.4 change (fixed 800 MiB KV): 7312 tokens, OK.
+- Startup (0.6B, model cached): ~160 s to healthy: 37 s Python imports, 32 s config resolution (HF hub lookup),
+  38 s engine process start, 19 s model load (weights 2.7 s), 12 s KV/profiling. 115 s with `HF_HUB_OFFLINE=1`.
+  This is the cold start the simulator has to model (D4).
+Notes:
+- vLLM v0.31.0 (2026-10-05), the newest release at least two weeks old; v0.32.0 was 8 days old. Pinned by digest.
+- `max_model_len` 8192 did not fit the 0.6B at util 0.42 (needs 0.88 GiB KV, 0.61 GiB available, max 5728):
+  real and sim now use 4096 (user decision).
+- Model revisions pinned in `config/` as `model.revision` (user decision), passed as `--revision` and
+  `--tokenizer-revision` (without the second, the tokenizer and chat template come from `main`).
+- Containers run as the calling user with `HF_HOME=/hf`, so files downloaded into `~/.cache/huggingface` are not
+  owned by root. Read-only mount + `HF_HUB_OFFLINE=1` (as the P0.7 pods use it) also tested: chat-check OK.
+- Manual step, once per machine: `hf auth login` with a read token (huggingface.co/settings/tokens). Optional:
+  without it downloads work, only with lower rate limits. The token lives in `~/.cache/huggingface/token`,
+  outside the repo.
+- `chat_check.sh` takes a base URL instead of a port (user decision), so P0.7 reuses it against the Service.
+- vLLM warnings on this GPU, harmless: pinned memory not available under WSL; FlashInfer top-k sampling needs more
+  than 16 SMs, so vLLM falls back.
+
 ### 2026-10-26 · P0.6 · green (ladder step 1)
 Command: `make k3s && make gpu-check`
 Result:
