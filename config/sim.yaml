@@ -2,10 +2,12 @@
 model:
   # Same model as "real": the simulator is calibrated from it, so the results stay comparable (D4).
   name: Qwen/Qwen3-0.6B-GPTQ-Int8
+  # Same commit as "real", so the tokenizer and chat template match the calibration runs.
+  revision: d3f20e7e71825fe57ad32705b396e9e156279107
   # Same as "real", so a simulated pod has the same KV-cache budget as a real one.
   gpu_memory_utilization: 0.42
   # Same as "real", so the same traces fit within the context limit.
-  max_model_len: 8192
+  max_model_len: 4096
   # Same as "real", so the agent sees the same tool-call format.
   tool_call_parser: hermes
 # Starts at the same size as "real"; autoscaling changes the count from here.

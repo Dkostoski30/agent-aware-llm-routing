@@ -2,10 +2,13 @@
 model:
   # The only model that fits twice in 4GB of VRAM (D8).
   name: Qwen/Qwen3-0.6B-GPTQ-Int8
+  # Hugging Face commit vLLM loads, so every run uses the same weights and chat template (versions.md, Models).
+  revision: d3f20e7e71825fe57ad32705b396e9e156279107
   # Two pods take 42% of VRAM each; the remaining 16% is left for the Windows desktop and CUDA context (checked in P0.4).
   gpu_memory_utilization: 0.42
-  # Room for a multi-step agent history with tool results, while the KV cache still fits in the 42% share.
-  max_model_len: 8192
+  # 8192 needs 0.88 GiB of KV cache for one request, but the 42% share leaves 0.61 GiB (~5700 tokens) after the
+  # weights (P0.3). 4096 still holds a multi-step agent history.
+  max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
   tool_call_parser: hermes
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).
