@@ -1,0 +1,20 @@
+<!-- @dsCard group="Cluster" height=300 width=420 subtitle="Priority order: nearest to done first" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ActiveRuns</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-panel{width:400px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-panel">' + A.activeRuns({"caption": "nearest to done first", "rows": [{"rank": 1, "id": "run-c45e19", "type": "support", "step": 3, "exp": 4, "pod": "vllm-0"}, {"rank": 2, "id": "run-7f3a9c", "type": "contracts", "step": 3, "exp": 5, "pod": "vllm-0", "you": true}, {"rank": 3, "id": "run-2b81d0", "type": "csv_analysis", "step": 2, "exp": 6, "pod": "vllm-1"}]}) + A.activeRuns({"caption": "21 active · nearest to done first", "more": "+ 16 more", "rows": [{"rank": 1, "id": "run-a19e07", "type": "contracts", "step": 4, "exp": 5, "pod": "sim-0", "you": true}, {"rank": 2, "id": "run-0c7a13", "type": "support", "step": 3, "exp": 4, "pod": "sim-1"}, {"rank": 3, "id": "run-5e2b90", "type": "support", "step": 3, "exp": 4, "pod": "sim-0"}, {"rank": 4, "id": "run-77d4f1", "type": "csv_analysis", "step": 4, "exp": 6, "pod": "sim-1"}, {"rank": 5, "id": "run-31aa08", "type": "contracts", "step": 2, "exp": 5, "pod": "sim-0"}]}) + '</div>';
+</script>
+</body>
+</html>

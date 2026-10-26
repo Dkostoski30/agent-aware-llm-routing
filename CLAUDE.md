@@ -4,7 +4,7 @@
 Bachelor thesis (FCSE): LLM call routing and vLLM autoscaling on Kubernetes.
 Agent tasks make chains of LLM calls sharing one context. A custom Endpoint Picker plugin (Gateway API Inference Extension) keeps a task on the pod that has its context cached, prioritizes tasks close to finishing, spills parallel calls only under overload. A shared run tracker (agent runtime + replayer) exports the remaining work of active tasks, and KEDA scales vLLM pods on it. Scale-down drains; failed pods don't lose tasks. A chat web app (login, chats, file attachments) is one client of the agent runtime; one chat message is one run (D13).
 
-The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one task ID. Design decisions D1–D13 in `PLAN.md` are binding; don't deviate without asking.
+The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one task ID. Design decisions D1–D14 in `PLAN.md` are binding; don't deviate without asking.
 
 ## Environment
 - Windows + WSL2, RTX 3050 4GB, 16GB RAM. All commands run inside WSL2.
@@ -26,7 +26,7 @@ The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one tas
 - `app/` Python FastAPI app backend + SQLite: users, sessions, chats, attachments
 - `loadgen/` trace recorder, replayer, converters
 - `sim/` simulator config and calibration
-- `ui/` Angular app: login, chats, step view, infrastructure page
+- `ui/` Angular app: login, chats, step view, cluster panel; follows `docs/design-system/` (D14)
 - `experiments/` scripts, configs, results
 
 ## Commands

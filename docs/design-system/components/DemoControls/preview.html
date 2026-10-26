@@ -1,0 +1,20 @@
+<!-- @dsCard group="Cluster" height=300 width=420 subtitle="Idle, and while a replay runs" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DemoControls</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-panel{width:400px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-panel">' + A.demo({"pattern": "burst", "pod": "vllm-0", "caption": "Start replays recorded tasks through the gateway (<code>make replay</code>). Kill deletes the pod; its runs continue on another one."}) + '</div><div style="height:16px"></div><div class="ag-panel">' + A.demo({"pattern": "burst", "pod": "sim-0", "busy": true, "caption": "Replay running: 7 of 20 finished · <code>make replay TRACE=demo PATTERN=burst</code>"}) + '</div>';
+</script>
+</body>
+</html>
