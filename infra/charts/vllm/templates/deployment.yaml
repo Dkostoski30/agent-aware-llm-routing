@@ -43,7 +43,7 @@ spec:
           env:
             - name: HF_HOME
               value: /hf
-            # The model is already in the host cache (make vllm-run downloaded it); a pod never downloads.
+            # The model is already in the host cache (infra/download-model.sh, run by make up); a pod never downloads.
             - name: HF_HUB_OFFLINE
               value: "1"
             {{- if eq .Values.gpuAccess "runtime" }}

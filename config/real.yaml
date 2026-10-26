@@ -36,3 +36,9 @@ routing:
   priority: false
   # Sends new runs to the newest pod right after scale-up (P4.2).
   warmup: false
+# Prometheus settings (P1.1).
+monitoring:
+  # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads
+  # from it. 5 s: a request took 6-9 s under load (P0.4), so a queue that builds and drains within one request is
+  # still seen; the Prometheus Operator default of 30 s would hide it.
+  scrape_interval_seconds: 5

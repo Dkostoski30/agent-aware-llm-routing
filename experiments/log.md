@@ -13,6 +13,36 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P1.1 · green
+Command: `make up` · `kubectl get pods -n monitoring` · `make service-check` · `make grafana`, dashboard `thesis-vllm`
+Result:
+- kube-prometheus-stack 92.3.0 installed by `make up` before the vLLM release; 4 pods Running in `monitoring`
+  (grafana 3/3, operator, kube-state-metrics, prometheus 2/2).
+- `make service-check` OK (12 / 10 requests per pod); the "vLLM pods" dashboard shows both pods in the queue,
+  KV-cache and prefix-cache hit rate panels (user checked in the browser).
+Notes:
+- Operator and kube-state-metrics restarted once at 20:53:30 UTC, while both vLLM pods were loading the model:
+  kube-state-metrics logged `Failed to contact API server for /livez`, failed its liveness probe and was
+  restarted; the operator exited cleanly on SIGTERM. The k3s API server stopped answering for a moment under the
+  model load. Not a failure of this task; watch for it in later `make up` runs (same family as the P0.7
+  datastore slowness).
+
+### 2026-10-26 · P1.0 · green
+Command: `make down` · `systemctl is-active k3s; nvidia-smi` · `time make up` · `make service-check`
+Result:
+- `make down`: releases vllm, monitoring, nvidia-device-plugin uninstalled, both namespaces deleted, k3s stopped
+  by `k3s-killall.sh`; `inactive`, `nvidia-smi` lists no process (335 MiB used by the desktop).
+- `make up` from a stopped k3s: exit 0, **8 min 2 s** wall time. Device plugin back with
+  `allocatable nvidia.com/gpu: 2`; model already in the cache (hf only checked 10 files); both vLLM pods
+  `1/1 Running` after the rollout (4 min 29 s from install to both Ready).
+- `make service-check` OK through the Service, 12 / 10 requests per pod.
+Notes:
+- The 8 min include the first pull of the monitoring images (P1.1, same run); the vLLM image and the model came
+  from k3s's containerd and the HF cache, as `make down` keeps them.
+- In k3s both pods became Ready after 4.5 min, slower than the 2-3 min in Docker (P0.3, P0.4): they load at the
+  same time from one disk and one GPU.
+- The second `make down` (idempotency) was not part of this run.
+
 ### 2026-10-26 · P0.7 · green · Gate 0 green
 Command: `make k3s` · `make vllm-deploy PROFILE=real` · `kubectl get pods` · `make service-check`
 Result:
