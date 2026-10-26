@@ -23,6 +23,8 @@ package = false
 [tool.pytest.ini_options]
 # Test files in different components may share a basename (e.g. test_config.py) without clashing.
 addopts = ["--import-mode=importlib", "--strict-markers"]
+# importlib mode does not put a test's directory on sys.path; scripts tested in place are listed here.
+pythonpath = ["infra/checks"]
 
 [tool.ruff]
 target-version = "py312"
@@ -36,4 +38,3 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-

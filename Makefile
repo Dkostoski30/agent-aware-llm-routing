@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check up down smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check up down smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -49,6 +49,19 @@ vllm-run:
 # Chat answer + tool call against a running vLLM server; BASE_URL defaults to the vllm-run port (P0.3).
 chat-check:
 	bash infra/checks/chat_check.sh $(BASE_URL)
+
+# Two vLLM containers from config/real.yaml on ports 8001 and 8002, in the background (P0.4).
+vllm-pair:
+	bash infra/local/vllm-pair.sh
+
+# Removes every local vLLM container (vllm-run, vllm-pair), e.g. before the GPU is handed to k3s (P0.7).
+vllm-stop:
+	@ids=$$(docker ps --all --quiet --filter 'name=^vllm(-[12])?$$'); \
+	if [ -n "$$ids" ]; then docker rm --force $$ids; else echo "vllm-stop: no vLLM containers"; fi
+
+# Load on both replicas, e.g. ARGS="--ports 8001 8002 --concurrency 4 --minutes 10" (P0.4).
+concurrency-check:
+	uv run --locked python infra/checks/concurrency_check.py $(ARGS)
 
 up:
 	@echo "not implemented yet: P1.0"; exit 1

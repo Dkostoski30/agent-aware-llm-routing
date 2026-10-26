@@ -25,10 +25,11 @@ profile_value() {
 
 # vllm_serve_args <profile>: fills the array VLLM_ARGS with the vLLM server flags for the profile.
 vllm_serve_args() {
-  local name revision gpu_util max_len parser
+  local name revision gpu_util kv_bytes max_len parser
   name=$(profile_value "$1" .model.name)
   revision=$(profile_value "$1" .model.revision)
   gpu_util=$(profile_value "$1" .model.gpu_memory_utilization)
+  kv_bytes=$(profile_value "$1" .model.kv_cache_memory_bytes)
   max_len=$(profile_value "$1" .model.max_model_len)
   parser=$(profile_value "$1" .model.tool_call_parser)
   # --tokenizer-revision: without it vLLM loads the tokenizer (and chat template) from main, not from the pinned commit.
@@ -38,6 +39,7 @@ vllm_serve_args() {
     --revision "$revision"
     --tokenizer-revision "$revision"
     --gpu-memory-utilization "$gpu_util"
+    --kv-cache-memory "$kv_bytes"
     --max-model-len "$max_len"
     --tool-call-parser "$parser"
     --enable-auto-tool-choice

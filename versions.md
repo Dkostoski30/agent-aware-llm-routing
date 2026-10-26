@@ -97,4 +97,4 @@ Revisions are pinned in `config/<profile>.yaml` (`model.revision`) and passed to
 | P0.3 | 0.6B, 1 container, util 0.42, max-model-len 4096 | 2271 MiB whole GPU (558 MiB idle) | 3.42 GiB | Weights 0.74 GiB, KV 0.62 GiB = 5840 tokens. 8192 did not fit (needs 0.88 GiB KV) |
 | P0.3 | 4B AWQ, 1 container, max-model-len 4096 | - | - | **Fits: no.** util 0.85 refused (3.22 GiB free); util 0.78: weights 2.5 GiB, KV 0.18 GiB = max 1312 tokens |
 | P0.3 | 1.7B GPTQ-Int8, 1 container, util 0.78, max-model-len 4096 | 3213 MiB whole GPU | 3.85 GiB | Weights 1.92 GiB, KV 0.86 GiB = 8016 tokens |
-| P0.4 | 0.6B, 2 containers at 0.42 | | | |
+| P0.4 | 0.6B, 2 containers, util 0.42, KV fixed at 480 MiB, max-model-len 4096 | 3468 MiB whole GPU (peak, both) | 2.79 / 2.92 GiB (peak) | 10 min, 4 in flight per port: 679 requests, 0 errors, p50 6.4 s, p95 9.5 s. KV 4384 tokens each |
