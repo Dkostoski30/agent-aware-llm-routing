@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=420 width=800 subtitle="Waiting, then finished with citations" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Answer</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:0 24px 20px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.answer({"wait": "The answer appears when the last step finishes."}) + A.answer({"html": "<p>Contract B is riskier. Its supplier can terminate on 30 days' written notice with no cure period, so one missed delivery is enough to end the agreement.<span class=\"ag-cite\" title=\"Step 3\">3</span></p><p>Contract A requires 90 days' notice and gives you 15 days to fix a breach before the supplier may terminate.<span class=\"ag-cite\" title=\"Step 2\">2</span></p><ul><li>Notice: 90 days in A, 30 days in B<span class=\"ag-cite\" title=\"Step 4\">4</span></li><li>Cure period: 15 days in A, none in B<span class=\"ag-cite\" title=\"Step 4\">4</span></li></ul>", "foot": "5 steps · 2.1 s · 4 of 5 served from cache · numbers computed by <code class=\"ag-mono\">diff_clauses</code>, not by the model"});
+</script>
+</body>
+</html>

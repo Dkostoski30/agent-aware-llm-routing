@@ -1,0 +1,20 @@
+<!-- @dsCard group="Feedback" height=110 subtitle="Pod, cache hit or miss, latency, retry, spill" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tag</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-tags">' + A.tag('vllm-0') + A.tag('hit', 'hit') + A.tag('miss', 'miss') + A.tag('290 ms') + A.tag('1.6 s') + A.tag('retry 1', 'retry') + A.tag('spilled', 'spill') + A.tag('running', 'muted') + '</div>';
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="P1.4 · P2.1 · empty state, one pod idle" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NewTaskScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: {"profile": "real", "model": "Qwen3-0.6B-GPTQ-Int8"},
+    main: A.newTask({ composer: {"hero": true, "placeholder": "Describe the task, or start from a scenario below", "scenario": "Contracts", "source": "contract_a.md · contract_b.md"}, scenarios: [{"icon": "table", "title": "CSV analysis", "prompt": "Which region grew revenue fastest from Q2 to Q3, and by how much?", "source": "sales_2025.csv", "tools": ["csv_summary", "group_by", "compare"]}, {"icon": "doc", "title": "Contracts", "prompt": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "source": "contract_a.md · contract_b.md", "tools": ["read_document", "extract_clauses", "diff_clauses"], "on": true}, {"icon": "chat", "title": "Support", "prompt": "Order 10482 arrived damaged. Draft a reply that follows our returns policy.", "source": "orders.json · policies.md", "tools": ["get_order", "get_policy", "draft_reply"]}] }),
+    panel: {"live": "Live", "rw": {"value": 0, "runs": 0, "series": [3, 5, 6, 6, 4, 4, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "reps": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1], "max": 14, "repMax": 2, "scale": "KEDA target <b>1</b> pod · min 1 · max 2"}, "pods": {"caption": "1 of 1 ready", "list": [{"name": "vllm-0", "state": "ready", "run": 0, "wait": 0, "kv": 3, "hit": 69, "note": "No runs pinned."}]}, "runs": {"caption": "none", "rows": [], "more": "No active runs. Start one on the left, or start 20 from the demo controls."}, "flags": {"source": "config/real.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "vllm-0", "caption": "Start replays recorded tasks through the gateway (<code>make replay</code>). Kill deletes the pod; its runs continue on another one."}}
+  });
+</script>
+</body>
+</html>

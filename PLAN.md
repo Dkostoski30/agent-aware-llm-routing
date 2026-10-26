@@ -53,6 +53,7 @@ Setup: Windows + WSL2, RTX 3050 4GB, Ryzen 7, 16GB RAM, €0, code written with 
 | D10 | Agent tools are high-level and deterministic (Python computes, the model orchestrates). Tool arguments are enums from fixed lists where possible; tool calls use vLLM structured outputs. | Small models pick the right tool but get arguments wrong; this removes that failure mode. |
 | D11 | One source of configuration: `config/` holds three profiles (`real`, `sim`, `demo`) with every tunable (model, replicas, thresholds, TTLs, KEDA targets, drain timeout). Each routing rule has a feature flag. Each experiment is a YAML file in `experiments/`; results are stamped with its hash. | Switching GPU/simulator/demo or swapping the model is one file; ablation needs flags; any result can be re-run from its file. |
 | D12 | The headers (D1), the trace format (D9) and the run request (app backend → agent runtime, D13) are versioned JSON schemas in `schemas/`; every component that reads or writes one runs contract tests against it. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run; app backend lines outside a run (login, chat list) carry `request-id` instead. | Shared formats can't drift silently; one task can be followed across every component. |
+| D14 | The UI follows the Tenax design system in `docs/design-system/` (tokens, component classes, screens). Where it disagrees with D1–D13 the decisions win: the model picks the scenario (D13) and the UI shows it read-only on the run; scenario cards only fill the composer with an example. Login, chat list and attachments, which the design has no cards for, are built from its tokens and components. The cluster panel sits beside the chat and a toggle shows or hides it. | One visual language for the whole demo; the panel beside the chat shows a step landing on a pod in one glance, and the toggle gives the chat the full width when the cluster doesn't matter. Decided 2026-10-26. |
 | D9 | Traces record the time between calls (tool time) and the replayer reproduces it. | Otherwise replays put more load on the system than real agents. |
 | D13 | One chat message = one run. Step 1 picks the scenario (enum structured output: `csv`, `contracts`, `support`, `out_of_scope`); later steps see only that scenario's tools. Step 1 sends a default `expected-steps` from `config/`; the run tracker updates it once the scenario is picked. The app backend sends attached files with the run request; the agent runtime keeps them for that run only (size limit in `config/`), and tools take them as enum IDs. History = user messages + final answers, capped by a token budget in `config/`; when over budget the oldest half is dropped. No chat-level header: turn-to-turn cache reuse relies on the stable prefix. | The model never chooses among all 9 tools at once; files never enter the 4096-token context; dropping in blocks keeps the prompt prefix stable across turns so prefix-cache hits survive. A header would change D1 and D12; add it only if experiments show turn-to-turn misses. Sending files with the request keeps the agent runtime unaware of the app. |
 
@@ -74,8 +75,9 @@ thesis/
 ├── app/                 # Python/FastAPI + SQLite: users, sessions, chats, attachments (D7)
 ├── loadgen/             # Python: trace recorder, replayer, converters
 ├── sim/                 # simulator config + calibration data
-├── ui/                  # Angular app: login, chats, step view, infrastructure page
+├── ui/                  # Angular app: login, chats, step view, cluster panel (D14)
 ├── experiments/         # scripts, configs, results (CSV), graphs, log.md
+├── docs/design-system/ # Tenax design system: tokens, components, screens (D14)
 └── docs/thesis/         # chapters
 ```
 
@@ -133,7 +135,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P1.1 | Prometheus + Grafana scraping vLLM | Grafana panel shows queue length, KV-cache usage, prefix-cache hit rate per pod |
 | P1.2 | Gateway (Envoy Gateway or kgateway) + Gateway API Inference Extension, default Endpoint Picker. Pin version. | Requests through the gateway reach both pods; picker logs show its choice |
 | P1.3 | Agent runtime v0: loop + calculator tool, non-streaming calls (D6), headers (D1), run history in Redis (D7) | `pytest` with a mocked LLM passes; a real task completes through the gateway; headers visible in gateway logs; history readable from Redis |
-| P1.4 | Angular shell: task input + live step list (SSE) | Typing a task in the UI shows each step as it happens |
+| P1.4 | Angular shell in the design system (D14): tokens and both themes, top bar, New task screen, run view with live step cards (SSE) | Typing a task in the UI shows each step as it happens |
 | P1.5 | `make smoke`: UI-less end-to-end check | One command runs a task through every layer and exits 0 |
 | P1.6 | Practical go/no-go: one demo task (CSV analysis) with high-level tools (D10) on the demo model, 10 runs | ≥9/10 correct results → go. Below that: narrow the tasks, or move the demo to a FINKI GPU server (ask at Checkpoint 1) |
 
@@ -172,7 +174,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P3.10 | Autoscaling | Baselines: HPA on CPU, KEDA on queue depth | Both run on the same replay; results in CSV |
 | P3.11 | UI | Angular: infrastructure panel (pods, queues, remaining work) | Panel numbers match Grafana |
 | P3.12 | App | Chats, messages, attachments API; one message → one agent-runtime call with files in the request (`schemas/run-request`, D12, D13); `run_id` stored on the assistant message; steps fetched from the agent runtime by `run_id` | pytest with mocked runtime passes; run-request contract tests pass in app and agent; a real message through every layer returns an answer and its run_id; another user's chat returns 404; `make smoke` goes through the app backend |
-| P3.13 | UI | Angular: login/register, chat list, open chat with file attach; step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons on a separate infrastructure page | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
+| P3.13 | UI | Angular: login/register, chat list, open chat with file attach; step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons in the cluster panel beside the chat, shown or hidden by a toggle (D14) | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
 
 **Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work.
 

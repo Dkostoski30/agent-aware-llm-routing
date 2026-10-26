@@ -1,0 +1,20 @@
+<!-- @dsCard group="Layout" height=140 width=1200 subtitle="Real profile idle; sim profile with a run in progress" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TopBar</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.topbar({"profile": "real", "model": "Qwen3-0.6B-GPTQ-Int8"}) + '<div style="height:12px"></div>' + A.topbar(Object.assign({"profile": "sim", "model": "llm-d-inference-sim"}, { working: true }));
+</script>
+</body>
+</html>

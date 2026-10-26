@@ -1,0 +1,29 @@
+<!-- @dsCard group="Brand" height=400 width=900 subtitle="8-bit horse: sizes, states, placements" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Avatar</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:24px;color:var(--ink);font-family:var(--font-sans)} .row{display:flex;gap:16px;margin-bottom:16px;align-items:flex-end} .cell{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-muted)} .stage{display:grid;place-items:center;min-width:120px;height:140px;padding:0 16px;border-radius:var(--radius-md);background:var(--surface-2)} .bar{display:flex;align-items:center;gap:10px;height:52px;padding:0 14px;border-radius:var(--radius-md);background:var(--surface);border:1px solid var(--line);color:var(--ink);font-size:13px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  var sizes = ['1x', '2x', '4x', '8x'];
+  var cell = function (inner, cap) { return '<div class="cell"><div class="stage">' + inner + '</div><span>' + cap + '</span></div>'; };
+  document.getElementById('root').innerHTML =
+    '<div class="row">' + sizes.map(function (s) { return cell(A.horse({ size: s === '2x' ? '' : s }), 'Still · ' + s); }).join('') + '</div>' +
+    '<div class="row">' + sizes.map(function (s) { return cell(A.horse({ size: s === '2x' ? '' : s, state: 'working' }), 'Working · ' + s); }).join('') + '</div>' +
+    '<div class="row ctx">' +
+      '<div class="cell"><div class="bar">' + A.horse({}) + '<b>' + A.name + '</b></div><span>Top bar</span></div>' +
+      '<div class="cell"><div class="bar">' + A.horse({ state: 'working' }) + 'Step 3 · 5 expected</div><span>Run header</span></div>' +
+      '<div class="cell"><div class="bar">' + A.horse({}) + '<b>Answer</b></div><span>Answer heading</span></div>' +
+    '</div>';
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=330 width=1000 subtitle="The run in the recorder's fields" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StepTable</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:0 20px 20px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.stepTable([{"n": 1, "call": "read_document(contract_a), read_document(contract_b)", "pod": "vllm-0", "cache": "miss", "ttft": 142, "ms": 820, "gap": 0, "tin": "612", "tout": 58}, {"n": 2, "call": "extract_clauses(contract_a, termination)", "par": "extract-1", "pod": "vllm-0", "cache": "hit", "ttft": 85, "ms": 310, "gap": 42, "tin": "1,830", "tout": 96}, {"n": 3, "call": "extract_clauses(contract_b, termination)", "par": "extract-1", "pod": "vllm-0", "cache": "hit", "ttft": 88, "ms": 290, "gap": 42, "tin": "1,834", "tout": 92}, {"n": 4, "call": "diff_clauses(termination)", "pod": "vllm-0", "cache": "hit", "ttft": 61, "ms": 240, "gap": 18, "tin": "2,104", "tout": 40}, {"n": 5, "call": "answer", "pod": "vllm-0", "cache": "hit", "ttft": 66, "ms": 610, "gap": 9, "tin": "2,250", "tout": 118}]);
+</script>
+</body>
+</html>

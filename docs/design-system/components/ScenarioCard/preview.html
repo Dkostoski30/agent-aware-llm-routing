@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=220 width=900 subtitle="CSV analysis, Contracts (selected), Support" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ScenarioCard</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-scenarios">' + [{"icon": "table", "title": "CSV analysis", "prompt": "Which region grew revenue fastest from Q2 to Q3, and by how much?", "source": "sales_2025.csv", "tools": ["csv_summary", "group_by", "compare"]}, {"icon": "doc", "title": "Contracts", "prompt": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "source": "contract_a.md · contract_b.md", "tools": ["read_document", "extract_clauses", "diff_clauses"], "on": true}, {"icon": "chat", "title": "Support", "prompt": "Order 10482 arrived damaged. Draft a reply that follows our returns policy.", "source": "orders.json · policies.md", "tools": ["get_order", "get_policy", "draft_reply"]}].map(A.scenario).join('') + '</div>';
+</script>
+</body>
+</html>

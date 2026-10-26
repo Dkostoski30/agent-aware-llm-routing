@@ -1,0 +1,27 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="P4.3 · P4.2 · scale-down drains, warm-up routing" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DrainScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: {"profile": "sim", "model": "llm-d-inference-sim"},
+    main: A.run({ head: {"title": "Order 10482 arrived damaged. Draft a reply that follows our returns policy.", "runId": "run-0c7a13", "type": "support", "done": true, "elapsed": "1.9 s", "segments": ["done", "done", "done", "done"]},
+      tabs: [{ label: 'Answer', on: true }, { label: 'Steps', count: 4 }], composer: {"scenario": "Support", "placeholder": "Ask a follow-up"},
+      blocks: [A.steps([{"n": 1, "tool": "get_order", "args": "order_id = 10482", "pod": "sim-2", "cache": "miss", "ms": 700, "state": "done"}, {"n": 2, "tool": "get_policy", "args": "topic = damaged_items", "pod": "sim-2", "cache": "hit", "ms": 260, "state": "done"}, {"n": 3, "tool": "draft_reply", "args": "tone = apologetic", "pod": "sim-2", "cache": "hit", "ms": 410, "state": "done"}, {"n": 4, "tool": "answer", "args": "final message, no tool call", "pod": "sim-2", "cache": "hit", "ms": 520, "state": "done"}], '4 steps · all on sim-2'), A.answer({"html": "<p>Here is a reply that follows the damaged-items policy: a free replacement, no return needed for items under €50.<span class=\"ag-cite\" title=\"Step 2\">2</span></p><div class=\"ag-quote\"><p>Hi Ana, I'm sorry your desk lamp arrived damaged. We've sent a replacement today at no cost, and you don't need to return the broken one.</p><p>It should reach you by Thursday 29 October. Your tracking number is in the confirmation email.</p></div><p>Order 10482: one desk lamp, €34.90, delivered 24 October.<span class=\"ag-cite\" title=\"Step 1\">1</span></p>", "foot": "4 steps · 1.9 s · 3 of 4 served from cache · drafted by <code class=\"ag-mono\">draft_reply</code>"})] }),
+    panel: {"live": "Live", "rw": {"value": 9, "runs": 4, "series": [12, 25, 40, 52, 58, 63, 62, 61, 55, 47, 40, 33, 27, 22, 18, 15, 13, 11, 10, 9], "reps": [2, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3], "max": 70, "repMax": 4, "scale": "KEDA scaling <b>4 → 3</b> pods · sim-3 draining"}, "pods": {"caption": "3 ready · 1 draining", "list": [{"name": "sim-0", "state": "ready", "run": 2, "wait": 0, "kv": 30, "hit": 77}, {"name": "sim-1", "state": "ready", "run": 1, "wait": 0, "kv": 18, "hit": 71}, {"name": "sim-2", "state": "ready", "run": 1, "wait": 0, "kv": 21, "hit": 68, "note": "Newest pod; took 6 new runs right after Ready."}, {"name": "sim-3", "state": "draining", "run": 1, "wait": 0, "kv": 12, "hit": 59, "note": "<b>No new runs.</b> 1 run finishing (run-77d4f1, step 5 of 6). Removed when it ends, or when the drain timeout runs out in 1:30."}]}, "runs": {"caption": "4 active · nearest to done first", "rows": [{"rank": 1, "id": "run-77d4f1", "type": "csv_analysis", "step": 5, "exp": 6, "pod": "sim-3"}, {"rank": 2, "id": "run-e2c9b4", "type": "support", "step": 2, "exp": 4, "pod": "sim-0"}, {"rank": 3, "id": "run-4f81c2", "type": "contracts", "step": 2, "exp": 5, "pod": "sim-0"}, {"rank": 4, "id": "run-b07d35", "type": "csv_analysis", "step": 1, "exp": 6, "pod": "sim-1"}]}, "flags": {"source": "config/sim.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "sim-0", "caption": "Replay finished: 20 of 20 completed, 0 interrupted by scale-down."}}
+  });
+  document.querySelector('.ag-panel-scroll').scrollTop = 300;
+</script>
+</body>
+</html>

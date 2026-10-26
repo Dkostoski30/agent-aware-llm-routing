@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=260 width=900 subtitle="Done, running, pending, selected, retried, spilled" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StepCard</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-steps">' + [{"n": 2, "tool": "extract_clauses", "args": "contract_a · termination", "pod": "vllm-0", "cache": "hit", "ms": 310, "par": "extract-1", "state": "done"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "vllm-0", "par": "extract-1", "state": "running"}, {"n": 4, "tool": "Waits for steps 2 and 3", "state": "pending"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "vllm-0", "cache": "hit", "ms": 290, "par": "extract-1", "state": "selected"}, {"n": 4, "tool": "diff_clauses", "args": "termination", "pod": "vllm-1", "cache": "miss", "ms": 1920, "state": "retried", "retry": 1, "note": "First attempt lost with vllm-0"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "sim-1", "cache": "miss", "ms": 1610, "par": "extract-1", "state": "done", "spill": true, "note": "sim-0 was over its queue threshold"}].map(A.stepCard).join('') + '</div>';
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!-- @dsCard group="Actions" height=150 subtitle="Primary, secondary, ghost, danger; icon and small sizes" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Button</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px} .row{display:flex;gap:10px;align-items:center;margin-bottom:14px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML =
+    '<div class="row">' + A.btn('Start 20 tasks', { kind: 'primary', icon: 'play' }) + A.btn('New task', { icon: 'plus' }) + A.btn('Cancel', { kind: 'ghost' }) + A.btn('Kill pod', { kind: 'danger', icon: 'power' }) + A.btn('Start 20 tasks', { kind: 'primary', icon: 'play', disabled: true }) + '</div>' +
+    '<div class="row">' + A.btn('Copy', { size: 'sm' }) + A.btn('Retry', { size: 'sm', kind: 'ghost', icon: 'retry' }) +
+    A.btn('', { kind: 'primary', icon: 'send', aria: 'Send' }).replace('ag-btn--primary', 'ag-btn--primary ag-btn--send') + A.btn('', { kind: 'ghost', icon: 'moon', aria: 'Switch theme' }).replace('ag-btn--ghost', 'ag-btn--ghost ag-btn--icon') + '</div>';
+</script>
+</body>
+</html>

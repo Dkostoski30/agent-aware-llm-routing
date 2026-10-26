@@ -46,7 +46,7 @@ agent/         Python agent runtime, tools, run tracker
 app/           Python app backend + SQLite: users, sessions, chats, attachments
 loadgen/       trace recorder, replayer, converters
 sim/           simulator config and calibration
-ui/            Angular app: login, chats, step view, infrastructure page
+ui/            Angular app: login, chats, step view, cluster panel
 experiments/   experiment configs, results, graphs, log
-docs/          task cards, thesis outline
+docs/          task cards, design system (Tenax), thesis outline
 ```
