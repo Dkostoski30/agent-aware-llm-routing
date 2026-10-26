@@ -4,10 +4,15 @@ model:
   name: Qwen/Qwen3-0.6B-GPTQ-Int8
   # Hugging Face commit vLLM loads, so every run uses the same weights and chat template (versions.md, Models).
   revision: d3f20e7e71825fe57ad32705b396e9e156279107
-  # Two pods take 42% of VRAM each; the remaining 16% is left for the Windows desktop and CUDA context (checked in P0.4).
+  # With kv_cache_memory_bytes set, vLLM sizes nothing from this; it only refuses to start if less than this share of
+  # VRAM is free (vllm/v1/worker/utils.py request_memory). 0.42: each of the two pods needs ~1.53 GiB (P0.4).
   gpu_memory_utilization: 0.42
-  # 8192 needs 0.88 GiB of KV cache for one request, but the 42% share leaves 0.61 GiB (~5700 tokens) after the
-  # weights (P0.3). 4096 still holds a multi-step agent history.
+  # KV cache size, set instead of derived from gpu_memory_utilization: under WSL vLLM sees only device-wide memory,
+  # so a second replica counts the first one's memory as its own and gets a negative KV cache (P0.4). 480 MiB holds
+  # ~4400 tokens, above max_model_len; two replicas then need ~3.06 of the 3.22 GiB free at startup.
+  kv_cache_memory_bytes: 503316480
+  # 8192 needs 0.88 GiB of KV cache for one request, more than a replica's share of the GPU can give (P0.3).
+  # 4096 fits the KV cache above and still holds a multi-step agent history.
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
   tool_call_parser: hermes

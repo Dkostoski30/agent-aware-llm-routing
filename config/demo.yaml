@@ -6,8 +6,11 @@ model:
   # Hugging Face commit vLLM loads, so every run uses the same weights and chat template (versions.md, Models).
   revision: 382fed3fa21d1a7e837b42a500564a0c4be4f060
   # vLLM refuses to start if less than this share of VRAM is free; only ~3.22 of 4.0 GiB are free next to the Windows
-  # desktop and the CUDA context, so 0.85 failed (P0.3).
+  # desktop and the CUDA context, so 0.85 failed (P0.3). The KV cache size comes from kv_cache_memory_bytes.
   gpu_memory_utilization: 0.78
+  # Set explicitly like in the other profiles. 800 MiB (7312 tokens, P0.3) is just under the 0.86 GiB vLLM derived from
+  # 0.78 for this model in P0.3, so a busier desktop does not push the pod out of memory.
+  kv_cache_memory_bytes: 838860800
   # Same context limit as the 0.6B, so the same agent tasks fit.
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.

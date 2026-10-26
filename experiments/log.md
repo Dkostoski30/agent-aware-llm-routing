@@ -13,6 +13,24 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-26 · P0.4 · green (attempt 2)
+Command: `make vllm-pair` · `make concurrency-check ARGS="--ports 8001 8002 --concurrency 4 --minutes 10"`
+Result:
+- port 8001: 344 requests, **0 errors**, p50 6.35 s, p95 9.55 s; port 8002: 335 requests, **0 errors**, p50 6.38 s,
+  p95 9.43 s (4 in flight per port, max_tokens 128).
+- Peak GPU memory 3468 / 4096 MiB (whole GPU, 558 MiB of it the desktop). Peak RAM vllm-1 2.79 GiB, vllm-2 2.92 GiB:
+  under the card's ~3 GB, so no `--swap-space` change.
+- Both replicas: KV cache 0.47 GiB = 4384 tokens each; healthy after 114 s and 120 s.
+Notes:
+- Attempt 1 (KV cache sized by `gpu_memory_utilization` 0.42): replica 1 fine (0.62 GiB KV), replica 2 computed
+  **-0.79 GiB** and exited. Under WSL vLLM sees only device-wide memory (both replicas log "Initial free memory
+  3.22 GiB"), so replica 2 counted replica 1's memory as its own. Fix, suggested by vLLM's own log: a fixed KV
+  size, `kv_cache_memory_bytes` in `config/` (480 MiB real/sim, 800 MiB demo) passed as `--kv-cache-memory`.
+- With it set, `gpu_memory_utilization` no longer sizes anything; vLLM only checks at startup that this share of
+  VRAM is free (`vllm/v1/worker/utils.py`, `request_memory`).
+- Replicas start one after the other (`vllm-pair.sh`), so they never profile memory at the same time.
+- `concurrency_check.py` uses only the standard library (user decision, no httpx); summary math unit-tested.
+
 ### 2026-10-26 · P0.3 · green (demo model changed)
 Command: `make vllm-run PROFILE=real` · `make chat-check` · `make vllm-run PROFILE=demo` · `make chat-check`
 Result:
