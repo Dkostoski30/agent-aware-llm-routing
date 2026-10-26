@@ -2,30 +2,31 @@
 
 ## Project
 Bachelor thesis (FCSE): LLM call routing and vLLM autoscaling on Kubernetes.
-Agent tasks make chains of LLM calls sharing one context. A custom Endpoint Picker plugin (Gateway API Inference Extension) keeps a task on the pod that has its context cached, prioritizes tasks close to finishing, spills parallel calls only under overload. A shared run tracker (agent runtime + replayer) exports the remaining work of active tasks, and KEDA scales vLLM pods on it. Scale-down drains; failed pods don't lose tasks.
+Agent tasks make chains of LLM calls sharing one context. A custom Endpoint Picker plugin (Gateway API Inference Extension) keeps a task on the pod that has its context cached, prioritizes tasks close to finishing, spills parallel calls only under overload. A shared run tracker (agent runtime + replayer) exports the remaining work of active tasks, and KEDA scales vLLM pods on it. Scale-down drains; failed pods don't lose tasks. A chat web app (login, chats, file attachments) is one client of the agent runtime; one chat message is one run (D13).
 
-The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one task ID. Design decisions D1–D12 in `PLAN.md` are binding; don't deviate without asking.
+The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one task ID. Design decisions D1–D13 in `PLAN.md` are binding; don't deviate without asking.
 
 ## Environment
 - Windows + WSL2, RTX 3050 4GB, 16GB RAM. All commands run inside WSL2.
 - Model: Qwen3-0.6B-GPTQ-Int8 for experiments and the infrastructure demo; Qwen3-1.7B-GPTQ-Int8 as a single replica for the practical demo (the 4B didn't fit, P0.3). Thinking mode off.
 - Agent tools are high-level and deterministic: Python computes, the model only orchestrates. Tool arguments are enums where possible; tool calls use vLLM structured outputs (D10).
-- Every LLM call carries headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`. Agent LLM calls are non-streaming. Run history lives in Redis.
+- Every LLM call carries headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`. Agent LLM calls are non-streaming. Run history lives in Redis; users, sessions, chats, messages and attachments live in SQLite in the app backend (D7).
 - Autoscaling experiments run on simulated pods (llm-d-inference-sim) calibrated from the real GPU, including cold start; validated on real vLLM at 1↔2 pods.
 - Pinned versions live in `versions.md`. Never upgrade anything without being asked.
 - Every tunable lives in a `config/` profile (`real`, `sim`, `demo`); nothing is hardcoded. Each routing rule has a feature flag. Experiments are YAML files in `experiments/` (D11).
 - Infra wait times (install and readiness timeouts in `infra/` scripts) are not experiment tunables: they stay in the script as a named constant with a comment saying why, not in `config/`.
-- Headers and the trace format follow the versioned schemas in `schemas/`; contract tests must pass in every component that reads or writes them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line (D12).
+- Headers and the trace format follow the versioned schemas in `schemas/`; contract tests must pass in every component that reads or writes them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run, `request-id` on app backend lines outside a run (D12).
 
 ## Layout
 - `config/` profiles: real, sim, demo
-- `schemas/` versioned JSON schemas for headers and traces
+- `schemas/` versioned JSON schemas for headers, traces and the run request
 - `infra/` cluster setup, Helm values, manifests
 - `gateway/` Go scheduling plugin
 - `agent/` Python FastAPI agent runtime and tools
+- `app/` Python FastAPI app backend + SQLite: users, sessions, chats, attachments
 - `loadgen/` trace recorder, replayer, converters
 - `sim/` simulator config and calibration
-- `ui/` Angular app
+- `ui/` Angular app: login, chats, step view, infrastructure page
 - `experiments/` scripts, configs, results
 
 ## Commands
@@ -34,6 +35,7 @@ The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one tas
 - `make smoke`: end-to-end check through every layer
 - `make replay TRACE=... PATTERN=...`: replay recorded tasks
 - `make experiment NAME=...`: run an experiment and regenerate its CSV and graphs
+- `make reset-app`: wipe app users, chats and files (`make down` keeps them)
 
 ## Rules
 1. Work on exactly one task ID at a time. Touch only the files the task needs. If something outside the task looks broken, report it, don't fix it.

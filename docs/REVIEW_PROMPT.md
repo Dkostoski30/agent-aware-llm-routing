@@ -16,7 +16,7 @@ You are reviewing uncommitted changes for task <ID>. You did not write them.
 - Any broad try/except, ignored errors, or swallowed failures?
 - Tests assert behavior? Was any test edited, skipped or weakened?
 - Any new dependency? Is it pinned and justified?
-- Does it follow D1–D12 (config profiles, flags, schemas, thesis_ metrics, JSON logs with run-id)?
+- Does it follow D1–D13 (config profiles, flags, schemas, thesis_ metrics, JSON logs with run-id)?
 - Are thresholds in config with a comment saying why?
 - Logs and metrics present where the thesis needs measurements?
 - Could the author explain every line at a thesis defense?

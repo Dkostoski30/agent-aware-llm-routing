@@ -23,15 +23,16 @@ Working outline. Format, template and length follow FCSE rules (to be confirmed 
 - What this thesis adds: agent awareness inside a standard Kubernetes gateway, with unmodified vLLM, plus autoscaling and safe scale-down.
 
 ## 4. Дизајн на системот (16–22.11)
-- Architecture diagram: UI → agent runtime → gateway + plugin → vLLM pods; run tracker → Prometheus → KEDA.
+- Architecture diagram: UI → app backend → agent runtime → gateway + plugin → vLLM pods; run tracker → Prometheus → KEDA.
+- Chat app as one client of the agent runtime: one message = one run, scenario step, context budget (D13); app data in SQLite, runs in Redis (D7).
 - Headers and run lifecycle (D1), run tracker (D2).
 - Routing rules: affinity, overload guard, parallel spill, progress priority, warm-up routing.
 - Autoscaling: remaining-work signal, scale-up, drain, failover.
-- Design decisions D1–D12 and why.
+- Design decisions D1–D13 and why.
 
 ## 5. Имплементација (23–29.11)
 - Environment: WSL2, k3s, GPU sharing, versions.
-- Plugin in Go, agent runtime and tools, replayer, simulator calibration.
+- Plugin in Go, agent runtime and tools, app backend and chat UI, replayer, simulator calibration.
 - Configuration profiles and feature flags, schemas and contract tests.
 - Verification approach: task cards, gates, tests.
 

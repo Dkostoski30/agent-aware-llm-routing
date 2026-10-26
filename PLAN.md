@@ -48,12 +48,13 @@ Setup: Windows + WSL2, RTX 3050 4GB, Ryzen 7, 16GB RAM, €0, code written with 
 | D4 | The simulator models cold start (measured model load time) and cached vs uncached prefill. | Without it, autoscaling and affinity results look unrealistically good. |
 | D5 | Autoscaling strategies are validated on real vLLM at 1↔2 pods; the simulator extends them to larger scale. | CPU-based HPA on simulated pods is meaningless; real pods give a ground truth. |
 | D6 | LLM calls from the agent are non-streaming; the UI streams steps over SSE. | Retry after a pod failure stays simple and correct. |
-| D7 | Run history in Redis only. | Nothing needs a relational database. |
+| D7 | Run history in Redis (agent runtime). Users, sessions, chats, messages and attachments in SQLite (app backend, 1 replica, persistent volume). | Runs are short-lived state shared by the runtime and replayer; users → chats → messages is relational product data. Keeping them apart lets experiments run without the app. SQLite allows only one writer pod, which is fine: only vLLM scales. |
 | D8 | Qwen3-0.6B-GPTQ-Int8 for all experiments and the infrastructure demo (needs 2 replicas). Practical demo on Qwen3-1.7B-GPTQ-Int8 as a single replica: Qwen3-4B-AWQ did not fit (P0.3, 1312-token context), the FP16 Qwen3-1.7B is 4 GB of weights. | Only the 0.6B fits twice in 4GB; the 4B is much better at multi-step tool use. |
 | D10 | Agent tools are high-level and deterministic (Python computes, the model orchestrates). Tool arguments are enums from fixed lists where possible; tool calls use vLLM structured outputs. | Small models pick the right tool but get arguments wrong; this removes that failure mode. |
 | D11 | One source of configuration: `config/` holds three profiles (`real`, `sim`, `demo`) with every tunable (model, replicas, thresholds, TTLs, KEDA targets, drain timeout). Each routing rule has a feature flag. Each experiment is a YAML file in `experiments/`; results are stamped with its hash. | Switching GPU/simulator/demo or swapping the model is one file; ablation needs flags; any result can be re-run from its file. |
-| D12 | The headers (D1) and the trace format (D9) are versioned JSON schemas in `schemas/`; runtime, replayer and plugin run contract tests against them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line. | Shared formats can't drift silently; one task can be followed across every component. |
+| D12 | The headers (D1), the trace format (D9) and the run request (app backend → agent runtime, D13) are versioned JSON schemas in `schemas/`; every component that reads or writes one runs contract tests against it. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run; app backend lines outside a run (login, chat list) carry `request-id` instead. | Shared formats can't drift silently; one task can be followed across every component. |
 | D9 | Traces record the time between calls (tool time) and the replayer reproduces it. | Otherwise replays put more load on the system than real agents. |
+| D13 | One chat message = one run. Step 1 picks the scenario (enum structured output: `csv`, `contracts`, `support`, `out_of_scope`); later steps see only that scenario's tools. Step 1 sends a default `expected-steps` from `config/`; the run tracker updates it once the scenario is picked. The app backend sends attached files with the run request; the agent runtime keeps them for that run only (size limit in `config/`), and tools take them as enum IDs. History = user messages + final answers, capped by a token budget in `config/`; when over budget the oldest half is dropped. No chat-level header: turn-to-turn cache reuse relies on the stable prefix. | The model never chooses among all 9 tools at once; files never enter the 4096-token context; dropping in blocks keeps the prompt prefix stable across turns so prefix-cache hits survive. A header would change D1 and D12; add it only if experiments show turn-to-turn misses. Sending files with the request keeps the agent runtime unaware of the app. |
 
 ---
 
@@ -66,13 +67,14 @@ thesis/
 ├── versions.md          # every pinned version + machine setup
 ├── Makefile             # up, down, test, smoke, replay, experiment
 ├── config/              # profiles: real.yaml, sim.yaml, demo.yaml (D11)
-├── schemas/             # versioned JSON schemas: headers, trace (D12)
+├── schemas/             # versioned JSON schemas: headers, trace, run request (D12)
 ├── infra/               # WSL2/k3s setup scripts, Helm values, manifests
 ├── gateway/             # Go: Endpoint Picker scheduling plugin
 ├── agent/               # Python/FastAPI: agent runtime, tools, run tracker
+├── app/                 # Python/FastAPI + SQLite: users, sessions, chats, attachments (D7)
 ├── loadgen/             # Python: trace recorder, replayer, converters
 ├── sim/                 # simulator config + calibration data
-├── ui/                  # Angular demo app
+├── ui/                  # Angular app: login, chats, step view, infrastructure page
 ├── experiments/         # scripts, configs, results (CSV), graphs, log.md
 └── docs/thesis/         # chapters
 ```
@@ -141,7 +143,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 
 | ID | Track | Task | Done when |
 |---|---|---|---|
-| P2.1 | Routing | Tools for 3 demo scenarios (D10): CSV analysis (`csv_summary`, `group_by`, `compare`), contracts (`read_document`, `extract_clauses`, `diff_clauses`), support (`get_order`, `get_policy`, `draft_reply`); enum arguments, structured outputs, parallel tool calls | Each tool has a unit test; the contracts task reads documents in parallel |
+| P2.1 | Routing | Tools for 3 demo scenarios (D10): CSV analysis (`csv_summary`, `group_by`, `compare`), contracts (`read_document`, `extract_clauses`, `diff_clauses`), support (`get_order`, `get_policy`, `draft_reply`); enum arguments, structured outputs, parallel tool calls; files come from the run request by ID (D13) | Each tool has a unit test; the contracts task reads documents in parallel |
 | P2.2 | Routing | Call recorder: every LLM call logged (run-id, step, prompt tokens, pod, TTFT, duration, gap since previous call) | A run produces one JSONL line per call with all fields |
 | P2.3 | Routing | Trace format + replayer: arrival patterns (steady, burst), inter-call gaps (D9), fixed seed | Replaying 20 recorded runs reproduces the same call sequence and gaps twice in a row |
 | P2.4 | Routing | AgentProcessBench converter to the trace format; `expected-steps` per task type derived from recorded runs (D1) | Converted traces pass the schema check; replayer runs them |
@@ -150,6 +152,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P2.7 | Autoscaling | Simulator (llm-d-inference-sim) deployed as a pool backend | Replayer runs against simulated pods through the same gateway |
 | P2.8 | Autoscaling | Calibration on the real 0.6B: TTFT and per-token time vs concurrency, cached vs uncached prefill, cold start time (D4) | Calibration table saved in `sim/`; simulator configured from it |
 | P2.9 | Autoscaling | Validation: same replay on 1 real pod vs 1 simulated pod | Error within ~10–15%, table saved; if not, recalibrate |
+| P2.10 | App | App backend skeleton: FastAPI + `sqlite3`, schema (users, sessions, chats, messages, attachments), register/login/logout, `hashlib.scrypt`, session cookie with TTL from config (D7); Deployment + PVC in `infra/` | pytest: register → login → authorized request passes; wrong password and expired session rejected; data survives a pod restart; `make down && make up` keeps users and chats, `make reset-app` wipes them |
 
 **Gate 2:** baseline experiment regenerates from one command; simulator validated.
 
@@ -164,10 +167,12 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P3.5 | Routing | Overload guard: spill when the pinned pod's queue passes a threshold; remap only if sustained (hysteresis) | Tests cover spike vs sustained overload; no remap on a short spike |
 | P3.6 | Routing | Parallel calls: same `parallel-group` stays on the pod if it has room, otherwise spills | Tests pass; burst replay shows spill only under overload |
 | P3.7 | Routing | Burst replay vs default picker | p95 latency not worse than default under overload; result in CSV |
-| P3.8 | Autoscaling | Run tracker (D2) in runtime and replayer exports remaining work | Test: metric equals Σ(expected-steps − step) for a known set of runs; ended runs drop out |
+| P3.8 | Autoscaling | Run tracker (D2) in runtime and replayer exports remaining work | Test: metric equals Σ(expected-steps − step) for a known set of runs; ended runs drop out; updating a run's expected-steps after its first step (D13) changes the metric |
 | P3.9 | Autoscaling | KEDA ScaledObject on remaining work (simulated pool) | Burst replay: scale-up starts before the queue passes the threshold |
 | P3.10 | Autoscaling | Baselines: HPA on CPU, KEDA on queue depth | Both run on the same replay; results in CSV |
 | P3.11 | UI | Angular: infrastructure panel (pods, queues, remaining work) | Panel numbers match Grafana |
+| P3.12 | App | Chats, messages, attachments API; one message → one agent-runtime call with files in the request (`schemas/run-request`, D12, D13); `run_id` stored on the assistant message; steps fetched from the agent runtime by `run_id` | pytest with mocked runtime passes; run-request contract tests pass in app and agent; a real message through every layer returns an answer and its run_id; another user's chat returns 404; `make smoke` goes through the app backend |
+| P3.13 | UI | Angular: login/register, chat list, open chat with file attach; step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons on a separate infrastructure page | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
 
 **Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work.
 
@@ -182,6 +187,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P4.5 | Autoscaling | Real-hardware validation (D5): CPU HPA vs KEDA queue vs remaining work at 1↔2 real vLLM pods | Same ranking as on the simulator, or the difference explained in `experiments/log.md` |
 | P4.6 | UI | Angular: demo buttons ("start 20 tasks", "kill pod") | Buttons trigger the replayer and pod deletion |
 | P4.7 | Demo | Practical task suite: each of the 3 demo scenarios run 10 times on the demo model | Every scenario ≥9/10 correct; success table saved in `experiments/` (goes into the thesis as proof of practical use) |
+| P4.8 | App | Agent: routing step + context slicing (D13); tokens counted via vLLM `/tokenize`; the routing step and the tool steps share one prompt prefix so affinity (P3.3) lands on a matching cache; demo traces re-recorded afterwards so replays include the routing step | Tests: out-of-scope message gets a fixed reply with no tool call; history never exceeds the budget; prompt prefix identical across turns until a drop; steps 1..n of a run share the prefix up to the tool list; P4.7 runs through the chat path |
 
 **Gate 4 = feature freeze (Sun 22.11).** Everything works end to end. From here on, only bug fixes.
 
@@ -200,6 +206,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 
 - Mon 30.11: full draft to mentor (Checkpoint 3).
 - Fixes from mentor feedback, chapter 7, second demo rehearsal.
+- UI polish: loading, error and out-of-scope states, consistent layout. Done when the P5.4 rehearsal shows no raw errors or stuck spinners.
 - **Wed 9.12: mentor uploads the final text.**
 
 ### Phase 7: Procedure and defense (10–18.12)
