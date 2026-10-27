@@ -53,8 +53,20 @@ apt packages come from Ubuntu 24.04 and are recorded here, not pinned: Ubuntu dr
 | ruff | 0.17.0 | uv.lock |
 | mypy | 2.4.0 | uv.lock |
 | types-jsonschema | 4.26.0.20261006 | uv.lock |
+| types-PyYAML | 6.0.12.20260906 | uv.lock (P1.3a-1: stubs for mypy strict) |
+| anyio | 4.15.1 | uv.lock (P1.3a-1: its pytest plugin runs the async agent tests; also a dependency of httpx) |
 | pytest | 9.1.1 | uv.lock |
-| jsonschema | 4.26.0 | uv.lock |
+
+## Python runtime packages
+
+Pinned in each component's `pyproject.toml` and in `uv.lock`; each pin is the newest release at least two weeks old
+on the day it was added. Packages they pull in are pinned by `uv.lock` only.
+
+| Package | Version | Component, added in |
+|---|---|---|
+| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06) |
+| jsonschema | 4.26.0 | agent, P1.3a-1 (tool-call checks, D10); a dev tool since P0.0, runtime since P1.3a-1 |
+| PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles) |
 
 ## Container and cluster
 
