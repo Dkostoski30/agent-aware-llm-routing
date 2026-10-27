@@ -32,3 +32,30 @@ monitoring:
   # from it. 5 s: a request took 6-9 s under load (P0.4), so a queue that builds and drains within one request is
   # still seen; the Prometheus Operator default of 30 s would hide it.
   scrape_interval_seconds: 5
+# Agent runtime (P1.3a).
+agent:
+  # The model calls a tool or answers in plain text, like a real agent; the runtime checks every call and retries
+  # invalid ones, so the recorded traffic keeps the shape of real agent traffic (D10).
+  tool_choice: auto
+  # Safety cap only (D1): about 3x the 3 calls the calculator task needs, so a model that keeps calling tools is
+  # stopped well before it fills max_model_len.
+  max_steps: 10
+  # First guess, not measured: a run with three invalid calls (per run, not in a row) is not converging. P1.6b counts
+  # the real retries per run.
+  max_invalid_calls: 3
+  # The calculator task: two tool calls and the answer. P2.4 replaces it with a value per task type from recorded
+  # runs (D1); D13 updates it once the scenario is picked.
+  expected_steps_default: 3
+  # Bounds a stuck call, not a latency target: P0.4 measured p95 9.5 s with 4 requests in flight per replica, so a
+  # call over 120 s means the pod is not answering.
+  llm_timeout_seconds: 120
+  # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
+  sampling:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+  # The same text in every profile, so recorded traces (real, sim) carry the prompt the demo sends. "Give the final
+  # answer" fits both D10 modes: in required the model sees a final_answer tool, in auto it answers in text.
+  system_prompt: |
+    You are a calculator agent. Use the calculator tool for every arithmetic operation, one operation per call.
+    When you know the result, give the final answer.
