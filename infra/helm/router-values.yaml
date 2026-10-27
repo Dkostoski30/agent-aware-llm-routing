@@ -1,0 +1,33 @@
+# llm-d-router-gateway chart v0.11.0 (P1.2). Release vllm-pool creates the InferencePool vllm-pool over the vLLM pods
+# and its Endpoint Picker (EPP) vllm-pool-epp. The EPP runs the chart's default scheduling profile (queue,
+# KV-cache and prefix-cache scorers), the "default picker" baseline; P3.1 replaces the image with a self-built one.
+router:
+  modelServers:
+    # The labels of the vllm chart's pods (infra/charts/vllm/templates/deployment.yaml).
+    matchLabels:
+      app.kubernetes.io/name: vllm
+    # vLLM's port in the pods (infra/charts/vllm/templates/service.yaml).
+    targetPorts:
+      - number: 8000
+  inferencePool:
+    # The chart default FailOpen lets the gateway pick a pod itself when the EPP does not answer. A request that
+    # bypasses the picker would count in a routing experiment as if the picker had chosen, so a picker failure must
+    # fail the request instead.
+    failureMode: FailClose
+  epp:
+    image:
+      # Pinned by digest, so P3.1 compares its self-built picker against exactly this image.
+      tag: v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf
+    flags:
+      # 3 (VERBOSE) is the lowest level that logs "Request handled" with the chosen endpoint
+      # (pkg/epp/requestcontrol/director.go in llm-d-router v0.11.0); infra/checks/gateway_check.sh reads it.
+      v: 3
+    # The chart requests 8 CPUs and 8Gi, sized for large GPU clusters; that can never be scheduled next to two vLLM
+    # pods in the 10 GB WSL VM. Requests only reserve capacity; the EPP's real use is measured in P1.2
+    # (experiments/log.md). The chart's 16Gi memory limit stays: it is larger than the VM, so the EPP runs without an
+    # effective limit, like the vLLM pods. A guessed lower limit could OOM-kill the picker when its prefix index grows
+    # under load, and with FailClose that would fail every request of an experiment.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi

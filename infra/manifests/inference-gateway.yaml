@@ -1,0 +1,77 @@
+# The Gateway every LLM call goes through (P1.2). agentgateway serves it; the HTTPRoute sends /v1 to the InferencePool
+# vllm-pool (infra/helm/router-values.yaml), whose Endpoint Picker chooses the vLLM pod for each request.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: inference-gateway
+  namespace: default
+spec:
+  logging:
+    # One JSON object per line, so the checks (and the call recorder, P2.2) read the access log with jq.
+    format: json
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: inference-gateway
+  # Same namespace as the InferencePool, which must live next to the vLLM pods it selects.
+  namespace: default
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: inference-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# No request timeout: agentgateway sets none by default, and the agent runtime bounds each call with
+# agent.llm_timeout_seconds from config/ (P1.3a), so a busy pod's slow answer is not cut off here first.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vllm
+  namespace: default
+spec:
+  parentRefs:
+    - name: inference-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: vllm-pool
+---
+# Adds the D1 headers to every access-log line under the log keys of D12 (run-id, as in the agent's logs), so lines
+# of one run join across components on the same keys; a header the request does not carry is left out of the line.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: inference-gateway-access-log
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: inference-gateway
+  frontend:
+    accessLog:
+      attributes:
+        add:
+          - name: run-id
+            expression: 'request.headers["x-run-id"]'
+          - name: step
+            expression: 'request.headers["x-step"]'
+          - name: expected-steps
+            expression: 'request.headers["x-expected-steps"]'
+          - name: parallel-group
+            expression: 'request.headers["x-parallel-group"]'

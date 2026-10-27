@@ -13,6 +13,73 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-27 · P1.2 · green
+Command: `make down && make up` · `make gateway-check` · `kubectl top pods -A` · `kubectl top nodes`, one sequence
+on a fresh cluster with the final files (16:21 UTC, after the review fixes below)
+Result:
+- `make up` exit 0: CRDs applied; the three charts pulled by digest (`agentgateway-crds@sha256:dd7f965d…`,
+  `agentgateway@sha256:d3edf2b3…`, `llm-d-router-gateway@sha256:63a79a84…`); `agentgateway` (agentgateway-system),
+  `inference-gateway` and `vllm-pool-epp` (default) Running next to both vLLM pods.
+- `make gateway-check` OK, about a minute after the proxy rolled out (cold Gateway): 21 requests, 9 to
+  vllm-5fff45f674-gcsrk and 12 to vllm-5fff45f674-ldld8. The header request's access-log line carries
+  `"run-id":"p12-check","step":"1","expected-steps":"1"`, endpoint `10.42.0.13:8000` and `"duration":"95ms"`; no
+  `parallel-group`, as the request sent none. `vllm-pool-epp logged 21 choices for 21 requests`.
+- `kubectl top` (same run): agentgateway controller 3m / 63Mi, inference-gateway proxy 2m / 50Mi, vllm-pool-epp
+  229m / 63Mi; gateway total 176Mi. vLLM pods 226m / 2737Mi and 517m / 2742Mi. Grafana 674Mi, Prometheus 430Mi.
+  Node: 1337m CPU (8%), 8854Mi memory (89%).
+- The run before the review fixes (16:01 UTC, also cold) passed the same way: 10/11, 66ms, gateway total 169Mi.
+Notes:
+- The EPP is the busiest pod outside vLLM at idle (177m and 229m CPU in the two runs): its `metrics-data-source` plugin scrapes every pod's `/metrics` on
+  a short interval, and `--v=3` logging adds to it. Negligible at 2 pods; in the simulator experiments (P2.7+) the
+  scrape cost grows with the pod count, so measure it there instead of assuming it stays small.
+- Memory headroom: Grafana and Prometheus together (1.1Gi) use more than the whole gateway stack. If P1.3b
+  (agent + Redis) runs short of RAM, they are the first place to look.
+- Review fixes between the two runs (fresh-eyes review, 2026-10-27): the access log uses the D12 keys `run-id`, `step`,
+  `expected-steps`, `parallel-group`; the check also matches `step` and `expected-steps`; its prompts are one fixed
+  short prompt, below the EPP's 64-token prefix-cache block, so only the queue and KV-cache scorers decide; charts
+  are installed by digest; comments in `down.sh`, `router-values.yaml` and `gateway_check.sh` corrected.
+- The first `make gateway-check` of the day, ~90 s after the proxy rolled out, failed: 3 requests timed out at 60 s, later
+  batches took 13 s and 30 s, the last ones 0.1-3 s. The EPP picked every pod in ~10 ms and vLLM showed
+  `Running: 0 reqs` throughout, so the time was lost in the proxy between the pick and vLLM. In the same minutes the
+  agentgateway controller lost its leader lease 3 times (`Failed to renew lease ... context deadline exceeded`,
+  `leader election lost`), and the proxy logged xDS `Connection refused` while the controller restarted: the k3s
+  API server stalled again (same family as P0.7 and P1.1). The warm re-run passed, and so did both cold runs above.
+  Open: the stall is intermittent, so two cold passes don't rule it out; P1.5 runs right after `make up` and will
+  show whether it needs a wait for a warm Gateway.
+- The first check also had a bug: the EPP logs OpenTelemetry-style JSON (`body`, `timestamp`), not zap's
+  `msg`/`ts`. Fixed in `gateway_check.sh`; the `zap-devel` flag added for it was removed.
+
+### 2026-10-27 · P1.2 spike · done
+Command: read the release pages and the tagged source (shallow clones) of gateway-api-inference-extension,
+llm-d-router, kgateway, agentgateway and envoyproxy/gateway; `helm show` of the published charts; a ghcr.io manifest
+lookup for the EPP image.
+Result:
+- Since GAIE v1.6.0 (2026-08-17) the full Endpoint Picker lives in `llm-d/llm-d-router`; GAIE keeps only the
+  InferencePool API, a conformance-only lightweight EPP (`lwepp`) and the conformance tests.
+- llm-d-router v0.11.0 (2026-09-27): built on GAIE v1.5.0. Chart `oci://ghcr.io/llm-d/charts/llm-d-router-gateway`
+  v0.11.0 (chart digest `sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0`), image
+  `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0`. v1.0.0 (2026-10-16) is 11 days old and fails the
+  two-week rule.
+- Plugins: a rule is a Go `Scorer` (`Score(ctx, request, pods) map[Endpoint]float64`) registered with
+  `plugin.Register(type, stability, factory)` and enabled in a YAML scheduling profile. A custom plugin needs a
+  self-built EPP image (as P3.1 planned).
+- llm-d-router already ships `sessionaffinity` and `headerlabelaffinity` scorers: related work for chapter 2,
+  and P3.3 has to differ from them.
+- kgateway removed InferencePool support in v2.3.0 (2026-05-15); only the 2.2 line (GAIE v1.1.0, last release
+  2026-07-13) has it. Envoy Gateway v1.9.2 has InferencePool only in an example extension server.
+- agentgateway v1.6.0 (2026-10-02): native InferencePool, built and conformance-tested against GAIE v1.6.2,
+  `inferenceExtension.enabled` in its chart, controller requests 128Mi.
+- The InferencePool v1 fields the router and agentgateway use (`selector`, `targetPorts`, `endpointPickerRef`)
+  are the same in the GAIE v1.5.0 and v1.6.2 CRDs.
+- Gateway API: v1.6.3 (2026-10-06) is the newest release at least two weeks old.
+Notes:
+- Decided with the user: llm-d-router v0.11.0 in gateway mode, agentgateway v1.6.0, GAIE CRDs v1.6.2, Gateway API
+  CRDs v1.6.3 (standard channel). If the v0.11.0 EPP and agentgateway don't work together, the fallback is
+  llm-d-router v1.0.0, made for GAIE v1.6.2, recorded as an exception to the two-week rule.
+- RAM was not measured: it needs the install, so it moved into P1.2's done-when.
+- PLAN.md's P1.2 row named Envoy Gateway or kgateway; neither supports InferencePool any more (brick wall in
+  PLAN.md section 4).
+
 ### 2026-10-26 · P1.1 · green
 Command: `make up` · `kubectl get pods -n monitoring` · `make service-check` · `make grafana`, dashboard `thesis-vllm`
 Result:
