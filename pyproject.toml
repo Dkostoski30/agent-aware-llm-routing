@@ -4,16 +4,25 @@ version = "0.1.0"
 description = "LLM call routing and vLLM autoscaling on Kubernetes (FCSE bachelor thesis)"
 # The Python that Ubuntu 24.04 ships; uv uses it instead of downloading another one.
 requires-python = "==3.12.*"
-dependencies = []
+# The components, so one uv sync installs what every test needs.
+dependencies = ["agent"]
+
+[tool.uv.workspace]
+members = ["agent"]
+
+[tool.uv.sources]
+agent = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "jsonschema==4.26.0",
+    # Its pytest plugin runs the async agent tests; httpx depends on it too.
+    "anyio==4.15.1",
     "mypy==2.4.0",
     "pre-commit==4.6.2",
     "pytest==9.1.1",
     "ruff==0.17.0",
     "types-jsonschema==4.26.0.20261006",
+    "types-pyyaml==6.0.12.20260906",
 ]
 
 [tool.uv]
@@ -23,8 +32,9 @@ package = false
 [tool.pytest.ini_options]
 # Test files in different components may share a basename (e.g. test_config.py) without clashing.
 addopts = ["--import-mode=importlib", "--strict-markers"]
-# importlib mode does not put a test's directory on sys.path; scripts tested in place are listed here.
-pythonpath = ["infra/checks"]
+# importlib mode does not put a test's directory on sys.path; scripts tested in place and the directories that hold
+# a component's package (agent/ is not installed, it has no build backend) are listed here.
+pythonpath = ["infra/checks", "agent"]
 
 [tool.ruff]
 target-version = "py312"
@@ -38,3 +48,5 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# Finds agent_runtime when pre-commit passes only a test file that imports it.
+mypy_path = "agent"
