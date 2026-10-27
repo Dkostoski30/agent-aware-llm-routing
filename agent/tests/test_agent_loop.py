@@ -35,6 +35,7 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_invalid_calls=MAX_INVALID_CALLS,
         expected_steps_default=3,
         llm_timeout_seconds=5,
+        history_ttl_seconds=60,
         sampling=Sampling(temperature=0.7, top_p=0.8, top_k=20),
         system_prompt=SYSTEM_PROMPT,
     )
@@ -350,3 +351,21 @@ async def test_llm_call_is_logged_with_duration_and_finish_reason(
         assert fields["duration_ms"] >= 0
     expected = ["tool_calls", "tool_calls" if mode == "required" else "stop"]
     assert [fields["finish_reason"] for fields in llm_calls] == expected
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_on_step_sees_every_step_that_leaves_the_run_going(mode: ToolChoice) -> None:
+    seen: list[tuple[int, int, list[dict[str, Any]]]] = []
+
+    async def on_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
+        seen.append((step, invalid_calls, messages))
+
+    llm = ScriptedLLM([calls(calc("pow", 2, 3)), calls(calc("multiply", 7, 8)), final(mode, "56")])
+    config = make_config(mode)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
+    ) as http:
+        result = await run_task(TASK, RUN_ID, 7, config, LLMClient(http, config), on_step)
+    assert result.status == "done"
+    assert [(step, invalid) for step, invalid, _ in seen] == [(1, 1), (2, 1)]
+    assert [messages for _, _, messages in seen] == [result.messages[:4], result.messages[:6]]

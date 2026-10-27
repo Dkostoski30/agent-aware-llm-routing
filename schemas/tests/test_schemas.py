@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = SCHEMAS_DIR / "examples"
-SCHEMA_NAMES = ["headers.v1", "trace.v1"]
+SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1"]
 REMOVE = object()
 
 
@@ -129,3 +129,21 @@ def test_header_rules(field: str, value: object, accepted: bool) -> None:
 def test_trace_rules(field: str, value: object, accepted: bool) -> None:
     line = with_change(valid_example("trace.v1"), field, value)
     assert validator_for("trace.v1").is_valid(line) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("seed", REMOVE, True),
+        ("seed", 0, True),
+        ("task", REMOVE, False),
+        ("task", "", False),
+        ("task", 7, False),
+        ("seed", "7", False),
+        ("seed", 1.5, False),
+        ("max_steps", 5, False),
+    ],
+)
+def test_run_request_rules(field: str, value: object, accepted: bool) -> None:
+    request = with_change(valid_example("run-request.v1"), field, value)
+    assert validator_for("run-request.v1").is_valid(request) is accepted

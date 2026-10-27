@@ -67,6 +67,9 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 | httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06) |
 | jsonschema | 4.26.0 | agent, P1.3a-1 (tool-call checks, D10); a dev tool since P0.0, runtime since P1.3a-1 |
 | PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles) |
+| fastapi | 0.143.0 | agent, P1.3a-2 (run API: POST /runs, GET /runs/{id}, /healthz; 2026-10-08). Pulls in starlette 1.10.0 and pydantic 2.14.1, pinned by uv.lock |
+| uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25) |
+| redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
 
 ## Container and cluster
 

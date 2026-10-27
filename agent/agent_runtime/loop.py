@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -26,6 +27,10 @@ logger = logging.getLogger(__name__)
 # an answer (D10).
 TOOL_CALL_MARKER = "<tool_call>"
 
+# Awaited with (step, invalid_calls, messages) after every step that leaves the run going, so the
+# service can save the history before the next call (D7).
+StepCallback = Callable[[int, int, list[dict[str, Any]]], Awaitable[None]]
+
 
 @dataclass(frozen=True)
 class RunResult:
@@ -38,16 +43,21 @@ class RunResult:
     messages: list[dict[str, Any]]
 
 
+def initial_messages(task: str, config: AgentConfig) -> list[dict[str, Any]]:
+    """The history a run starts from: the system prompt and the task."""
+    return [
+        {"role": "system", "content": config.system_prompt},
+        {"role": "user", "content": task},
+    ]
+
+
 class _Run:
     """State of one run while the loop works on it."""
 
     def __init__(self, run_id: str, task: str, config: AgentConfig) -> None:
         self.run_id = run_id
         self.config = config
-        self.messages: list[dict[str, Any]] = [
-            {"role": "system", "content": config.system_prompt},
-            {"role": "user", "content": task},
-        ]
+        self.messages = initial_messages(task, config)
         # Number of LLM calls sent so far; 0 on the lines logged before the first call.
         self.step = 0
         self.invalid_calls = 0
@@ -80,7 +90,12 @@ def _tool_message(call_id: str, content: dict[str, Any]) -> dict[str, Any]:
 
 
 async def run_task(
-    task: str, run_id: str, seed: int | None, config: AgentConfig, llm: LLMClient
+    task: str,
+    run_id: str,
+    seed: int | None,
+    config: AgentConfig,
+    llm: LLMClient,
+    on_step: StepCallback | None = None,
 ) -> RunResult:
     run = _Run(run_id, task, config)
     # final_answer ends the run in required mode; in auto mode a plain text answer does (D10).
@@ -154,4 +169,7 @@ async def run_task(
             if name == FINAL_ANSWER:
                 return run.finish(answer=arguments["answer"])
             run.messages.append(_tool_message(call["id"], calculator(**arguments)))
+        if on_step is not None:
+            # A copy: the loop keeps appending to run.messages while the callback's caller holds it.
+            await on_step(run.step, run.invalid_calls, list(run.messages))
     return run.finish(error=f"{config.max_steps} calls without an answer (agent.max_steps)")
