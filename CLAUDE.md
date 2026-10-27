@@ -9,7 +9,7 @@ The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one tas
 ## Environment
 - Windows + WSL2, RTX 3050 4GB, 16GB RAM. All commands run inside WSL2.
 - Model: Qwen3-0.6B-GPTQ-Int8 for experiments and the infrastructure demo; Qwen3-1.7B-GPTQ-Int8 as a single replica for the practical demo (the 4B didn't fit, P0.3). Thinking mode off.
-- Agent tools are high-level and deterministic: Python computes, the model only orchestrates. Tool arguments are enums where possible; tool calls use vLLM structured outputs (D10).
+- Agent tools are high-level and deterministic: Python computes, the model only orchestrates. Tool arguments are enums where possible; `agent.tool_choice` in `config/` picks `required` (vLLM structured outputs + a `final_answer` tool) or `auto` (the runtime validates calls and retries invalid ones) (D10).
 - Every LLM call carries headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`. Agent LLM calls are non-streaming. Run history lives in Redis; users, sessions, chats, messages and attachments live in SQLite in the app backend (D7).
 - Autoscaling experiments run on simulated pods (llm-d-inference-sim) calibrated from the real GPU, including cold start; validated on real vLLM at 1↔2 pods.
 - Pinned versions live in `versions.md`. Never upgrade anything without being asked.
