@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/run-request.v1.json",
+  "title": "Run request v1",
+  "description": "Body of POST /runs on the agent runtime: one task to run (D12, D13).",
+  "type": "object",
+  "properties": {
+    "task": {
+      "description": "What the user asked, as the first user message of the run.",
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "description": "Sampling seed sent with every LLM call of the run, so a run can be repeated; absent for random sampling.",
+      "type": "integer"
+    }
+  },
+  "required": ["task"],
+  "additionalProperties": false
+}

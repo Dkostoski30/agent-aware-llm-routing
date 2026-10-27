@@ -49,6 +49,10 @@ agent:
   # Bounds a stuck call, not a latency target: P0.4 measured p95 9.5 s with 4 requests in flight per replica, so a
   # call over 120 s means the pod is not answering.
   llm_timeout_seconds: 120
+  # How long Redis keeps a run's metadata and messages (D7). 24 h covers a whole demo or experiment day, so the
+  # chat's step view (P3.13) still shows the steps of that day's runs; older chats keep their answers (SQLite) but
+  # lose their steps. Redis has no persistence, so a restart drops the history earlier anyway.
+  history_ttl_seconds: 86400
   # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
   sampling:
     temperature: 0.7

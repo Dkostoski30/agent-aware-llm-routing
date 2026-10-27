@@ -26,6 +26,7 @@ class AgentConfig:
     max_invalid_calls: int
     expected_steps_default: int
     llm_timeout_seconds: float
+    history_ttl_seconds: int
     sampling: Sampling
     system_prompt: str
 
@@ -45,6 +46,7 @@ def load_config(path: Path) -> AgentConfig:
         max_invalid_calls=agent["max_invalid_calls"],
         expected_steps_default=agent["expected_steps_default"],
         llm_timeout_seconds=agent["llm_timeout_seconds"],
+        history_ttl_seconds=agent["history_ttl_seconds"],
         sampling=Sampling(**agent["sampling"]),
         system_prompt=agent["system_prompt"],
     )
