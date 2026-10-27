@@ -1,0 +1,7 @@
+# agentgateway chart v1.6.0 (P1.2): the controller that turns the Gateway in infra/manifests/inference-gateway.yaml
+# into a proxy Deployment. Everything not set here keeps the chart default.
+
+# Lets the controller route an HTTPRoute to an InferencePool by asking the pool's Endpoint Picker for the pod.
+# Off by default in the chart.
+inferenceExtension:
+  enabled: true

@@ -10,6 +10,8 @@ repos:
         # Helm templates are YAML only after helm renders them ({{- if ... }} lines); make vllm-deploy renders
         # and applies them, so a broken template fails there.
         exclude: ^infra/charts/[^/]+/templates/
+        # Kubernetes manifests keep related objects in one file, separated by --- (infra/manifests/, P1.2).
+        args: [--allow-multiple-documents]
       - id: check-json
 
   - repo: local
