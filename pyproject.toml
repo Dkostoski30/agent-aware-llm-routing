@@ -34,7 +34,7 @@ package = false
 addopts = ["--import-mode=importlib", "--strict-markers"]
 # importlib mode does not put a test's directory on sys.path; scripts tested in place and the directories that hold
 # a component's package (agent/ is not installed, it has no build backend) are listed here.
-pythonpath = ["infra/checks", "agent"]
+pythonpath = ["infra/checks", "agent", "experiments"]
 
 [tool.ruff]
 target-version = "py312"
@@ -48,5 +48,5 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Finds agent_runtime when pre-commit passes only a test file that imports it.
-mypy_path = "agent"
+# Finds agent_runtime and the experiment scripts when pre-commit passes only a test file that imports them.
+mypy_path = "agent:experiments"

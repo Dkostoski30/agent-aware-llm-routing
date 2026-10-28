@@ -75,6 +75,10 @@ agent:
   # max_model_len beside the prompt and the tool schemas (D13: only tool results enter the context). csv_summary
   # applies it to the columns it lists, one result row per column.
   max_result_rows: 20
+  # P1.6b scores a final answer as correct when a number in it is within this share of the expected value. 1% passes
+  # a tool result rounded to 3-4 significant digits (1,274.06 written as 1,274) and fails another group's value, which
+  # the go/no-go fixture keeps more than 1% from every answer (experiments/demo-go-no-go.yaml).
+  answer_tolerance: 0.01
   # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
   sampling:
     temperature: 0.7
