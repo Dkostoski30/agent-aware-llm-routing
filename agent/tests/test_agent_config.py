@@ -41,3 +41,8 @@ def test_profile_sets_the_file_and_result_limits(profile: str) -> None:
     assert config.max_files > 0
     assert config.max_result_rows > 0
     assert config.result_decimals >= 0
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+def test_profile_sets_the_events_poll_interval(profile: str) -> None:
+    assert load_config(CONFIG_DIR / f"{profile}.yaml").events_poll_seconds > 0

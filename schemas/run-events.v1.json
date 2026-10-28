@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/run-events.v1.json",
+  "title": "Run events v1",
+  "description": "The data of one server-sent event of GET /runs/{run_id}/events (D6, D12). The SSE event field names the kind: one run event first, one step event per step, one end event last. Field names follow trace.v1 and headers.v1.",
+  "oneOf": [
+    { "$ref": "#/$defs/run" },
+    { "$ref": "#/$defs/step" },
+    { "$ref": "#/$defs/end" }
+  ],
+  "$defs": {
+    "run_id": {
+      "description": "Same value as the x-run-id header of the run's calls.",
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_steps": {
+      "description": "Number of calls this task type usually needs (D1); an estimate, so a run may end before or after it.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "text_or_null": {
+      "type": ["string", "null"]
+    },
+    "run": {
+      "description": "Sent first: what the run is.",
+      "type": "object",
+      "properties": {
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "task": { "type": "string", "minLength": 1 },
+        "expected_steps": { "$ref": "#/$defs/expected_steps" },
+        "created_ms": {
+          "description": "Start of the run in milliseconds since the Unix epoch.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["run_id", "task", "expected_steps", "created_ms"],
+      "additionalProperties": false
+    },
+    "step": {
+      "description": "One LLM call that answered, with the tools it called and their results.",
+      "type": "object",
+      "properties": {
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "step": {
+          "description": "Same value as the x-step header of the call.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "expected_steps": { "$ref": "#/$defs/expected_steps" },
+        "content": {
+          "description": "The reply's text; null when it only called tools.",
+          "$ref": "#/$defs/text_or_null"
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "arguments": {
+                "description": "The call's arguments as JSON, or the raw text when the model wrote invalid JSON."
+              },
+              "result": {
+                "description": "What the tool returned, or the error the runtime sent back for an invalid call; null for final_answer, which ends the run instead.",
+                "type": ["object", "null"]
+              }
+            },
+            "required": ["name", "arguments", "result"],
+            "additionalProperties": false
+          }
+        },
+        "error": {
+          "description": "The error the runtime sent back when it rejected the reply (D10); null otherwise.",
+          "$ref": "#/$defs/text_or_null"
+        }
+      },
+      "required": ["run_id", "step", "expected_steps", "content", "tool_calls", "error"],
+      "additionalProperties": false
+    },
+    "end": {
+      "description": "Sent last, once the run is over; the stream closes after it.",
+      "type": "object",
+      "properties": {
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "status": { "enum": ["done", "failed"] },
+        "answer": { "$ref": "#/$defs/text_or_null" },
+        "error": { "$ref": "#/$defs/text_or_null" },
+        "steps": {
+          "description": "LLM calls the run sent.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "invalid_calls": { "type": "integer", "minimum": 0 },
+        "elapsed_ms": {
+          "description": "From the start of the run to its last save.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["run_id", "status", "answer", "error", "steps", "invalid_calls", "elapsed_ms"],
+      "additionalProperties": false
+    }
+  }
+}

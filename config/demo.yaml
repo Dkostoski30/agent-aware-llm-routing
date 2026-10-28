@@ -64,6 +64,10 @@ agent:
   # chat's step view (P3.13) still shows the steps of that day's runs; older chats keep their answers (SQLite) but
   # lose their steps. Redis has no persistence, so a restart drops the history earlier anyway.
   history_ttl_seconds: 86400
+  # How often GET /runs/{id}/events reads the run from Redis for new steps (P1.4b-1). A step is at least one LLM call,
+  # and a call on these models takes longer than this, so a step card lands at most a quarter second after its step is
+  # saved; the cost is one Redis GET per open stream per poll.
+  events_poll_seconds: 0.25
   # Files never enter the context (D13); this bounds the run's files key in Redis and the tables the runtime parses
   # and keeps for the run. The request body is read whole before this check, so it does not cap the request's size.
   # 1 MiB holds a CSV of ~20,000 short rows, far more than a demo question needs.

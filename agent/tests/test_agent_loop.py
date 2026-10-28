@@ -49,6 +49,7 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_files=2,
         max_result_rows=MAX_RESULT_ROWS,
         result_decimals=RESULT_DECIMALS,
+        events_poll_seconds=0.01,
     )
 
 
