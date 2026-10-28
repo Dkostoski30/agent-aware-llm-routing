@@ -13,6 +13,22 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.6 rerun for Gate 1 · green (go)
+Command: `make agent-deploy PROFILE=demo` · `kubectl delete pod -l app.kubernetes.io/name=vllm
+--field-selector=status.phase=Failed` · `make go-no-go`
+Result:
+- `make go-no-go`: 20 rows in `experiments/results/demo-go-no-go-1f9b63bc24ca-99df636ae969.csv` (agent
+  `thesis/agent:99df636ae969`). required 10/10 correct, 0 invalid calls; auto 8/10 correct, 1 invalid call. Go;
+  config/demo.yaml keeps agent.tool_choice required.
+- All 20 answers are word for word the ones of P1.6c (`0d822ba16e8e`), auto two-step wrong in both seeds as there.
+Notes:
+- The tag is not P1.6c's: P1.4b-1 added the events endpoint (app.py, config.py, events_poll_seconds). loop.py,
+  tools.py, csv_tools.py, llm.py and the system prompt are unchanged since P1.6c, so the model got the same requests;
+  this run ties the result to the code Gate 1 is tagged on.
+- The first `make smoke` after the deploy failed at prometheus: `vllm-9d9d6db6f-778ld` was left in phase Failed
+  (UnexpectedAdmissionError) after k3s restarted, the second time this happened. Open: a card so a restart costs no
+  manual delete.
+
 ### 2026-10-28 · P1.6d + P1.6e · red (no-go, both undone)
 Command: `make up PROFILE=demo` · `make go-no-go`, twice: with P1.6d and P1.6e, then with P1.6d alone
 Result:
