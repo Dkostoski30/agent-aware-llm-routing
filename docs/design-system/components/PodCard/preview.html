@@ -1,0 +1,20 @@
+<!-- @dsCard group="Cluster" height=640 width=420 subtitle="Ready, overloaded, starting, draining, killed" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PodCard</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-panel{width:400px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-panel"><section class="ag-psec"><div class="ag-pods">' + [{"name": "vllm-0", "state": "ready", "run": 3, "wait": 0, "kv": 41, "hit": 78, "note": "<b>2 runs</b> pinned: run-7f3a9c, run-c45e19"}, {"name": "sim-0", "state": "ready", "run": 8, "wait": 5, "kv": 92, "hit": 81, "note": "<b>Over its queue threshold</b> for 6 s, so new parallel calls spill. Pinned runs stay."}, {"name": "sim-2", "state": "starting", "label": "Starting · 1:03", "boot": 38, "run": 0, "wait": 0, "kv": 0, "hit": 0, "note": "Simulated cold start, calibrated on the real pod. Takes new runs first once Ready (warm-up routing)."}, {"name": "sim-3", "state": "draining", "run": 1, "wait": 0, "kv": 12, "hit": 59, "note": "<b>No new runs.</b> 1 run finishing (run-77d4f1, step 5 of 6). Removed when it ends, or when the drain timeout runs out in 1:30."}, {"name": "vllm-0", "state": "failed", "run": 0, "wait": 0, "kv": 0, "hit": 0, "note": "<b>Killed from the demo panel</b> 0:09 ago. Kubernetes is recreating it; its 2 runs moved to vllm-1."}].map(A.podCard).join('') + '</div></section></div>';
+</script>
+</body>
+</html>

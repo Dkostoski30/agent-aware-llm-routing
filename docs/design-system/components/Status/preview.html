@@ -1,0 +1,21 @@
+<!-- @dsCard group="Feedback" height=120 subtitle="Pod states: Ready, Starting, Draining, Killed" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px} .row{display:flex;gap:10px;align-items:center;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="row">' + A.status('ready') + A.status('starting') + A.status('starting', 'Starting · 1:03') + A.status('draining') + A.status('failed') + '</div>' +
+    '<div class="row"><i class="ag-dot ag-dot--ready"></i><i class="ag-dot ag-dot--starting"></i><i class="ag-dot ag-dot--draining"></i><i class="ag-dot ag-dot--failed"></i></div>';
+</script>
+</body>
+</html>

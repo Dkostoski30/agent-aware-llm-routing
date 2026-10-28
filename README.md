@@ -39,14 +39,14 @@ make reset-app   # wipe app users, chats and files (make down keeps them)
 
 ```
 config/        profiles: real, sim, demo
-schemas/       versioned JSON schemas: headers, trace, run request
+schemas/       versioned JSON schemas: headers, trace, run request, run events
 infra/         setup scripts, Helm values, manifests
 gateway/       Go Endpoint Picker plugin
 agent/         Python agent runtime, tools, run tracker
 app/           Python app backend + SQLite: users, sessions, chats, attachments
 loadgen/       trace recorder, replayer, converters
 sim/           simulator config and calibration
-ui/            Angular app: login, chats, step view, infrastructure page
+ui/            Angular app: login, chats, step view, cluster panel
 experiments/   experiment configs, results, graphs, log
-docs/          task cards, thesis outline
+docs/          task cards, design system (Tenax), thesis outline
 ```

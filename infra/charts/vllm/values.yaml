@@ -9,10 +9,11 @@ image: vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77
 # of the time-sliced nvidia.com/gpu slots. "runtime": ladder step 3, no GPU request, the nvidia runtime alone.
 gpuAccess: plugin
 
-# Where the HF cache filled by make vllm-run lives on the node; set by make vllm-deploy to $HOME/.cache/huggingface.
+# Where the HF cache filled by infra/download-model.sh lives on the node; set by make vllm-deploy to $HOME/.cache/huggingface.
 hfCacheHostPath: ""
 
 # Filled from config/<profile>.yaml by make vllm-deploy.
 replicas: 0
 model: {}
 pod: {}
+monitoring: {}

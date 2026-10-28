@@ -1,5 +1,9 @@
-# Sourced by vllm-run.sh (P0.3) and vllm-pair.sh (P0.4), so every local vLLM container starts the same way.
-# Every model setting comes from config/<profile>.yaml (D11); only the image pin lives here.
+# Sourced by vllm-run.sh (P0.3) and vllm-pair.sh (P0.4), so every local vLLM container starts the same way, and by
+# infra/download-model.sh (P1.0) for profile_value and HF_CACHE.
+# Every model setting comes from config/<profile>.yaml (D11), read through infra/profile.sh; only the image pin
+# lives here.
+
+source "$(dirname "${BASH_SOURCE[0]}")/../profile.sh"
 
 # Newest vLLM release at least two weeks old on 2026-10-26 (versions.md). The tag is for reading, the digest pins it.
 VLLM_IMAGE=vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
@@ -7,21 +11,7 @@ VLLM_IMAGE=vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f6
 # Port the OpenAI-compatible server listens on inside the container (vLLM's default).
 VLLM_CONTAINER_PORT=8000
 
-REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HF_CACHE=$HOME/.cache/huggingface
-
-# profile_value <profile> <yq path>: prints one value from the profile; fails if the profile or the key is missing.
-profile_value() {
-  local config=$REPO_ROOT/config/$1.yaml
-  if [[ ! -f $config ]]; then
-    echo "vllm: no profile $config" >&2
-    return 1
-  fi
-  if ! yq -e "$2" "$config"; then
-    echo "vllm: $2 missing in $config" >&2
-    return 1
-  fi
-}
 
 # vllm_serve_args <profile>: fills the array VLLM_ARGS with the vLLM server flags for the profile.
 vllm_serve_args() {

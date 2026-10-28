@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check up down smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke replay experiment go-no-go
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -73,8 +73,8 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # vLLM pods behind the Service vllm, values rendered from config/$(PROFILE).yaml (P0.7). k3s does not share
 # Docker's image store, so k3s pulls the image itself once (~9 GB). Copying it from Docker (docker save | ctr import)
 # crashed k3s: the 32 GB burst of writes starved k3s's SQLite datastore until a commit failed (experiments/log.md).
-# Needs the model in ~/.cache/huggingface (make vllm-run PROFILE=$(PROFILE) downloads it) and the vLLM containers
-# stopped.
+# Needs the model in ~/.cache/huggingface (infra/download-model.sh), the PodMonitor CRD (infra/install-monitoring.sh),
+# both run by make up, and the vLLM containers stopped.
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
@@ -84,7 +84,7 @@ vllm-deploy:
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
 	fi; \
-	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod}' config/$(PROFILE).yaml | \
+	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - \
 			--set hfCacheHostPath=$$HOME/.cache/huggingface; \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
@@ -95,14 +95,63 @@ vllm-deploy:
 service-check:
 	bash infra/checks/service_check.sh
 
+# Requests through the Gateway reach every vLLM pod, the access log carries the D1 headers and the Endpoint Picker
+# logs its choices (P1.2).
+gateway-check:
+	bash infra/checks/gateway_check.sh
+
+# Redis and the agent runtime, image built from the working tree, config from config/$(PROFILE).yaml (P1.3b).
+agent-deploy:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make agent-deploy PROFILE=real|sim|demo"; exit 2; fi
+	bash infra/deploy-agent.sh $(PROFILE)
+
+# A calculator task through the agent: right answer, every call in the Gateway's access log, history in Redis (P1.3b).
+agent-check:
+	bash infra/checks/agent_check.sh
+
+# The agent's API on http://localhost:8080 until Ctrl+C; the UI's dev server proxies /api to it (P1.4).
+agent-forward:
+	kubectl port-forward svc/agent 8080:8080
+
+# The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
+# forwarding; it proxies /api to make agent-forward (ui/proxy.conf.json). profile.json feeds the top bar's chip, so
+# PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
+ui:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make ui PROFILE=real|sim|demo"; exit 2; fi
+	cd ui && npm ci --no-audit --no-fund
+	yq -e -o json '{"profile": "$(PROFILE)", "model": (.model.name | split("/") | .[-1])}' config/$(PROFILE).yaml \
+		> ui/public/profile.json
+	cd ui && npx --no-install ng serve
+
+# The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
+# the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 up:
-	@echo "not implemented yet: P1.0"; exit 1
+	$(MAKE) vllm-stop
+	bash infra/install-k3s.sh
+	bash infra/install-monitoring.sh $(or $(PROFILE),real)
+	bash infra/download-model.sh $(or $(PROFILE),real)
+	$(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real)
+	bash infra/install-gateway.sh
+	bash infra/deploy-agent.sh $(or $(PROFILE),real)
 
+# Uninstalls what make up installs and stops k3s; keeps the k3s install, its images and the model cache (P1.0).
 down:
-	@echo "not implemented yet: P1.0"; exit 1
+	bash infra/down.sh
 
+# Grafana on http://localhost:3000 until Ctrl+C, also from a Windows browser through WSL's localhost forwarding;
+# anonymous users see the dashboards without a login (P1.1).
+grafana:
+	kubectl port-forward --namespace monitoring svc/monitoring-grafana 3000:80
+
+# 5 CSV questions x 2 seeds on the demo model in each D10 mode, scored, one CSV row per run in experiments/results/
+# (P1.6b). Needs make up PROFILE=demo; restarts the agent once per mode and puts config/demo.yaml back at the end.
+go-no-go:
+	uv run --locked python experiments/go_no_go.py experiments/demo-go-no-go.yaml
+
+# One calculator task through every layer on the current cluster, any profile: pods Ready, agent answer, Gateway
+# access log, Endpoint Picker picks, Redis history, Prometheus samples; stops at the first FAIL (P1.5).
 smoke:
-	@echo "not implemented yet: P1.5"; exit 1
+	@bash infra/checks/smoke.sh
 
 replay:
 	@echo "not implemented yet: P2.3"; exit 1

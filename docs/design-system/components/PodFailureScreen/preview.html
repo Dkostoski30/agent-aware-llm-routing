@@ -1,0 +1,27 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="P4.4 · a pod killed mid-run, the run continues" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PodFailureScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: Object.assign({"profile": "real", "model": "Qwen3-0.6B-GPTQ-Int8"}, { working: true }),
+    main: A.run({ head: {"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-7f3a9c", "type": "contracts", "step": 5, "expected": 5, "elapsed": "4.6 s", "segments": ["done", "done", "done", "done", "run"]},
+      tabs: [{ label: 'Answer', on: true }, { label: 'Steps', count: 5 }], composer: {"scenario": "Contracts", "placeholder": "Ask a follow-up", "disabled": true, "hint": "Available when the run finishes"},
+      blocks: [A.notice({"kind": "fail", "icon": "power", "html": "<b>vllm-0 was killed during step 4.</b> The call was retried on vllm-1 with the run's history from Redis. Steps 1 to 3 are not repeated."}),
+        A.steps([{"n": 1, "tool": "read_document ×2", "args": "contract_a, contract_b", "pod": "vllm-0", "cache": "miss", "ms": 820, "state": "done"}, {"n": 2, "tool": "extract_clauses", "args": "contract_a · termination", "pod": "vllm-0", "cache": "hit", "ms": 310, "par": "extract-1", "state": "done"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "vllm-0", "cache": "hit", "ms": 290, "par": "extract-1", "state": "done"}, {"n": 4, "tool": "diff_clauses", "args": "termination", "pod": "vllm-1", "cache": "miss", "ms": 1920, "state": "retried", "retry": 1, "note": "First attempt lost with vllm-0"}, {"n": 5, "tool": "answer", "args": "final message, no tool call", "pod": "vllm-1", "state": "running"}], 'moved to vllm-1 at step 4'), A.answer({"wait": "The answer appears when the last step finishes."})] }),
+    panel: {"live": "Live", "rw": {"value": 6, "runs": 3, "series": [4, 5, 5, 6, 8, 11, 12, 10, 9, 9, 8, 7, 7, 7, 7, 7, 7, 7, 6, 6], "reps": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1], "max": 14, "repMax": 2, "scale": "KEDA target <b>2</b> pods · 1 ready, vllm-0 being recreated"}, "pods": {"caption": "1 of 2 ready", "list": [{"name": "vllm-0", "state": "failed", "run": 0, "wait": 0, "kv": 0, "hit": 0, "note": "<b>Killed from the demo panel</b> 0:09 ago. Kubernetes is recreating it; its 2 runs moved to vllm-1."}, {"name": "vllm-1", "state": "ready", "run": 3, "wait": 1, "kv": 58, "hit": 52, "note": "<b>3 runs</b> pinned, 2 of them moved from vllm-0"}]}, "runs": {"caption": "nearest to done first", "rows": [{"rank": 1, "id": "run-7f3a9c", "type": "contracts", "step": 4, "exp": 5, "pod": "vllm-1", "you": true}, {"rank": 2, "id": "run-c45e19", "type": "support", "step": 3, "exp": 4, "pod": "vllm-1"}, {"rank": 3, "id": "run-2b81d0", "type": "csv_analysis", "step": 2, "exp": 6, "pod": "vllm-1"}]}, "flags": {"source": "config/real.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "vllm-1", "caption": "vllm-0 is gone; until it is back, only vllm-1 can be killed."}}
+  });
+</script>
+</body>
+</html>

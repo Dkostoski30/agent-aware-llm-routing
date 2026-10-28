@@ -35,3 +35,66 @@ routing:
   priority: false
   # Sends new runs to the newest pod right after scale-up (P4.2).
   warmup: false
+# Prometheus settings (P1.1).
+monitoring:
+  # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads
+  # from it. 5 s: a request took 6-9 s under load (P0.4), so a queue that builds and drains within one request is
+  # still seen; the Prometheus Operator default of 30 s would hide it.
+  scrape_interval_seconds: 5
+# Agent runtime (P1.3a).
+agent:
+  # vLLM constrains every call to the tool schemas and the run ends with final_answer: a malformed call is
+  # impossible, which the demo's correctness needs most (D10). P1.6b compares both modes on this model.
+  tool_choice: required
+  # Safety cap only (D1): 5x the 2 calls the calculator task needs, so a model that keeps calling tools is stopped
+  # well before it fills max_model_len.
+  max_steps: 10
+  # First guess, not measured: a run with three invalid calls (per run, not in a row) is not converging. P1.6b counts
+  # the real retries per run.
+  max_invalid_calls: 3
+  # The calculator task "What is 7 times 8?": one tool call and the answer. The 0.6B cannot chain two operations
+  # (P1.3b, experiments/log.md). P2.4 replaces it with a value per task type from recorded runs (D1); D13 updates it
+  # once the scenario is picked.
+  expected_steps_default: 2
+  # Carried over from real: P0.4's p95 of 9.5 s (4 requests in flight per replica) was measured on the 0.6B, and the
+  # 1.7B single replica is not measured under load yet (P1.6b). 120 s is still more than 10x that p95, so it bounds a
+  # stuck call, not a slow one.
+  llm_timeout_seconds: 120
+  # How long Redis keeps a run's metadata and messages (D7). 24 h covers a whole demo or experiment day, so the
+  # chat's step view (P3.13) still shows the steps of that day's runs; older chats keep their answers (SQLite) but
+  # lose their steps. Redis has no persistence, so a restart drops the history earlier anyway.
+  history_ttl_seconds: 86400
+  # How often GET /runs/{id}/events reads the run from Redis for new steps (P1.4b-1). A trade-off between delay and
+  # load: a step card lands at most this long after its step is saved, and every open stream reads the run's record
+  # and messages from Redis once per poll. Only the UI opens streams, one per run on screen.
+  events_poll_seconds: 0.25
+  # Files never enter the context (D13); this bounds the run's files key in Redis and the tables the runtime parses
+  # and keeps for the run. The request body is read whole before this check, so it does not cap the request's size.
+  # 1 MiB holds a CSV of ~20,000 short rows, far more than a demo question needs.
+  max_file_bytes: 1048576
+  # Every file adds its ID and its columns to the tool schemas sent with every call, which share the 4096-token
+  # context with the history; the demo attaches one or two.
+  max_files: 5
+  # First guess, not measured: a result row is ~20 tokens, so 20 rows is ~400 tokens and a few results fit in
+  # max_model_len beside the prompt and the tool schemas (D13: only tool results enter the context). csv_summary
+  # applies it to the columns it lists, one result row per column.
+  max_result_rows: 20
+  # CSV tool results are rounded to this many decimals before they enter the context: the model copies numbers as
+  # it sees them (P1.6b: "17.833333333333332"). 2 keeps money exact and means readable; the rounding error of 0.005
+  # stays inside the go/no-go's 1% tolerance for any value from 0.5 up.
+  result_decimals: 2
+  # P1.6b scores a final answer as correct when a number in it is within this share of the expected value. 1% passes
+  # a tool result rounded to 3-4 significant digits (1,274.06 written as 1,274) and fails another group's value, which
+  # the go/no-go fixture keeps more than 1% from every answer (experiments/demo-go-no-go.yaml).
+  answer_tolerance: 0.01
+  # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
+  sampling:
+    temperature: 0.7
+    top_p: 0.8
+    top_k: 20
+  # The same text in every profile, so recorded traces (real, sim) carry the prompt the demo sends. "Give the final
+  # answer" fits both D10 modes: in required the model sees a final_answer tool, in auto it answers in text.
+  system_prompt: |
+    You are a data analysis agent. For questions about the attached CSV files use the csv_summary, group_by and
+    compare tools; for any other arithmetic use the calculator tool, one operation per call. Every number in your
+    answer must come from a tool result. When you know the result, give the final answer.

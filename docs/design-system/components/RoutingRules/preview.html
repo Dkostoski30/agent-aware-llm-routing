@@ -1,0 +1,20 @@
+<!-- @dsCard group="Cluster" height=230 width=420 subtitle="Feature flags from the active profile" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RoutingRules</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-panel{width:400px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-panel">' + A.flags({"source": "config/real.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}) + '</div>';
+</script>
+</body>
+</html>

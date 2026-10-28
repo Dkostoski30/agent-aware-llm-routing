@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=900 width=640 subtitle="Step 3 of the contracts run" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StepDetail</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .frame{position:relative;height:900px;overflow:hidden}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="frame">' + A.stepDetail({"n": 3, "tool": "extract_clauses", "call": "{\n  \"name\": \"extract_clauses\",\n  \"arguments\": {\n    \"document\": \"contract_b\",\n    \"clause\": \"termination\"\n  }\n}", "result": "{\n  \"document\": \"contract_b\",\n  \"clause\": \"termination\",\n  \"notice_days\": 30,\n  \"cure_period_days\": 0,\n  \"text\": \"Either party may terminate this Agreement on thirty (30) days' written notice.\"\n}", "pod": "vllm-0", "why": "Pinned to <code class=\"ag-mono\">run-7f3a9c</code> by task affinity. Its parallel group had room, so it did not spill.", "cache": "hit", "cached": 1664, "tin": 1834, "tout": 92, "ttft": 88, "ms": 290, "gap": 42, "queue": "2 running", "headers": [["x-run-id", "run-7f3a9c"], ["x-step", "3"], ["x-expected-steps", "5"], ["x-parallel-group", "extract-1"]]}) + '</div>';
+</script>
+</body>
+</html>
