@@ -1,0 +1,22 @@
+<!-- @dsCard group="Actions" height=150 subtitle="Select, segmented, switch" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Controls</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:20px;color:var(--ink-muted);font:13px var(--font-sans)} .row{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML =
+    '<div class="row">' + A.select('Contracts') + A.select('vllm-0') + A.segmented(['steady', 'burst'], 'burst') + '</div>' +
+    '<div class="row"><i class="ag-switch ag-switch--on" role="switch" aria-checked="true" aria-label="on"></i><span>on</span><i class="ag-switch" role="switch" aria-checked="false" aria-label="off"></i><span>off</span></div>';
+</script>
+</body>
+</html>

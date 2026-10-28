@@ -1,0 +1,27 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="P4.6 · P3.6 · P3.9 · burst replay: spill, scale-up, cold start" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BurstScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: Object.assign({"profile": "sim", "model": "llm-d-inference-sim"}, { working: true }),
+    main: A.run({ head: {"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-a19e07", "type": "contracts", "step": 4, "expected": 5, "elapsed": "4.8 s", "segments": ["done", "done", "done", "run", ""]},
+      tabs: [{ label: 'Answer', on: true }, { label: 'Steps', count: 4 }], composer: {"scenario": "Contracts", "placeholder": "Ask a follow-up", "disabled": true, "hint": "Available when the run finishes"},
+      blocks: [A.notice({"kind": "warn", "icon": "warn", "html": "<b>Burst started.</b> 20 recorded tasks are replaying through the gateway (pattern <code>burst</code>, seed <code>42</code>). sim-0 passed its queue threshold, so step 3 spilled to sim-1."}),
+        A.steps([{"n": 1, "tool": "read_document ×2", "args": "contract_a, contract_b", "pod": "sim-0", "cache": "miss", "ms": 840, "state": "done"}, {"n": 2, "tool": "extract_clauses", "args": "contract_a · termination", "pod": "sim-0", "cache": "hit", "ms": 1240, "par": "extract-1", "state": "done"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "sim-1", "cache": "miss", "ms": 1610, "par": "extract-1", "state": "done", "spill": true, "note": "sim-0 was over its queue threshold"}, {"n": 4, "tool": "diff_clauses", "args": "termination", "pod": "sim-0", "state": "running"}, {"n": 5, "tool": "Expected: the answer", "state": "pending"}], 'step 3 spilled to sim-1'), A.answer({"wait": "The answer appears when the last step finishes."})] }),
+    panel: {"live": "Live", "rw": {"value": 61, "runs": 21, "series": [5, 5, 6, 6, 7, 7, 7, 8, 7, 7, 8, 9, 12, 25, 40, 52, 58, 63, 62, 61], "reps": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 4], "max": 70, "repMax": 4, "scale": "KEDA scaling <b>2 → 4</b> pods on remaining work"}, "pods": {"caption": "2 of 4 ready", "list": [{"name": "sim-0", "state": "ready", "run": 8, "wait": 5, "kv": 92, "hit": 81, "note": "<b>Over its queue threshold</b> for 6 s, so new parallel calls spill. Pinned runs stay."}, {"name": "sim-1", "state": "ready", "run": 8, "wait": 2, "kv": 78, "hit": 74}, {"name": "sim-2", "state": "starting", "label": "Starting · 1:03", "boot": 38, "run": 0, "wait": 0, "kv": 0, "hit": 0, "note": "Simulated cold start, calibrated on the real pod. Takes new runs first once Ready (warm-up routing)."}, {"name": "sim-3", "state": "starting", "label": "Starting · 0:05", "boot": 3, "run": 0, "wait": 0, "kv": 0, "hit": 0}]}, "runs": {"caption": "21 active · nearest to done first", "more": "+ 16 more", "rows": [{"rank": 1, "id": "run-a19e07", "type": "contracts", "step": 4, "exp": 5, "pod": "sim-0", "you": true}, {"rank": 2, "id": "run-0c7a13", "type": "support", "step": 3, "exp": 4, "pod": "sim-1"}, {"rank": 3, "id": "run-5e2b90", "type": "support", "step": 3, "exp": 4, "pod": "sim-0"}, {"rank": 4, "id": "run-77d4f1", "type": "csv_analysis", "step": 4, "exp": 6, "pod": "sim-1"}, {"rank": 5, "id": "run-31aa08", "type": "contracts", "step": 2, "exp": 5, "pod": "sim-0"}]}, "flags": {"source": "config/sim.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "sim-0", "busy": true, "caption": "Replay running: 7 of 20 finished · <code>make replay TRACE=demo PATTERN=burst</code>"}}
+  });
+</script>
+</body>
+</html>

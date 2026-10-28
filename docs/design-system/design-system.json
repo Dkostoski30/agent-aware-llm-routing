@@ -1,0 +1,50 @@
+{
+  "v": 3,
+  "assetGroups": {
+    "Logos": {
+      "name": "Logos",
+      "tile": "m",
+      "order": [
+        "tenax-horse-on-dark.svg",
+        "tenax-horse-on-light.svg"
+      ],
+      "files": {
+        "tenax-horse-on-dark.svg": {
+          "name": "tenax-horse-on-dark.svg",
+          "blob": "058634386d5e1cd2972516c34d13fdc5",
+          "size": 483,
+          "type": "image/svg+xml"
+        },
+        "tenax-horse-on-light.svg": {
+          "name": "tenax-horse-on-light.svg",
+          "blob": "178ae73432ead61b64c480d85db346f4",
+          "size": 483,
+          "type": "image/svg+xml"
+        }
+      }
+    }
+  },
+  "blobs": {},
+  "createdOnFiles": {
+    "at": "2026-10-26T17:37:25Z",
+    "v": 1
+  },
+  "docs": {
+    "readme": "project/README.md",
+    "sections": []
+  },
+  "groups": [
+    "Logos"
+  ],
+  "lastChange": {
+    "by": "Claude",
+    "at": "2026-10-26T18:02:48Z",
+    "via": "Claude Code",
+    "note": "Named Tenax; teal horse confirmed; still horse added as SVG logos; cover redrawn."
+  },
+  "layout": "files",
+  "libraries": [],
+  "namespace": "AgentUI",
+  "sections": {},
+  "title": "Tenax"
+}

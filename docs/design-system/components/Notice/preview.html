@@ -1,0 +1,23 @@
+<!-- @dsCard group="Feedback" height=230 subtitle="Info, overload, pod lost" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notice</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:0 20px 20px} .ag-section{margin-top:12px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML =
+    A.notice({ kind: 'info', icon: 'info', html: '<b>Replay finished.</b> 20 of 20 tasks completed; 0 interrupted by scale-down.' }) +
+    A.notice({ kind: 'warn', icon: 'warn', html: '<b>Burst started.</b> sim-0 passed its queue threshold, so step 3 spilled to sim-1.' }) +
+    A.notice({ kind: 'fail', icon: 'power', html: '<b>vllm-0 was killed during step 4.</b> The call was retried on vllm-1 with the run\'s history from Redis.' });
+</script>
+</body>
+</html>

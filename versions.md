@@ -53,8 +53,45 @@ apt packages come from Ubuntu 24.04 and are recorded here, not pinned: Ubuntu dr
 | ruff | 0.17.0 | uv.lock |
 | mypy | 2.4.0 | uv.lock |
 | types-jsonschema | 4.26.0.20261006 | uv.lock |
+| types-PyYAML | 6.0.12.20260906 | uv.lock (P1.3a-1: stubs for mypy strict) |
+| anyio | 4.15.1 | uv.lock (P1.3a-1: its pytest plugin runs the async agent tests; also a dependency of httpx) |
 | pytest | 9.1.1 | uv.lock |
-| jsonschema | 4.26.0 | uv.lock |
+
+## Python runtime packages
+
+Pinned in each component's `pyproject.toml` and in `uv.lock`; each pin is the newest release at least two weeks old
+on the day it was added. Packages they pull in are pinned by `uv.lock` only.
+
+| Package | Version | Component, added in |
+|---|---|---|
+| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06) |
+| jsonschema | 4.26.0 | agent, P1.3a-1 (tool-call checks, D10); a dev tool since P0.0, runtime since P1.3a-1 |
+| PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles) |
+| fastapi | 0.143.0 | agent, P1.3a-2 (run API: POST /runs, GET /runs/{id}, /healthz; 2026-10-08). Pulls in starlette 1.10.0 and pydantic 2.14.1, pinned by uv.lock |
+| uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25) |
+| redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
+
+## UI packages
+
+Pinned exactly in `ui/package.json` (P1.4a); packages they pull in are pinned by `ui/package-lock.json` only.
+`ng new` (Angular CLI 22.2.2) generated the first block with `^` ranges; each pin is the newest release at least two
+weeks old on 2026-10-28, so a few are one patch below what `ng new` installed. No UI library (D14).
+
+| Package | Version | Why |
+|---|---|---|
+| @angular/core, common, compiler, forms, platform-browser, router | 22.2.3 | `ng new` (2026-10-14) |
+| @angular/compiler-cli | 22.2.3 | `ng new`, matches the framework |
+| @angular/build, @angular/cli | 22.2.2 | `ng new`; same as the global Angular CLI (22.2.4 was 6 days old) |
+| typescript | 6.0.3 | `ng new` (`@angular/build` 22.2 takes >=6.0 <6.1) |
+| rxjs | 7.8.2 | `ng new` |
+| tslib | 2.8.1 | `ng new` |
+| vitest | 5.0.4 | `ng new`'s test runner (5.0.5 was 13 days old) |
+| jsdom | 30.1.2 | `ng new`, the DOM vitest runs in (30.1.3 was 13 days old) |
+| prettier | 3.9.10 | `ng new` |
+| angular-eslint | 22.6.0 | `ng add angular-eslint`, for the eslint pre-commit hook (P0.0) |
+| eslint | 10.12.0 | `ng add angular-eslint` (10.13.0 was 12 days old) |
+| @eslint/js | 10.0.1 | `ng add angular-eslint` |
+| typescript-eslint | 8.71.2 | `ng add angular-eslint` (8.72.0 was 9 days old) |
 
 ## Container and cluster
 
@@ -72,11 +109,14 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | NVIDIA device plugin (Helm chart `nvidia-device-plugin`) | 0.20.1, image `nvcr.io/nvidia/k8s-device-plugin:v0.20.1` (newest; reports the WSL2 GPU as one device `all` on `/dev/dxg`). Pinned in `infra/install-k3s.sh`. Time-slicing with 2 replicas since P0.7 (`infra/helm/device-plugin-values.yaml`): the node shows `nvidia.com/gpu: 2` |
 | vLLM chart | local, `infra/charts/vllm` 0.1.0 (P0.7) |
 | vLLM image (`vllm/vllm-openai`) | v0.31.0, digest `sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3` (released 2026-10-05; the newest release at least two weeks old on 2026-10-26, v0.32.0 was 8 days old). Pinned in `infra/local/vllm-common.sh` and `infra/charts/vllm/values.yaml` |
-| Gateway (Envoy Gateway or kgateway) | |
-| Gateway API Inference Extension | |
+| Gateway API CRDs (standard channel) | v1.6.3 (2026-10-06, the newest release at least two weeks old on 2026-10-27), `standard-install.yaml` sha256 `356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5`. Pinned in `infra/install-gateway.sh` |
+| Gateway (agentgateway, Helm charts `agentgateway-crds` and `agentgateway`) | v1.6.0 (2026-10-02, the newest release at least two weeks old on 2026-10-27; built and conformance-tested against GAIE v1.6.2). kgateway dropped InferencePool in v2.3.0 and Envoy Gateway has no native support (spike, `experiments/log.md`). Chart digests: `agentgateway-crds` `sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a`, `agentgateway` `sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28`. The controller and proxy images come from the chart (tag v1.6.0), as for the monitoring stack. Pinned in `infra/install-gateway.sh` |
+| Gateway API Inference Extension (InferencePool CRD) | v1.6.2 (2026-09-17, the newest release at least two weeks old on 2026-10-27), `v1-manifests.yaml` sha256 `f410dfca474608c02903087b47f1ac081706dfb6dfe7f83d00a7cc7e00c4ad0d`, InferencePool `inference.networking.k8s.io/v1`. Pinned in `infra/install-gateway.sh` |
+| Endpoint Picker (llm-d-router, Helm chart `llm-d-router-gateway`) | v0.11.0 (2026-09-27; v1.0.0 of 2026-10-16 was 11 days old), chart digest `sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0`, image `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf`. Built on GAIE v1.5.0; its InferencePool fields match the v1.6.2 CRD. Pinned in `infra/install-gateway.sh` and `infra/helm/router-values.yaml` |
 | KEDA | |
-| kube-prometheus-stack | |
-| Redis | |
+| kube-prometheus-stack (Helm chart) | 92.3.0 (2026-10-10, the newest release at least two weeks old on 2026-10-26): Prometheus Operator v0.94.1, Prometheus v3.15.0, Grafana 13.2.3, kube-state-metrics v2.20.0, k8s-sidecar 2.14.1. Pinned in `infra/install-monitoring.sh` |
+| Redis (image `redis`) | 8.10.2-alpine (2026-09-17, the newest release at least two weeks old on 2026-10-27; 8.10.3 was a day old), digest `sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b`, no persistence (D7). Pinned in `infra/manifests/redis.yaml` (P1.3b) |
+| Agent runtime base image (`python`) | 3.12.15-slim (2026-09-30, the newest 3.12 release at least two weeks old on 2026-10-27; 3.12.16 was two days old), digest `sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704`. The built image is ~220 MB. Pinned in `agent/Dockerfile` (P1.3b) |
 | SQLite (Python `sqlite3`, app backend) | |
 | llm-d-inference-sim | |
 

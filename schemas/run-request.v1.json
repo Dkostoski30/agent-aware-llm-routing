@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/run-request.v1.json",
+  "title": "Run request v1",
+  "description": "Body of POST /runs on the agent runtime: one task to run (D12, D13).",
+  "type": "object",
+  "properties": {
+    "task": {
+      "description": "What the user asked, as the first user message of the run.",
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "description": "Sampling seed sent with every LLM call of the run, so a run can be repeated; absent for random sampling.",
+      "type": "integer"
+    },
+    "files": {
+      "description": "CSV files attached to the task, kept with the run; the tools take them by id and they never enter the context (D13). Their number and size are limited by agent.max_files and agent.max_file_bytes in config/.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Lowercase slug the model names the file by; unique within the request.",
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "maxLength": 64
+          },
+          "name": {
+            "description": "The file name as the user attached it.",
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "description": "The file's text: UTF-8 CSV with a header row.",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name", "content"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["task"],
+  "additionalProperties": false
+}

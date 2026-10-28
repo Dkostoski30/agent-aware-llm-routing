@@ -1,0 +1,18 @@
+[project]
+name = "agent"
+version = "0.1.0"
+description = "Agent runtime: runs a task as a chain of LLM calls through the gateway (P1.3)"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi==0.143.0",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "pyyaml==6.0.3",
+    "redis==8.1.0",
+    "uvicorn==0.54.0",
+]
+
+[tool.uv]
+# Not installed as a package: pytest and mypy find agent_runtime through pythonpath / mypy_path, so no build
+# backend is needed.
+package = false

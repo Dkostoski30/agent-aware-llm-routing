@@ -1,0 +1,108 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tenax</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-sans); overflow: hidden; }
+  .cover { position: relative; width: 960px; height: 288px; overflow: hidden; }
+  .art { position: absolute; top: 0; left: 480px; width: 480px; height: 288px; }
+  .art svg { display: block; width: 480px; height: 288px; }
+  .accent { fill: var(--accent); }
+  .soft { fill: var(--accent-soft); }
+  .ink { fill: var(--ink); }
+  .amber { fill: var(--draining); }
+  .cut { fill: var(--bg); }
+  .blk { rx: var(--radius-md); }
+  .small { rx: var(--radius-xs); }
+  .words { position: absolute; left: var(--space-6); bottom: var(--space-6); max-width: 440px; }
+  .name { margin: 0; font-size: 120px; line-height: .9; font-weight: 700; letter-spacing: -.03em; color: var(--ink); }
+  .tag { margin: var(--space-3) 0 0 6px; font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      accent 224×256 bled off the top, first in the box (the identity colour, largest) · accent-soft 152×96 (the tint) · ink 256×144 bled off the right · draining 24×24 once, small (it only ever means overload or drain) · ≈45% of 960×288
+  arrangement one tall accent slab with satellites, bottoms on one line space-12 above the edge, space-4 gutters
+  pattern     square pixels, from the 8-bit horse and the "pixels stay square" rule: a burst's remaining work as a pixel bar chart cut out of the slab in bg, one column per sample
+  scales      gutters space-4; pixels space-2 square at a space-3 pitch, inset space-6; blocks radius-md, satellite radius-xs, pixels square
+-->
+<rect class="accent blk" x="0" y="-16" width="224" height="256" rx="10"/>
+<rect class="soft blk" x="240" y="-16" width="152" height="96" rx="10"/>
+<rect class="amber small" x="408" y="56" width="24" height="24" rx="4"/>
+<rect class="ink blk" x="240" y="96" width="256" height="144" rx="10"/>
+<!-- a burst's remaining work, one column per sample: 60 pixels -->
+<rect class="cut" x="24" y="208" width="8" height="8"/>
+<rect class="cut" x="36" y="208" width="8" height="8"/>
+<rect class="cut" x="48" y="208" width="8" height="8"/>
+<rect class="cut" x="48" y="196" width="8" height="8"/>
+<rect class="cut" x="60" y="208" width="8" height="8"/>
+<rect class="cut" x="60" y="196" width="8" height="8"/>
+<rect class="cut" x="72" y="208" width="8" height="8"/>
+<rect class="cut" x="72" y="196" width="8" height="8"/>
+<rect class="cut" x="72" y="184" width="8" height="8"/>
+<rect class="cut" x="84" y="208" width="8" height="8"/>
+<rect class="cut" x="84" y="196" width="8" height="8"/>
+<rect class="cut" x="84" y="184" width="8" height="8"/>
+<rect class="cut" x="84" y="172" width="8" height="8"/>
+<rect class="cut" x="96" y="208" width="8" height="8"/>
+<rect class="cut" x="96" y="196" width="8" height="8"/>
+<rect class="cut" x="96" y="184" width="8" height="8"/>
+<rect class="cut" x="96" y="172" width="8" height="8"/>
+<rect class="cut" x="96" y="160" width="8" height="8"/>
+<rect class="cut" x="96" y="148" width="8" height="8"/>
+<rect class="cut" x="108" y="208" width="8" height="8"/>
+<rect class="cut" x="108" y="196" width="8" height="8"/>
+<rect class="cut" x="108" y="184" width="8" height="8"/>
+<rect class="cut" x="108" y="172" width="8" height="8"/>
+<rect class="cut" x="108" y="160" width="8" height="8"/>
+<rect class="cut" x="108" y="148" width="8" height="8"/>
+<rect class="cut" x="108" y="136" width="8" height="8"/>
+<rect class="cut" x="108" y="124" width="8" height="8"/>
+<rect class="cut" x="120" y="208" width="8" height="8"/>
+<rect class="cut" x="120" y="196" width="8" height="8"/>
+<rect class="cut" x="120" y="184" width="8" height="8"/>
+<rect class="cut" x="120" y="172" width="8" height="8"/>
+<rect class="cut" x="120" y="160" width="8" height="8"/>
+<rect class="cut" x="120" y="148" width="8" height="8"/>
+<rect class="cut" x="120" y="136" width="8" height="8"/>
+<rect class="cut" x="120" y="124" width="8" height="8"/>
+<rect class="cut" x="120" y="112" width="8" height="8"/>
+<rect class="cut" x="132" y="208" width="8" height="8"/>
+<rect class="cut" x="132" y="196" width="8" height="8"/>
+<rect class="cut" x="132" y="184" width="8" height="8"/>
+<rect class="cut" x="132" y="172" width="8" height="8"/>
+<rect class="cut" x="132" y="160" width="8" height="8"/>
+<rect class="cut" x="132" y="148" width="8" height="8"/>
+<rect class="cut" x="132" y="136" width="8" height="8"/>
+<rect class="cut" x="132" y="124" width="8" height="8"/>
+<rect class="cut" x="144" y="208" width="8" height="8"/>
+<rect class="cut" x="144" y="196" width="8" height="8"/>
+<rect class="cut" x="144" y="184" width="8" height="8"/>
+<rect class="cut" x="144" y="172" width="8" height="8"/>
+<rect class="cut" x="144" y="160" width="8" height="8"/>
+<rect class="cut" x="144" y="148" width="8" height="8"/>
+<rect class="cut" x="156" y="208" width="8" height="8"/>
+<rect class="cut" x="156" y="196" width="8" height="8"/>
+<rect class="cut" x="156" y="184" width="8" height="8"/>
+<rect class="cut" x="156" y="172" width="8" height="8"/>
+<rect class="cut" x="168" y="208" width="8" height="8"/>
+<rect class="cut" x="168" y="196" width="8" height="8"/>
+<rect class="cut" x="168" y="184" width="8" height="8"/>
+<rect class="cut" x="180" y="208" width="8" height="8"/>
+<rect class="cut" x="180" y="196" width="8" height="8"/>
+<rect class="cut" x="192" y="208" width="8" height="8"/>
+</svg>
+</div>
+<div class="words">
+  <h1 class="name">Tenax</h1>
+  <p class="tag">Every step of an agent's run, and the pod that served it.</p>
+</div>
+</div>
+</body>
+</html>

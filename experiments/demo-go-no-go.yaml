@@ -1,0 +1,56 @@
+# P1.6b: practical go/no-go on the demo model (PLAN.md P1.6, D10, D11). Run with make go-no-go after
+# make up PROFILE=demo; the result CSV in results/ carries this file's hash.
+# The cluster's profile; the script checks that the agent runs its model and switches agent.tool_choice in it.
+profile: demo
+# The CSV attached to every run. 36 rows: 3 months x 4 regions x 3 products, revenue = units x a fixed unit price.
+# Widget sells the most units and Gizmo makes the most revenue, so question two-step cannot be answered by one call,
+# and every wrong-but-plausible answer (another group's value) is more than agent.answer_tolerance from the right one.
+file:
+  # The file ID the model names in its tool calls (run-request.v1).
+  id: sales
+  name: sales.csv
+  # Relative to this file.
+  path: data/sales.csv
+# Two seeds per question, so one lucky sample cannot carry a question.
+seeds: [1, 2]
+# Both D10 modes; the order they run in.
+modes: [required, auto]
+# PLAN.md P1.6: go if a mode answers at least 9 of its 10 runs correctly.
+go_threshold: 9
+# One question of each kind, so one easy kind cannot carry the score. expected says how go_no_go.py computes the
+# answer from the CSV (aggregate, difference or of_top_group); the answer itself is not written here.
+# expected_calls: tool calls a correct run made and that returned a result. Arguments are named only where the
+# number does not prove the call: in two-step the right product can be a guess (P1.6b, 2026-10-28).
+# wrong_if_matches: a regex (case-insensitive) for an answer that states the opposite of the fact around the number.
+questions:
+  - id: summary
+    text: What is the average revenue per row in sales.csv?
+    expected_calls: [{tool: csv_summary}]
+    expected: {kind: aggregate, agg: mean, value: revenue}
+  - id: group-total
+    text: What is the total revenue of the North region in sales.csv?
+    expected_calls: [{tool: group_by}]
+    expected: {kind: aggregate, agg: sum, value: revenue, group: {by: region, equals: North}}
+  - id: group-mean
+    text: What is the average number of units per row for the product Gadget in sales.csv?
+    expected_calls: [{tool: group_by}]
+    expected: {kind: aggregate, agg: mean, value: units, group: {by: product, equals: Gadget}}
+  - id: compare
+    text: How much more total revenue did the North region make than the South region in sales.csv?
+    expected_calls: [{tool: compare}]
+    # North made more. An answer saying North is lower, or South higher, is wrong (3 of 4 in the first run read
+    # compare's negative difference that way). The comparative must have its "than" within two words, which makes
+    # the group before it the one it is about: in "... higher than South's (10622.2), 35.1% more." the "more" is
+    # North's lead (P1.6c). Up to the end of the sentence; ".9" in "$3,728.90" is not one.
+    wrong_if_matches: '\bnorth\b(?:[^.]|\.\d)*\b(?:less|lower|fewer|smaller)(?:\s+\w+){0,2}\s+than\b|\bsouth\b(?:[^.]|\.\d)*\b(?:more|higher|greater|larger)(?:\s+\w+){0,2}\s+than\b'
+    expected: {kind: difference, agg: sum, value: revenue, by: region, left: South, right: North}
+  - id: two-step
+    text: Which product sold the most units in total in sales.csv, and what is that product's total revenue?
+    # Units summed per product is what tells which product sold the most; counted, all three tie at 12 rows.
+    expected_calls: [{tool: group_by, arguments: {by: product, value: units, agg: sum}}]
+    expected:
+      kind: of_top_group
+      by: product
+      rank: {agg: sum, value: units}
+      agg: sum
+      value: revenue

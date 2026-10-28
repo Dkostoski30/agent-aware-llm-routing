@@ -1,0 +1,13 @@
+/* Every ag- component class and the two fonts, straight from the design system (D14); the tokens they read are
+   set on <html> by Theme (src/app/theme/theme.ts). */
+@import '../../docs/design-system/components/bundle.css';
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+}

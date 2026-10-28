@@ -1,0 +1,20 @@
+<!-- @dsCard group="Cluster" height=240 width=420 subtitle="Steady at 7, then a burst at 61 scaling 2 → 4" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RemainingWork</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-panel{width:400px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = '<div class="ag-panel">' + A.remaining({"value": 7, "runs": 3, "series": [0, 0, 0, 2, 3, 5, 5, 6, 4, 4, 5, 8, 11, 12, 10, 9, 9, 8, 7, 7], "reps": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2], "max": 14, "repMax": 2, "scale": "KEDA target <b>2</b> pods · min 1 · max 2"}) + A.remaining({"value": 61, "runs": 21, "series": [5, 5, 6, 6, 7, 7, 7, 8, 7, 7, 8, 9, 12, 25, 40, 52, 58, 63, 62, 61], "reps": [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 4], "max": 70, "repMax": 4, "scale": "KEDA scaling <b>2 → 4</b> pods on remaining work"}) + '</div>';
+</script>
+</body>
+</html>

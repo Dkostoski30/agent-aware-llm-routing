@@ -10,6 +10,8 @@ repos:
         # Helm templates are YAML only after helm renders them ({{- if ... }} lines); make vllm-deploy renders
         # and applies them, so a broken template fails there.
         exclude: ^infra/charts/[^/]+/templates/
+        # Kubernetes manifests keep related objects in one file, separated by --- (infra/manifests/, P1.2).
+        args: [--allow-multiple-documents]
       - id: check-json
 
   - repo: local
@@ -41,9 +43,11 @@ repos:
         language: system
         files: ^ui/.*\.ts$
         pass_filenames: false
+      # Angular's tsconfig.json lists no files, only references, so tsc -p tsconfig.json checks nothing (P1.4a);
+      # the app and the specs are checked through their own configs.
       - id: tsc
         name: tsc --strict (ui)
-        entry: bash -c 'cd ui && npx --no-install tsc --noEmit --strict -p tsconfig.json'
+        entry: bash -c 'cd ui && npx --no-install tsc --noEmit --strict -p tsconfig.app.json && npx --no-install tsc --noEmit --strict -p tsconfig.spec.json'
         language: system
         files: ^ui/.*\.ts$
         pass_filenames: false
