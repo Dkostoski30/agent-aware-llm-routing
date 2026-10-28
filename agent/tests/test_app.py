@@ -48,8 +48,8 @@ def make_config() -> AgentConfig:
     )
 
 
-def calc(op: str, a: float, b: float) -> dict[str, Any]:
-    call = {"name": "calculator", "arguments": json.dumps({"op": op, "a": a, "b": b})}
+def calc(expression: str) -> dict[str, Any]:
+    call = {"name": "calculator", "arguments": json.dumps({"expression": expression})}
     return {
         "role": "assistant",
         "content": None,
@@ -112,7 +112,7 @@ class Service:
 
 
 def test_post_starts_a_run_and_get_reads_it_back() -> None:
-    service = Service([calc("multiply", 7, 8), calc("add", 56, 3), text("59")])
+    service = Service([calc("7*8"), calc("56+3"), text("59")])
     run_id = service.start({"task": TASK, "seed": 7})
     assert re.fullmatch(r"run-[0-9a-f]{12}", run_id)
     response = service.client.get(f"/runs/{run_id}")
@@ -209,7 +209,7 @@ def test_healthz() -> None:
 
 
 def test_history_is_saved_after_every_step() -> None:
-    service = Service([calc("multiply", 7, 8), calc("add", 56, 3), text("59")])
+    service = Service([calc("7*8"), calc("56+3"), text("59")])
     run_id = service.start({"task": TASK})
     saved = [
         (record.status, record.step, record.invalid_calls, record.answer, len(messages))
@@ -248,7 +248,7 @@ def test_running_run_shows_the_steps_so_far() -> None:
     messages = [
         {"role": "system", "content": "You are a calculator agent."},
         {"role": "user", "content": TASK},
-        calc("multiply", 7, 8),
+        calc("7*8"),
         {"role": "tool", "tool_call_id": "call-1", "content": json.dumps({"result": 56})},
     ]
     record = RunRecord(
@@ -273,7 +273,7 @@ def test_running_run_shows_the_steps_so_far() -> None:
             "tool_calls": [
                 {
                     "name": "calculator",
-                    "arguments": {"op": "multiply", "a": 7, "b": 8},
+                    "arguments": {"expression": "7*8"},
                     "result": {"result": 56},
                 }
             ],
@@ -284,15 +284,15 @@ def test_running_run_shows_the_steps_so_far() -> None:
 
 def test_steps_show_invalid_calls_and_rejected_answers() -> None:
     broken = text('<tool_call>\n{"name": "calculator", "arguments": {"op": "add"\n</tool_call>')
-    service = Service([calc("pow", 2, 3), broken, calc("multiply", 7, 8), text("56")])
+    service = Service([calc("2^3"), broken, calc("7*8"), text("56")])
     run_id = service.start({"task": TASK})
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["invalid_calls"]) == ("done", 2)
     steps = run["steps"]
     assert [step["step"] for step in steps] == [1, 2, 3, 4]
     first = steps[0]["tool_calls"][0]
-    assert first["arguments"] == {"op": "pow", "a": 2, "b": 3}
-    assert "'multiply'" in first["result"]["error"]
+    assert first["arguments"] == {"expression": "2^3"}
+    assert "does not match" in first["result"]["error"]
     assert steps[0]["error"] is None
     assert (steps[1]["tool_calls"], steps[1]["content"]) == ([], broken["content"])
     assert "could not be parsed" in steps[1]["error"]
@@ -344,8 +344,8 @@ STEP_0 = [
     {"role": "system", "content": "You are a calculator agent."},
     {"role": "user", "content": TASK},
 ]
-STEP_1 = [*STEP_0, calc("multiply", 7, 8), tool_result({"result": 56})]
-STEP_2 = [*STEP_1, calc("add", 56, 3), tool_result({"result": 59})]
+STEP_1 = [*STEP_0, calc("7*8"), tool_result({"result": 56})]
+STEP_2 = [*STEP_1, calc("56+3"), tool_result({"result": 59})]
 DONE = [*STEP_2, {"role": "assistant", "content": "59"}]
 
 
@@ -401,7 +401,7 @@ async def test_saved_steps_then_live_steps_then_end() -> None:
         "tool_calls": [
             {
                 "name": "calculator",
-                "arguments": {"op": "multiply", "a": 7, "b": 8},
+                "arguments": {"expression": "7*8"},
                 "result": {"result": 56},
             }
         ],
@@ -467,7 +467,7 @@ def stream(service: Service, run_id: str) -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_finished_run_streams_its_steps_and_answer_then_closes() -> None:
-    service = Service([calc("multiply", 7, 8), calc("add", 56, 3), text("59")])
+    service = Service([calc("7*8"), calc("56+3"), text("59")])
     run_id = service.start({"task": TASK})
     events = stream(service, run_id)
     assert kinds(events) == ["run", "step 1", "step 2", "step 3", "end"]
@@ -479,10 +479,10 @@ def test_finished_run_streams_its_steps_and_answer_then_closes() -> None:
 
 def test_invalid_calls_reach_the_stream() -> None:
     broken = text('<tool_call>\n{"name": "calculator", "arguments": {"op": "add"\n</tool_call>')
-    service = Service([calc("pow", 2, 3), broken, calc("multiply", 7, 8), text("56")])
+    service = Service([calc("2^3"), broken, calc("7*8"), text("56")])
     events = stream(service, service.start({"task": TASK}))
     steps = [data for name, data in events if name == "step"]
-    assert "'multiply'" in steps[0]["tool_calls"][0]["result"]["error"]
+    assert "does not match" in steps[0]["tool_calls"][0]["result"]["error"]
     assert "could not be parsed" in steps[1]["error"]
     assert (events[-1][1]["answer"], events[-1][1]["invalid_calls"]) == ("56", 2)
 

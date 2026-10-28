@@ -356,8 +356,8 @@ def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
 @pytest.mark.parametrize(
     ("name", "arguments", "expected"),
     [
-        # The calculator is not rounded: its result feeds the next operation.
-        (CALCULATOR, {"op": "divide", "a": 1, "b": 3}, {"result": 1 / 3}),
+        # The calculator is not rounded: its arithmetic is exact (P1.6d).
+        (CALCULATOR, {"expression": "1/3"}, {"result": 1 / 3}),
         (CSV_SUMMARY, {"file": "sales"}, csv_summary(sales(), MAX_ROWS, DECIMALS)),
         (
             GROUP_BY,

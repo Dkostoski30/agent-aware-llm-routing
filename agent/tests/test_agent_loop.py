@@ -61,8 +61,8 @@ def tool_call(name: str, arguments: dict[str, Any], call_id: str = "call-1") -> 
     }
 
 
-def calc(op: str, a: float, b: float, call_id: str = "call-1") -> dict[str, Any]:
-    return tool_call("calculator", {"op": op, "a": a, "b": b}, call_id)
+def calc(expression: str, call_id: str = "call-1") -> dict[str, Any]:
+    return tool_call("calculator", {"expression": expression}, call_id)
 
 
 def calls(*tool_calls: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +127,7 @@ async def run(
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_tool_results_are_fed_back(mode: ToolChoice) -> None:
-    script = [calls(calc("multiply", 7, 8)), calls(calc("add", 56, 3)), final(mode, "59")]
+    script = [calls(calc("7*8")), calls(calc("56+3")), final(mode, "59")]
     result, llm = await run(mode, ScriptedLLM(script))
     assert (result.status, result.answer, result.steps) == ("done", "59", 3)
     assert llm.bodies()[1]["messages"][-1] == {
@@ -139,7 +139,7 @@ async def test_tool_results_are_fed_back(mode: ToolChoice) -> None:
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_history_keeps_role_content_and_tool_calls_only(mode: ToolChoice) -> None:
-    result, _ = await run(mode, ScriptedLLM([calls(calc("multiply", 7, 8)), final(mode, "56")]))
+    result, _ = await run(mode, ScriptedLLM([calls(calc("7*8")), final(mode, "56")]))
     final_message: dict[str, Any] = {"role": "assistant", "content": "56"}
     if mode == "required":
         final_message = {
@@ -150,7 +150,7 @@ async def test_history_keeps_role_content_and_tool_calls_only(mode: ToolChoice) 
     assert result.messages == [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": TASK},
-        {"role": "assistant", "content": None, "tool_calls": [calc("multiply", 7, 8)]},
+        {"role": "assistant", "content": None, "tool_calls": [calc("7*8")]},
         {"role": "tool", "tool_call_id": "call-1", "content": json.dumps({"result": 56})},
         final_message,
     ]
@@ -158,7 +158,7 @@ async def test_history_keeps_role_content_and_tool_calls_only(mode: ToolChoice) 
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_headers_follow_the_schema_and_count_every_call(mode: ToolChoice) -> None:
-    script = [calls(calc("pow", 7, 8)), calls(calc("multiply", 7, 8)), final(mode, "56")]
+    script = [calls(calc("7^8")), calls(calc("7*8")), final(mode, "56")]
     _, llm = await run(mode, ScriptedLLM(script))
     validator = Draft202012Validator(json.loads(HEADERS_SCHEMA.read_text()))
     sent = [
@@ -212,7 +212,7 @@ async def test_final_answer_ends_the_run(mode: ToolChoice) -> None:
 
 
 async def test_required_final_answer_ends_the_run_before_later_calls() -> None:
-    reply = calls(tool_call("final_answer", {"answer": "59"}), calc("add", 1, 1, "call-2"))
+    reply = calls(tool_call("final_answer", {"answer": "59"}), calc("1+1", call_id="call-2"))
     result, llm = await run("required", ScriptedLLM([reply]))
     assert (result.status, result.answer) == ("done", "59")
     assert result.messages[-1]["role"] == "assistant"
@@ -221,7 +221,7 @@ async def test_required_final_answer_ends_the_run_before_later_calls() -> None:
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_calls_of_one_response_run_in_order_as_one_step(mode: ToolChoice) -> None:
-    reply = calls(calc("multiply", 7, 8, "call-a"), calc("add", 1, 2, "call-b"))
+    reply = calls(calc("7*8", call_id="call-a"), calc("1+2", call_id="call-b"))
     result, llm = await run(mode, ScriptedLLM([reply, final(mode, "59")]))
     assert result.steps == 2
     assert llm.bodies()[1]["messages"][-2:] == [
@@ -233,17 +233,19 @@ async def test_calls_of_one_response_run_in_order_as_one_step(mode: ToolChoice) 
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_invalid_enum_is_retried_with_the_allowed_values(mode: ToolChoice) -> None:
-    result, llm = await run(mode, ScriptedLLM([calls(calc("pow", 2, 3)), final(mode, "8")]))
-    assert (result.status, result.answer, result.invalid_calls) == ("done", "8", 1)
+    # The calculator has no enum since P1.6d; the aggregate enum of group_by stands in.
+    script = [calls(group("region", "revenue", "median")), final(mode, "South")]
+    result, llm = await run(mode, ScriptedLLM(script), tables=[SALES])
+    assert (result.status, result.answer, result.invalid_calls) == ("done", "South", 1)
     feedback = llm.bodies()[1]["messages"][-1]
     assert (feedback["role"], feedback["tool_call_id"]) == ("tool", "call-1")
-    for allowed in ("'add'", "'subtract'", "'multiply'", "'divide'"):
+    for allowed in ("'sum'", "'mean'", "'min'", "'max'"):
         assert allowed in json.loads(feedback["content"])["error"]
 
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_division_by_zero_goes_back_as_a_tool_error(mode: ToolChoice) -> None:
-    result, llm = await run(mode, ScriptedLLM([calls(calc("divide", 1, 0)), final(mode, "none")]))
+    result, llm = await run(mode, ScriptedLLM([calls(calc("1/0")), final(mode, "none")]))
     assert (result.status, result.invalid_calls) == ("done", 0)
     assert llm.bodies()[1]["messages"][-1]["content"] == json.dumps({"error": "division by zero"})
 
@@ -279,7 +281,7 @@ async def test_required_text_without_a_tool_call_is_invalid() -> None:
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_step_cap_fails_the_run(mode: ToolChoice) -> None:
-    result, llm = await run(mode, ScriptedLLM([calls(calc("add", 1, 1))] * MAX_STEPS))
+    result, llm = await run(mode, ScriptedLLM([calls(calc("1+1"))] * MAX_STEPS))
     assert (result.status, result.answer, result.steps) == ("failed", None, MAX_STEPS)
     assert result.error is not None
     assert "agent.max_steps" in result.error
@@ -288,7 +290,7 @@ async def test_step_cap_fails_the_run(mode: ToolChoice) -> None:
 
 @pytest.mark.parametrize("mode", MODES)
 async def test_invalid_call_cap_fails_the_run(mode: ToolChoice) -> None:
-    result, llm = await run(mode, ScriptedLLM([calls(calc("pow", 2, 3))] * MAX_INVALID_CALLS))
+    result, llm = await run(mode, ScriptedLLM([calls(calc("2^3"))] * MAX_INVALID_CALLS))
     assert (result.status, result.invalid_calls) == ("failed", MAX_INVALID_CALLS)
     assert result.error is not None
     assert "agent.max_invalid_calls" in result.error
@@ -339,13 +341,13 @@ async def test_invalid_call_is_logged_with_its_reason(
     mode: ToolChoice, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO, logger="agent_runtime")
-    await run(mode, ScriptedLLM([calls(calc("pow", 2, 3)), final(mode, "8")]))
+    await run(mode, ScriptedLLM([calls(calc("2^3")), final(mode, "8")]))
     warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
     assert len(warnings) == 1
     # Log fields are record attributes; "run-id" is not a Python name, so they come from __dict__.
     fields = warnings[0].__dict__
     assert (fields["run-id"], fields["step"]) == (RUN_ID, 1)
-    assert "'pow'" in fields["reason"]
+    assert "'2^3'" in fields["reason"]
     own = [record for record in caplog.records if record.name.startswith("agent_runtime")]
     assert own
     assert all(record.__dict__["run-id"] == RUN_ID for record in own)
@@ -356,7 +358,7 @@ async def test_llm_call_is_logged_with_duration_and_finish_reason(
     mode: ToolChoice, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.INFO, logger="agent_runtime")
-    await run(mode, ScriptedLLM([calls(calc("multiply", 7, 8)), final(mode, "56")]))
+    await run(mode, ScriptedLLM([calls(calc("7*8")), final(mode, "56")]))
     llm_calls = [record.__dict__ for record in caplog.records if record.getMessage() == "llm call"]
     assert [fields["step"] for fields in llm_calls] == [1, 2]
     for fields in llm_calls:
@@ -373,7 +375,7 @@ async def test_on_step_sees_every_step_that_leaves_the_run_going(mode: ToolChoic
     async def on_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
         seen.append((step, invalid_calls, messages))
 
-    llm = ScriptedLLM([calls(calc("pow", 2, 3)), calls(calc("multiply", 7, 8)), final(mode, "56")])
+    llm = ScriptedLLM([calls(calc("2^3")), calls(calc("7*8")), final(mode, "56")])
     config = make_config(mode)
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(llm.handle), base_url="http://gateway"

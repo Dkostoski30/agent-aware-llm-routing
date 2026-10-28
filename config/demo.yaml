@@ -96,5 +96,5 @@ agent:
   # answer" fits both D10 modes: in required the model sees a final_answer tool, in auto it answers in text.
   system_prompt: |
     You are a data analysis agent. For questions about the attached CSV files use the csv_summary, group_by and
-    compare tools; for any other arithmetic use the calculator tool, one operation per call. Every number in your
-    answer must come from a tool result. When you know the result, give the final answer.
+    compare tools; for any other arithmetic call the calculator tool once with the whole expression. Every number
+    in your answer must come from a tool result. When you know the result, give the final answer.
