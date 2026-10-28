@@ -13,6 +13,49 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.5 · green
+Command: on the demo profile `make smoke` · `kubectl scale deployment/agent --replicas=0` · `make smoke` ·
+`kubectl scale deployment/agent --replicas=1` · `make smoke` · `make agent-check`; then `make down && make up` (real)
+· `make smoke` · `make agent-check`
+Result:
+- Demo (one Qwen3-1.7B pod, agent `thesis/agent:0d822ba16e8e`, tool_choice required), first run:
+  ```
+  ok pods: vllm 1/1 inference-gateway 1/1 vllm-pool-epp 1/1 redis 1/1 agent 1/1
+  ok agent: run run-5b9078ffd703 (What is 7 times 8?, seed 7) done in 4 s, answer: 56
+  ok gateway: 2 lines with run-id run-5b9078ffd703, steps [1,2], endpoints ["10.42.0.12:8000"]
+  ok picker: 2 picks by vllm-pool-epp in the run's window, for 2 steps
+  ok redis: thesis:run:run-5b9078ffd703 status done, step 2
+  ok prometheus: vllm:num_requests_running has a sample for ["vllm-9d9d6db6f-x6thv"]
+  ```
+- Agent scaled to 0: `FAIL pods: agent: all of at least 1 pod Ready expected, 0 of 0 Ready`, exit 1.
+- Agent back at 1: six ok lines again, run `run-deefd9f23c4d`, 4 s, same steps and pod.
+- `make agent-check` OK on demo (run `run-380acb21befb`: calculator multiply(7,8), then final_answer "56") with the
+  shared calls from `infra/checks/agent_calls.sh`.
+- Real, smoke run right after `make up` exit 0 (two Qwen3-0.6B pods, same agent image):
+  ```
+  ok pods: vllm 2/2 inference-gateway 1/1 vllm-pool-epp 1/1 redis 1/1 agent 1/1
+  ok agent: run run-ffd2dab2050d (What is 7 times 8?, seed 7) done in 14 s, answer: The result is 56.
+  ok gateway: 2 lines with run-id run-ffd2dab2050d, steps [1,2], endpoints ["10.42.0.13:8000"]
+  ok picker: 2 picks by vllm-pool-epp in the run's window, for 2 steps
+  ok redis: thesis:run:run-ffd2dab2050d status done, step 2
+  ok prometheus: vllm:num_requests_running has a sample for ["vllm-5fff45f674-4687g","vllm-5fff45f674-d5rrf"]
+  ```
+- `make agent-check` OK on real (run `run-a5ad24db34bf`, 2 steps on 10.42.0.13, text answer "The result is 56.").
+Notes:
+- Both D10 modes pass the same check: required ends with final_answer ("56"), auto answers in text. Both take 2 steps,
+  so expected-steps 2 holds in both.
+- The real smoke ran 12 s after the agent pod started and right after the vLLM pods loaded: the run took 14 s against
+  4 s on the warm demo cluster, as in P1.3b's first run on fresh pods (26.8 s). It went to the agent pod's IP, so the
+  Service lag seen in P1.6c could not hit it.
+- The picker check is linked to the run by time only: the EPP's "Request handled" line has its own x-request-id but
+  no run-id, and the access log does not carry that id.
+- The pods check compares each Deployment's Ready pods with its own `spec.replicas`, not with the profile in
+  `config/`: that works on any profile without a PROFILE argument and stays right once KEDA sets the vllm count, but a
+  vllm Deployment scaled down by hand would pass.
+- After the review, every failure path prints its "FAIL <layer>" line (vllm pod list, a run state that is not JSON,
+  EPP log read and parse reported apart); the passing output above is unchanged.
+- The cluster is on the real profile again.
+
 ### 2026-10-28 · P1.6c · green (go)
 Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make go-no-go`
 Result:

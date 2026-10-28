@@ -138,8 +138,10 @@ grafana:
 go-no-go:
 	uv run --locked python experiments/go_no_go.py experiments/demo-go-no-go.yaml
 
+# One calculator task through every layer on the current cluster, any profile: pods Ready, agent answer, Gateway
+# access log, Endpoint Picker picks, Redis history, Prometheus samples; stops at the first FAIL (P1.5).
 smoke:
-	@echo "not implemented yet: P1.5"; exit 1
+	@bash infra/checks/smoke.sh
 
 replay:
 	@echo "not implemented yet: P2.3"; exit 1
