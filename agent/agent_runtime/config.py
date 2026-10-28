@@ -33,6 +33,8 @@ class AgentConfig:
     max_file_bytes: int
     max_files: int
     max_result_rows: int
+    # Decimals the CSV tools round their numbers to (P1.6c).
+    result_decimals: int
 
 
 def load_config(path: Path) -> AgentConfig:
@@ -56,4 +58,5 @@ def load_config(path: Path) -> AgentConfig:
         max_file_bytes=agent["max_file_bytes"],
         max_files=agent["max_files"],
         max_result_rows=agent["max_result_rows"],
+        result_decimals=agent["result_decimals"],
     )

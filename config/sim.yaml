@@ -65,6 +65,10 @@ agent:
   # max_model_len beside the prompt and the tool schemas (D13: only tool results enter the context). csv_summary
   # applies it to the columns it lists, one result row per column.
   max_result_rows: 20
+  # CSV tool results are rounded to this many decimals before they enter the context: the model copies numbers as
+  # it sees them (P1.6b: "17.833333333333332"). 2 keeps money exact and means readable; the rounding error of 0.005
+  # stays inside the go/no-go's 1% tolerance for any value from 0.5 up.
+  result_decimals: 2
   # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
   sampling:
     temperature: 0.7

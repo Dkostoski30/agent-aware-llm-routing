@@ -91,19 +91,30 @@ def check_call(
 
 
 def run_tool(
-    name: str, arguments: dict[str, Any], tables: Mapping[str, Table], max_result_rows: int
+    name: str,
+    arguments: dict[str, Any],
+    tables: Mapping[str, Table],
+    max_result_rows: int,
+    result_decimals: int,
 ) -> dict[str, Any]:
     """Runs a call that passed check_call, to any tool but final_answer. The file enum guarantees
-    the file exists; a call the file's data cannot answer comes back as a tool error."""
+    the file exists; a call the file's data cannot answer comes back as a tool error. The CSV
+    tools' numbers are rounded to result_decimals; the calculator's are not, since its result
+    feeds the next operation."""
     if name == CALCULATOR:
         return calculator(**arguments)
     table = tables[arguments["file"]]
     try:
         if name == CSV_SUMMARY:
-            return csv_tools.csv_summary(table, max_result_rows)
+            return csv_tools.csv_summary(table, max_result_rows, result_decimals)
         if name == GROUP_BY:
             return csv_tools.group_by(
-                table, arguments["by"], arguments["value"], arguments["agg"], max_result_rows
+                table,
+                arguments["by"],
+                arguments["value"],
+                arguments["agg"],
+                max_result_rows,
+                result_decimals,
             )
         if name == COMPARE:
             return csv_tools.compare(
@@ -114,6 +125,7 @@ def run_tool(
                 arguments["left"],
                 arguments["right"],
                 max_result_rows,
+                result_decimals,
             )
     except ToolError as error:
         return {"error": str(error)}

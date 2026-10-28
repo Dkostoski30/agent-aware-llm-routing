@@ -1,6 +1,7 @@
 """The CSV tools of the demo (P1.6a): the run request carries the files, the model names a file by
 its ID and columns by name, Python computes (D10, D13). Files never enter the context; only the
-tool results do, capped at agent.max_result_rows rows.
+tool results do, capped at agent.max_result_rows rows and rounded to agent.result_decimals
+(P1.6c).
 """
 
 import csv
@@ -16,9 +17,11 @@ CSV_SUMMARY = "csv_summary"
 GROUP_BY = "group_by"
 COMPARE = "compare"
 
-# The aggregates the model can ask for, in the order the agg enum lists them.
-AGGREGATES = ("sum", "mean", "count", "min", "max")
-# count is the group's rows; the others take the group's non-empty numbers.
+# The aggregates the model can ask for, in the order the agg enum lists them. row_count, not count:
+# the demo model took "count" for a total of the value column (P1.6b, experiments/log.md).
+ROW_COUNT = "row_count"
+AGGREGATES = ("sum", "mean", ROW_COUNT, "min", "max")
+# row_count is the group's rows; the others take the group's non-empty numbers.
 _NUMBER_AGGREGATES: dict[str, Callable[[list[float]], float]] = {
     "sum": math.fsum,
     "mean": statistics.fmean,
@@ -26,16 +29,20 @@ _NUMBER_AGGREGATES: dict[str, Callable[[list[float]], float]] = {
     "max": max,
 }
 
+_ROW_COUNT_IS_NOT_A_TOTAL = (
+    "row_count is the number of rows in a group, not a total; to total a column use sum."
+)
+
 DESCRIPTIONS = {
     CSV_SUMMARY: "Row count and columns of a CSV file, with min, max and mean of number columns.",
     GROUP_BY: (
-        "Groups the rows of a CSV file by one column and aggregates a number column per group "
-        "(count is the number of rows in the group); largest first."
+        "Groups the rows of a CSV file by one column and aggregates a number column per group; "
+        f"largest first. {_ROW_COUNT_IS_NOT_A_TOTAL}"
     ),
     COMPARE: (
         "Aggregates a number column for two groups of a CSV file (left and right are values of "
-        "the by column; count is the number of rows) and returns both, right minus left, and the "
-        "percent change from left."
+        "the by column) and says which group is higher, by how much and by what percent, with a "
+        f"summary sentence. {_ROW_COUNT_IS_NOT_A_TOTAL}"
     ),
 }
 
@@ -177,13 +184,17 @@ def _numbers(table: Table, column: str) -> list[float]:
     return [number for row in table.rows if (number := _number(row[column])) is not None]
 
 
-def csv_summary(table: Table, max_rows: int) -> dict[str, Any]:
+def csv_summary(table: Table, max_rows: int, decimals: int) -> dict[str, Any]:
     columns: list[dict[str, Any]] = []
     for name in table.columns[:max_rows]:
         column: dict[str, Any] = {"name": name, "type": table.types[name]}
         if table.types[name] == "number":
             numbers = _numbers(table, name)
-            column.update(min=min(numbers), max=max(numbers), mean=statistics.fmean(numbers))
+            column.update(
+                min=round(min(numbers), decimals),
+                max=round(max(numbers), decimals),
+                mean=round(statistics.fmean(numbers), decimals),
+            )
         columns.append(column)
     return {
         "file": table.id,
@@ -194,9 +205,9 @@ def csv_summary(table: Table, max_rows: int) -> dict[str, Any]:
 
 
 def _aggregate(table: Table, by: str, value: str, agg: str) -> dict[str, float]:
-    """agg of the value column per group of the by column. count is the group's rows, so it does
-    not depend on which value column the model picks. The other aggregates leave empty value cells
-    out, so a group whose value cells are all empty has no result for them."""
+    """agg of the value column per group of the by column. row_count is the group's rows, so it
+    does not depend on which value column the model picks. The other aggregates leave empty value
+    cells out, so a group whose value cells are all empty has no result for them."""
     for column in (by, value):
         if column not in table.types:
             raise ToolError(
@@ -206,7 +217,7 @@ def _aggregate(table: Table, by: str, value: str, agg: str) -> dict[str, float]:
         numeric = [column for column in table.columns if table.types[column] == "number"]
         allowed = f"its number columns: {', '.join(numeric)}" if numeric else "it has none"
         raise ToolError(f"{value!r} is a text column of {table.id}; value must be a {allowed}")
-    if agg == "count":
+    if agg == ROW_COUNT:
         return {group: size for group, size in Counter(row[by] for row in table.rows).items()}
     groups: dict[str, list[float]] = {}
     for row in table.rows:
@@ -216,7 +227,9 @@ def _aggregate(table: Table, by: str, value: str, agg: str) -> dict[str, float]:
     return {group: _NUMBER_AGGREGATES[agg](numbers) for group, numbers in groups.items()}
 
 
-def group_by(table: Table, by: str, value: str, agg: str, max_rows: int) -> dict[str, Any]:
+def group_by(
+    table: Table, by: str, value: str, agg: str, max_rows: int, decimals: int
+) -> dict[str, Any]:
     results = _aggregate(table, by, value, agg)
     # Largest first; ties by group name, so the order never depends on the file's row order.
     ordered = sorted(results.items(), key=lambda item: (-item[1], item[0]))
@@ -226,13 +239,26 @@ def group_by(table: Table, by: str, value: str, agg: str, max_rows: int) -> dict
         "value": value,
         "agg": agg,
         "group_count": len(ordered),
-        "rows": [{"group": group, agg: result} for group, result in ordered[:max_rows]],
+        "rows": [
+            {"group": group, agg: round(result, decimals)} for group, result in ordered[:max_rows]
+        ],
     }
 
 
 def compare(
-    table: Table, by: str, value: str, agg: str, left: str, right: str, max_rows: int
+    table: Table,
+    by: str,
+    value: str,
+    agg: str,
+    left: str,
+    right: str,
+    max_rows: int,
+    decimals: int,
 ) -> dict[str, Any]:
+    """agg of value for two groups, as the higher and the lower one, so the result does not depend
+    on which group the model passed as left: a signed right-minus-left difference was read
+    backwards by the demo model (P1.6b). summary says it in one sentence for the model to copy.
+    Equal groups keep the argument order."""
     results = _aggregate(table, by, value, agg)
     for group in (left, right):
         if group not in results:
@@ -241,16 +267,32 @@ def compare(
             if len(groups) > max_rows:
                 shown += f" (first {max_rows} of {len(groups)})"
             raise ToolError(f"{group!r} is not a group of {by} in {table.id}; groups: {shown}")
-    difference = results[right] - results[left]
-    # A change from 0 has no percentage; abs keeps the sign of the change when left is negative.
-    percent_change = None if results[left] == 0 else difference / abs(results[left]) * 100
+    higher, lower = (right, left) if results[right] > results[left] else (left, right)
+    high = round(results[higher], decimals)
+    low = round(results[lower], decimals)
+    difference = round(results[higher] - results[lower], decimals)
+    # A change from 0 has no percentage; abs keeps it positive when lower is negative.
+    percent_more = (
+        None
+        if results[lower] == 0
+        else round((results[higher] - results[lower]) / abs(results[lower]) * 100, decimals)
+    )
+    measure = "row count" if agg == ROW_COUNT else f"{agg} of {value}"
+    if difference == 0:
+        summary = f"{higher}'s and {lower}'s {measure} are equal ({high})."
+    else:
+        percent = "" if percent_more is None else f", {percent_more}% more"
+        summary = (
+            f"{higher}'s {measure} ({high}) is {difference} higher than {lower}'s ({low}){percent}."
+        )
     return {
         "file": table.id,
         "by": by,
         "value": value,
         "agg": agg,
-        "left": {"group": left, agg: results[left]},
-        "right": {"group": right, agg: results[right]},
+        "higher": {"group": higher, agg: high},
+        "lower": {"group": lower, agg: low},
         "difference": difference,
-        "percent_change": percent_change,
+        "percent_more": percent_more,
+        "summary": summary,
     }

@@ -13,6 +13,41 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.6c · green (go)
+Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make go-no-go`
+Result:
+- `make go-no-go`: 20 rows in `experiments/results/demo-go-no-go-1f9b63bc24ca-0d822ba16e8e.csv` (experiment file
+  `1f9b63bc24ca`, agent `thesis/agent:0d822ba16e8e`). required 10/10 correct, 0 invalid calls; auto 8/10 correct,
+  1 invalid call (compare seed 2, corrected on the retry). Decision: go; config/demo.yaml keeps agent.tool_choice
+  required.
+- Against P1.6b (required 6/10, auto 7/10), same questions and seeds:
+  - compare: required 0/2 -> 2/2, auto 1/2 -> 2/2. required copies the new summary sentence word for word ("North's
+    sum of revenue (14351.1) is 3728.9 higher than South's (10622.2), 35.1% more."); auto words it itself, with the
+    right direction.
+  - two-step: required 0/2 -> 2/2: it now sums units per product ("Widget ... 617.0 units ... 15116.5"). auto
+    0/2 -> 0/2: both runs name Gizmo with Widget's 617 units and Gizmo's revenue, so the products from the two
+    group_by results get mixed up.
+  - summary, group-total, group-mean: 12/12 as before. Numbers come rounded ("17.83", not "17.833333333333332").
+- required takes 3-6 steps and 6-14 s per run, auto 2-5 steps and 3-24 s.
+Notes:
+- The tools changed, not the model or the prompt: compare returns higher, lower, a non-negative difference,
+  percent_more and a summary sentence; agg count is now row_count; CSV tool numbers are rounded to
+  agent.result_decimals (2).
+- Three reruns failed before this one, none of them on the model:
+  - The first crashed in the switch to auto with a connect timeout. The auto pod was Ready, but the node's Service
+    rules still led to the deleted required pod more than 10 s after it was gone (k3s API stalls, as in P0.7, P1.1,
+    P1.2). Second failure of reaching the restarted agent through the Service, so per rule 8 it stopped there; decided
+    with the user: go_no_go.py sends the runs to the one Ready agent pod's IP.
+  - The same run scored both required compare answers wrong: wrong_if_matches read the "35.1% more" after South's
+    value as a claim about South. It now needs the comparative's "than" within two words. That sentence is a test.
+  - The next one stopped at the first switch: ready_pod_ip compared whole condition dicts, and real conditions carry
+    timestamps too, so no pod was Ready. The test pods now carry them.
+- Result files now carry the agent image tag (`<experiment>-<yaml hash>-<agent tag>.csv`), so P1.6b's
+  `demo-go-no-go-9440b109d5fa.csv` belongs to agent `c61bb199c383`.
+- The demo should use required: auto's remaining failure is a two-step question, the kind of multi-call question the
+  demo needs most. Open for P2: auto stays the mode of the real and sim profiles (D10), where traffic shape matters
+  more than answers.
+
 ### 2026-10-28 · P1.6b · red (no-go)
 Command: `make down && make up PROFILE=demo` · `make test` · `make go-no-go`, run three times (see notes)
 Result:

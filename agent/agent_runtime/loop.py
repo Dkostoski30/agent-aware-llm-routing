@@ -171,7 +171,9 @@ async def run_task(
                 continue
             if name == FINAL_ANSWER:
                 return run.finish(answer=arguments["answer"])
-            result = run_tool(name, arguments, tables_by_id, config.max_result_rows)
+            result = run_tool(
+                name, arguments, tables_by_id, config.max_result_rows, config.result_decimals
+            )
             if "error" in result:
                 # A valid call the data cannot answer: not an invalid call (D10), but P1.6b counts
                 # these to tell failures on the data from failures on the schema.

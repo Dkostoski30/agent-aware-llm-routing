@@ -39,8 +39,10 @@ questions:
     text: How much more total revenue did the North region make than the South region in sales.csv?
     expected_calls: [{tool: compare}]
     # North made more. An answer saying North is lower, or South higher, is wrong (3 of 4 in the first run read
-    # compare's negative difference that way). Up to the end of the sentence; ".9" in "$3,728.90" is not one.
-    wrong_if_matches: '\bnorth\b(?:[^.]|\.\d)*\b(?:less|lower|fewer|smaller)\b|\bsouth\b(?:[^.]|\.\d)*\b(?:more|higher|greater|larger)\b'
+    # compare's negative difference that way). The comparative must have its "than" within two words, which makes
+    # the group before it the one it is about: in "... higher than South's (10622.2), 35.1% more." the "more" is
+    # North's lead (P1.6c). Up to the end of the sentence; ".9" in "$3,728.90" is not one.
+    wrong_if_matches: '\bnorth\b(?:[^.]|\.\d)*\b(?:less|lower|fewer|smaller)(?:\s+\w+){0,2}\s+than\b|\bsouth\b(?:[^.]|\.\d)*\b(?:more|higher|greater|larger)(?:\s+\w+){0,2}\s+than\b'
     expected: {kind: difference, agg: sum, value: revenue, by: region, left: South, right: North}
   - id: two-step
     text: Which product sold the most units in total in sales.csv, and what is that product's total revenue?
