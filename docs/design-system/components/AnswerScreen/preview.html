@@ -1,0 +1,25 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="A finished run: evidence cards and a cited answer" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AnswerScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: {"profile": "real", "model": "Qwen3-0.6B-GPTQ-Int8"},
+    main: A.run({ head: {"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-7f3a9c", "type": "contracts", "done": true, "elapsed": "2.1 s", "segments": ["done", "done", "done", "done", "done"]}, tabs: [{"label": "Answer", "on": true}, {"label": "Steps", "count": 5}], composer: {"scenario": "Contracts", "placeholder": "Ask a follow-up"},
+      blocks: [A.steps([{"n": 1, "tool": "read_document ×2", "args": "contract_a, contract_b", "pod": "vllm-0", "cache": "miss", "ms": 820, "state": "done"}, {"n": 2, "tool": "extract_clauses", "args": "contract_a · termination", "pod": "vllm-0", "cache": "hit", "ms": 310, "par": "extract-1", "state": "done"}, {"n": 3, "tool": "extract_clauses", "args": "contract_b · termination", "pod": "vllm-0", "cache": "hit", "ms": 290, "par": "extract-1", "state": "done"}, {"n": 4, "tool": "diff_clauses", "args": "termination", "pod": "vllm-0", "cache": "hit", "ms": 240, "state": "done"}, {"n": 5, "tool": "answer", "args": "final message, no tool call", "pod": "vllm-0", "cache": "hit", "ms": 610, "state": "done"}], '5 steps · all on vllm-0 · 4 cache hits'), A.answer({"html": "<p>Contract B is riskier. Its supplier can terminate on 30 days' written notice with no cure period, so one missed delivery is enough to end the agreement.<span class=\"ag-cite\" title=\"Step 3\">3</span></p><p>Contract A requires 90 days' notice and gives you 15 days to fix a breach before the supplier may terminate.<span class=\"ag-cite\" title=\"Step 2\">2</span></p><ul><li>Notice: 90 days in A, 30 days in B<span class=\"ag-cite\" title=\"Step 4\">4</span></li><li>Cure period: 15 days in A, none in B<span class=\"ag-cite\" title=\"Step 4\">4</span></li></ul>", "foot": "5 steps · 2.1 s · 4 of 5 served from cache · numbers computed by <code class=\"ag-mono\">diff_clauses</code>, not by the model"})] }),
+    panel: {"live": "Live", "rw": {"value": 5, "runs": 2, "series": [0, 0, 2, 3, 5, 5, 6, 4, 4, 5, 8, 11, 12, 10, 9, 9, 8, 7, 7, 5], "reps": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2], "max": 14, "repMax": 2, "scale": "KEDA target <b>2</b> pods · min 1 · max 2"}, "pods": {"caption": "2 of 2 ready", "list": [{"name": "vllm-0", "state": "ready", "run": 1, "wait": 0, "kv": 36, "hit": 78, "note": "<b>1 run</b> pinned: run-9d02aa"}, {"name": "vllm-1", "state": "ready", "run": 1, "wait": 0, "kv": 27, "hit": 66, "note": "<b>1 run</b> pinned: run-2b81d0"}]}, "runs": {"caption": "nearest to done first", "rows": [{"rank": 1, "id": "run-2b81d0", "type": "csv_analysis", "step": 4, "exp": 6, "pod": "vllm-1"}, {"rank": 2, "id": "run-9d02aa", "type": "support", "step": 1, "exp": 4, "pod": "vllm-0"}]}, "flags": {"source": "config/real.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "vllm-0", "caption": "Start replays recorded tasks through the gateway (<code>make replay</code>). Kill deletes the pod; its runs continue on another one."}}
+  });
+</script>
+</body>
+</html>

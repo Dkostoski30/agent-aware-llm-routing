@@ -1,0 +1,25 @@
+<!-- @dsCard group="Screens" height=900 width=1440 subtitle="P2.6 · the same run as the recorder's log" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StepsTabScreen</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  #root { height: 900px; }
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.app({
+    top: {"profile": "real", "model": "Qwen3-0.6B-GPTQ-Int8"},
+    main: A.run({ head: {"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-7f3a9c", "type": "contracts", "done": true, "elapsed": "2.1 s", "segments": ["done", "done", "done", "done", "done"]}, tabs: [{ label: 'Answer' }, { label: 'Steps', count: 5, on: true }], composer: {"scenario": "Contracts", "placeholder": "Ask a follow-up"},
+      blocks: [A.stepTable([{"n": 1, "call": "read_document(contract_a), read_document(contract_b)", "pod": "vllm-0", "cache": "miss", "ttft": 142, "ms": 820, "gap": 0, "tin": "612", "tout": 58}, {"n": 2, "call": "extract_clauses(contract_a, termination)", "par": "extract-1", "pod": "vllm-0", "cache": "hit", "ttft": 85, "ms": 310, "gap": 42, "tin": "1,830", "tout": 96}, {"n": 3, "call": "extract_clauses(contract_b, termination)", "par": "extract-1", "pod": "vllm-0", "cache": "hit", "ttft": 88, "ms": 290, "gap": 42, "tin": "1,834", "tout": 92}, {"n": 4, "call": "diff_clauses(termination)", "pod": "vllm-0", "cache": "hit", "ttft": 61, "ms": 240, "gap": 18, "tin": "2,104", "tout": 40}, {"n": 5, "call": "answer", "pod": "vllm-0", "cache": "hit", "ttft": 66, "ms": 610, "gap": 9, "tin": "2,250", "tout": 118}])] }),
+    panel: {"live": "Live", "rw": {"value": 5, "runs": 2, "series": [0, 0, 2, 3, 5, 5, 6, 4, 4, 5, 8, 11, 12, 10, 9, 9, 8, 7, 7, 5], "reps": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2], "max": 14, "repMax": 2, "scale": "KEDA target <b>2</b> pods · min 1 · max 2"}, "pods": {"caption": "2 of 2 ready", "list": [{"name": "vllm-0", "state": "ready", "run": 1, "wait": 0, "kv": 36, "hit": 78, "note": "<b>1 run</b> pinned: run-9d02aa"}, {"name": "vllm-1", "state": "ready", "run": 1, "wait": 0, "kv": 27, "hit": 66, "note": "<b>1 run</b> pinned: run-2b81d0"}]}, "runs": {"caption": "nearest to done first", "rows": [{"rank": 1, "id": "run-2b81d0", "type": "csv_analysis", "step": 4, "exp": 6, "pod": "vllm-1"}, {"rank": 2, "id": "run-9d02aa", "type": "support", "step": 1, "exp": 4, "pod": "vllm-0"}]}, "flags": {"source": "config/real.yaml", "items": [["Task affinity", "affinity", true], ["Overload guard", "overload_guard", true], ["Parallel spill", "parallel_spill", true], ["Progress priority", "priority", true], ["Warm-up routing", "warmup", true]]}, "demo": {"pattern": "burst", "pod": "vllm-0", "caption": "Start replays recorded tasks through the gateway (<code>make replay</code>). Kill deletes the pod; its runs continue on another one."}}
+  });
+</script>
+</body>
+</html>

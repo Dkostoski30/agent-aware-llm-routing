@@ -1,0 +1,20 @@
+<!-- @dsCard group="Conversation" height=300 width=900 subtitle="Running and finished, with tabs" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RunHeader</title>
+<style>
+  html, body { margin: 0; }
+  body { background: var(--bg); }
+  .ag-root{padding:24px}
+</style>
+</head>
+<body>
+<div id="root" class="ag-root"></div>
+<script>
+  var A = window.AgentUI;
+  document.getElementById('root').innerHTML = A.runHead({"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-7f3a9c", "type": "contracts", "step": 3, "expected": 5, "elapsed": "1.4 s", "segments": ["done", "run", "run", "", ""]}) + A.tabs([{"label": "Answer", "on": true}, {"label": "Steps", "count": 3}]) + '<div style="height:40px"></div>' + A.runHead({"title": "Compare the termination clauses in contract A and contract B. Which one is riskier for us?", "runId": "run-7f3a9c", "type": "contracts", "done": true, "elapsed": "2.1 s", "segments": ["done", "done", "done", "done", "done"]}) + A.tabs([{"label": "Answer", "on": true}, {"label": "Steps", "count": 5}]);
+</script>
+</body>
+</html>
