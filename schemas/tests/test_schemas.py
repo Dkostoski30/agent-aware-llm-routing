@@ -136,14 +136,46 @@ def test_trace_rules(field: str, value: object, accepted: bool) -> None:
     [
         ("seed", REMOVE, True),
         ("seed", 0, True),
+        ("files", REMOVE, True),
+        ("files", [], True),
         ("task", REMOVE, False),
         ("task", "", False),
         ("task", 7, False),
         ("seed", "7", False),
         ("seed", 1.5, False),
         ("max_steps", 5, False),
+        ("files", {}, False),
+        ("files", "sales.csv", False),
     ],
 )
 def test_run_request_rules(field: str, value: object, accepted: bool) -> None:
     request = with_change(valid_example("run-request.v1"), field, value)
+    assert validator_for("run-request.v1").is_valid(request) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("id", "q3-sales-2025", True),
+        ("id", "a" * 64, True),
+        ("content", "", True),
+        ("id", REMOVE, False),
+        ("name", REMOVE, False),
+        ("content", REMOVE, False),
+        ("id", "", False),
+        ("id", "Sales", False),
+        ("id", "sales.csv", False),
+        ("id", "sales_q3", False),
+        ("id", "-sales", False),
+        ("id", "sales-", False),
+        ("id", "a--b", False),
+        ("id", "a" * 65, False),
+        ("name", "", False),
+        ("content", 7, False),
+        ("size", 10, False),
+    ],
+)
+def test_run_request_file_rules(field: str, value: object, accepted: bool) -> None:
+    request = valid_example("run-request.v1")
+    request["files"] = [with_change(request["files"][0], field, value)]
     assert validator_for("run-request.v1").is_valid(request) is accepted

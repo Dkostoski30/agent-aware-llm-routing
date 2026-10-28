@@ -3,20 +3,21 @@
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
 
 from agent_runtime.config import AgentConfig
+from agent_runtime.csv_tools import Table
 from agent_runtime.llm import LLMClient, LLMResponseError
 from agent_runtime.tools import (
-    CALCULATOR,
     FINAL_ANSWER,
     InvalidCallError,
-    calculator,
     check_call,
+    offered_tools,
+    run_tool,
     tool_definitions,
 )
 
@@ -96,11 +97,13 @@ async def run_task(
     config: AgentConfig,
     llm: LLMClient,
     on_step: StepCallback | None = None,
+    tables: Sequence[Table] = (),
 ) -> RunResult:
+    """tables are the run request's files, already read (csv_tools.read_files)."""
     run = _Run(run_id, task, config)
-    # final_answer ends the run in required mode; in auto mode a plain text answer does (D10).
-    tool_names = [CALCULATOR, FINAL_ANSWER] if config.tool_choice == "required" else [CALCULATOR]
-    tools = tool_definitions(tool_names)
+    tools = offered_tools(config.tool_choice, tables)
+    definitions = tool_definitions(tools)
+    tables_by_id = {table.id: table for table in tables}
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
     run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     while run.step < config.max_steps:
@@ -112,7 +115,7 @@ async def run_task(
         }
         started = time.perf_counter()
         try:
-            reply = await llm.chat(run.messages, tools, headers, seed)
+            reply = await llm.chat(run.messages, definitions, headers, seed)
         except (httpx.HTTPError, LLMResponseError) as error:
             return run.finish(error=f"LLM call failed: {type(error).__name__}: {error}")
         duration_ms = round((time.perf_counter() - started) * 1000)
@@ -151,7 +154,7 @@ async def run_task(
                     "again with valid JSON arguments, or answer in plain text"
                 )
             else:
-                reason = f"answer with a call to one of the tools: {', '.join(tool_names)}"
+                reason = f"answer with a call to one of the tools: {', '.join(tools)}"
             run.messages.append({"role": "user", "content": f"Error: {reason}"})
             if run.invalid(reason):
                 return run.finish(error=max_invalid)
@@ -160,7 +163,7 @@ async def run_task(
         for call in tool_calls:
             name = call["function"]["name"]
             try:
-                arguments = check_call(name, call["function"]["arguments"], tool_names)
+                arguments = check_call(name, call["function"]["arguments"], tools)
             except InvalidCallError as error:
                 run.messages.append(_tool_message(call["id"], {"error": str(error)}))
                 if run.invalid(str(error)):
@@ -168,7 +171,12 @@ async def run_task(
                 continue
             if name == FINAL_ANSWER:
                 return run.finish(answer=arguments["answer"])
-            run.messages.append(_tool_message(call["id"], calculator(**arguments)))
+            result = run_tool(name, arguments, tables_by_id, config.max_result_rows)
+            if "error" in result:
+                # A valid call the data cannot answer: not an invalid call (D10), but P1.6b counts
+                # these to tell failures on the data from failures on the schema.
+                run.log(logging.WARNING, "tool error", tool=name, error=result["error"])
+            run.messages.append(_tool_message(call["id"], result))
         if on_step is not None:
             # A copy: the loop keeps appending to run.messages while the callback's caller holds it.
             await on_step(run.step, run.invalid_calls, list(run.messages))

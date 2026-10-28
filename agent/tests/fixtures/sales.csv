@@ -1,0 +1,6 @@
+region,product,units,revenue
+North,Widget,10,100.5
+North,Gadget,5,250
+South,Widget,8,80
+South,Gadget,,300
+East,Widget,3,30

@@ -3,9 +3,16 @@
 import json
 
 import pytest
-from agent_runtime.tools import CALCULATOR, FINAL_ANSWER, InvalidCallError, calculator, check_call
+from agent_runtime.tools import (
+    CALCULATOR,
+    FINAL_ANSWER,
+    PARAMETERS,
+    InvalidCallError,
+    calculator,
+    check_call,
+)
 
-BOTH_TOOLS = [CALCULATOR, FINAL_ANSWER]
+BOTH_TOOLS = {name: PARAMETERS[name] for name in (CALCULATOR, FINAL_ANSWER)}
 
 
 @pytest.mark.parametrize(
@@ -37,7 +44,7 @@ def test_valid_call_returns_its_arguments(
 
 
 @pytest.mark.parametrize(
-    ("name", "raw_arguments", "tool_names", "error_parts"),
+    ("name", "raw_arguments", "tools", "error_parts"),
     [
         (
             CALCULATOR,
@@ -53,13 +60,18 @@ def test_valid_call_returns_its_arguments(
         (FINAL_ANSWER, '{"answer": ""}', BOTH_TOOLS, ["non-empty"]),
         ("power", "{}", BOTH_TOOLS, ["unknown tool 'power'", "calculator, final_answer"]),
         # In auto mode final_answer is not offered, so calling it is calling an unknown tool (D10).
-        (FINAL_ANSWER, '{"answer": "59"}', [CALCULATOR], ["unknown tool 'final_answer'"]),
+        (
+            FINAL_ANSWER,
+            '{"answer": "59"}',
+            {CALCULATOR: PARAMETERS[CALCULATOR]},
+            ["unknown tool 'final_answer'"],
+        ),
     ],
 )
 def test_invalid_call_names_what_is_wrong(
-    name: str, raw_arguments: str, tool_names: list[str], error_parts: list[str]
+    name: str, raw_arguments: str, tools: dict[str, dict[str, object]], error_parts: list[str]
 ) -> None:
     with pytest.raises(InvalidCallError) as raised:
-        check_call(name, raw_arguments, tool_names)
+        check_call(name, raw_arguments, tools)
     for part in error_parts:
         assert part in str(raised.value)

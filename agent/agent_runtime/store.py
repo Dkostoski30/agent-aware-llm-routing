@@ -29,6 +29,10 @@ class RunRecord:
 class RunStore(Protocol):
     async def save(self, record: RunRecord, messages: list[dict[str, Any]]) -> None: ...
 
+    async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
+        """The run request's files, saved once before the run starts (D13)."""
+        ...
+
     async def get(self, run_id: str) -> tuple[RunRecord, list[dict[str, Any]]] | None:
         """The run's last saved record and messages, or None if it is unknown or expired."""
         ...
@@ -38,11 +42,13 @@ _INT_FIELDS = ("step", "expected_steps", "invalid_calls", "created_ms", "updated
 
 
 class RedisStore:
-    """thesis:run:<id> is a hash of the record, thesis:run:<id>:messages the messages as JSON.
+    """thesis:run:<id> is a hash of the record, thesis:run:<id>:messages the messages as JSON,
+    thesis:run:<id>:files the run request's files as JSON.
 
-    Both are written in one MULTI transaction with the same TTL, so a reader (P4.4 failover on
-    another pod) never sees a record and messages from different steps. The client must decode
-    responses (decode_responses=True), so the hash comes back as strings.
+    The record and messages are written in one MULTI transaction with the same TTL, so a reader
+    (P4.4 failover on another pod) never sees a record and messages from different steps. The files
+    are written once; every save renews their TTL with the run's, so they expire together. The
+    client must decode responses (decode_responses=True), so the hash comes back as strings.
     """
 
     def __init__(self, redis: Redis, ttl_seconds: int) -> None:
@@ -60,7 +66,12 @@ class RedisStore:
             pipe.hset(key, mapping=fields)
             pipe.set(f"{key}:messages", json.dumps(messages), ex=self._ttl_seconds)
             pipe.expire(key, self._ttl_seconds)
+            pipe.expire(f"{key}:files", self._ttl_seconds)
             await pipe.execute()
+
+    async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
+        key = f"thesis:run:{run_id}:files"
+        await self._redis.set(key, json.dumps(files), ex=self._ttl_seconds)
 
     async def get(self, run_id: str) -> tuple[RunRecord, list[dict[str, Any]]] | None:
         key = f"thesis:run:{run_id}"

@@ -6,12 +6,14 @@ the shape vLLM's /v1/chat/completions returns it.
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from agent_runtime.config import AgentConfig, Sampling, ToolChoice
+from agent_runtime.csv_tools import Table, group_by, parse_file
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import RunResult, run_task
 from jsonschema import Draft202012Validator
@@ -25,6 +27,10 @@ TASK = "What is 7 times 8 plus 3?"
 SYSTEM_PROMPT = "You are a calculator agent."
 MAX_STEPS = 4
 MAX_INVALID_CALLS = 2
+MAX_RESULT_ROWS = 20
+SALES = parse_file(
+    "sales", "sales.csv", (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
+)
 
 
 def make_config(mode: ToolChoice) -> AgentConfig:
@@ -38,6 +44,9 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         history_ttl_seconds=60,
         sampling=Sampling(temperature=0.7, top_p=0.8, top_k=20),
         system_prompt=SYSTEM_PROMPT,
+        max_file_bytes=1000,
+        max_files=2,
+        max_result_rows=MAX_RESULT_ROWS,
     )
 
 
@@ -103,12 +112,13 @@ class ScriptedLLM:
 
 
 async def run(
-    mode: ToolChoice, llm: ScriptedLLM, seed: int | None = 7
+    mode: ToolChoice, llm: ScriptedLLM, seed: int | None = 7, tables: Sequence[Table] = ()
 ) -> tuple[RunResult, ScriptedLLM]:
     config = make_config(mode)
     transport = httpx.MockTransport(llm.handle)
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as http:
-        result = await run_task(TASK, RUN_ID, seed, config, LLMClient(http, config))
+        llm_client = LLMClient(http, config)
+        result = await run_task(TASK, RUN_ID, seed, config, llm_client, tables=tables)
     return result, llm
 
 
@@ -369,3 +379,60 @@ async def test_on_step_sees_every_step_that_leaves_the_run_going(mode: ToolChoic
     assert result.status == "done"
     assert [(step, invalid) for step, invalid, _ in seen] == [(1, 1), (2, 1)]
     assert [messages for _, _, messages in seen] == [result.messages[:4], result.messages[:6]]
+
+
+def group(by: str, value: str, agg: str, call_id: str = "call-1") -> dict[str, Any]:
+    return tool_call("group_by", {"file": "sales", "by": by, "value": value, "agg": agg}, call_id)
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_csv_tool_result_is_fed_back(mode: ToolChoice) -> None:
+    script = [calls(group("region", "revenue", "sum")), final(mode, "South")]
+    result, llm = await run(mode, ScriptedLLM(script), tables=[SALES])
+    assert (result.status, result.answer, result.invalid_calls) == ("done", "South", 0)
+    expected = group_by(SALES, "region", "revenue", "sum", MAX_RESULT_ROWS)
+    assert llm.bodies()[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call-1",
+        "content": json.dumps(expected),
+    }
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_tool_schemas_offer_the_runs_files(mode: ToolChoice) -> None:
+    _, llm = await run(mode, ScriptedLLM([final(mode, "none")]), tables=[SALES])
+    tools = {tool["function"]["name"]: tool["function"] for tool in llm.bodies()[0]["tools"]}
+    properties = tools["group_by"]["parameters"]["properties"]
+    assert properties["file"]["enum"] == ["sales"]
+    assert properties["by"]["enum"] == ["region", "product", "units", "revenue"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_text_value_column_is_a_tool_error_not_an_invalid_call(mode: ToolChoice) -> None:
+    script = [calls(group("region", "product", "sum")), final(mode, "none")]
+    result, llm = await run(mode, ScriptedLLM(script), tables=[SALES])
+    assert (result.status, result.invalid_calls) == ("done", 0)
+    error = json.loads(llm.bodies()[1]["messages"][-1]["content"])["error"]
+    assert "text column" in error
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_tool_error_is_logged_with_the_tool_and_its_error(
+    mode: ToolChoice, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_runtime")
+    script = [calls(group("region", "product", "sum")), final(mode, "none")]
+    await run(mode, ScriptedLLM(script), tables=[SALES])
+    errors = [record.__dict__ for record in caplog.records if record.getMessage() == "tool error"]
+    assert len(errors) == 1
+    assert (errors[0]["run-id"], errors[0]["step"], errors[0]["tool"]) == (RUN_ID, 1, "group_by")
+    assert "text column" in errors[0]["error"]
+
+
+async def test_auto_column_outside_the_enum_is_retried_with_the_allowed_values() -> None:
+    script = [calls(group("country", "revenue", "sum")), text("South")]
+    result, llm = await run("auto", ScriptedLLM(script), tables=[SALES])
+    assert (result.status, result.answer, result.invalid_calls) == ("done", "South", 1)
+    error = json.loads(llm.bodies()[1]["messages"][-1]["content"])["error"]
+    for allowed in ("'country'", "'region'", "'product'", "'units'", "'revenue'"):
+        assert allowed in error

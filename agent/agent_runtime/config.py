@@ -29,6 +29,10 @@ class AgentConfig:
     history_ttl_seconds: int
     sampling: Sampling
     system_prompt: str
+    # Limits on the files of a run request (D13) and on the rows of a tool result (P1.6a).
+    max_file_bytes: int
+    max_files: int
+    max_result_rows: int
 
 
 def load_config(path: Path) -> AgentConfig:
@@ -49,4 +53,7 @@ def load_config(path: Path) -> AgentConfig:
         history_ttl_seconds=agent["history_ttl_seconds"],
         sampling=Sampling(**agent["sampling"]),
         system_prompt=agent["system_prompt"],
+        max_file_bytes=agent["max_file_bytes"],
+        max_files=agent["max_files"],
+        max_result_rows=agent["max_result_rows"],
     )
