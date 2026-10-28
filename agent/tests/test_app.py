@@ -300,8 +300,10 @@ def test_steps_show_invalid_calls_and_rejected_answers() -> None:
     assert (steps[3]["content"], steps[3]["error"]) == ("56", None)
 
 
-EVENTS_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "run-events.v1.json"
-VALIDATOR = Draft202012Validator(json.loads(EVENTS_SCHEMA.read_text()))
+EVENTS_SCHEMA = json.loads(
+    (Path(__file__).resolve().parents[2] / "schemas" / "run-events.v1.json").read_text()
+)
+VALIDATOR = Draft202012Validator(EVENTS_SCHEMA)
 RUN_ID = "run-0123456789ab"
 CREATED_MS = 1_000
 
@@ -309,8 +311,11 @@ Snapshot = tuple[RunRecord, list[dict[str, Any]]] | None
 
 
 def checked(events: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
-    for _, data in events:
+    """Each event's data is a run-events.v1 of the kind its SSE event name says: every field of a
+    kind is required and no other is allowed, so the fields tell the kind."""
+    for name, data in events:
         VALIDATOR.validate(data)
+        assert set(data) == set(EVENTS_SCHEMA["$defs"][name]["required"])
     return events
 
 
@@ -480,6 +485,20 @@ def test_invalid_calls_reach_the_stream() -> None:
     assert "'multiply'" in steps[0]["tool_calls"][0]["result"]["error"]
     assert "could not be parsed" in steps[1]["error"]
     assert (events[-1][1]["answer"], events[-1][1]["invalid_calls"]) == ("56", 2)
+
+
+def test_arguments_that_are_not_json_reach_the_stream_as_text() -> None:
+    call = {"name": "calculator", "arguments": '{"op": "add"'}
+    broken = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": call}],
+    }
+    service = Service([broken, text("3")])
+    events = stream(service, service.start({"task": TASK}))
+    [first] = events[1][1]["tool_calls"]
+    assert first["arguments"] == '{"op": "add"'
+    assert "error" in first["result"]
 
 
 def test_failed_run_ends_with_its_error() -> None:

@@ -63,7 +63,7 @@
                 "description": "The call's arguments as JSON, or the raw text when the model wrote invalid JSON."
               },
               "result": {
-                "description": "What the tool returned, or the error the runtime sent back for an invalid call; null for final_answer, which ends the run instead.",
+                "description": "What the tool returned, or the error the runtime sent back for an invalid call; null for a call that never ran: final_answer, which ends the run; every call after it, or after the invalid call that hit agent.max_invalid_calls, in the same reply; every call of a reply cut off at model.max_model_len (finish_reason length).",
                 "type": ["object", "null"]
               }
             },

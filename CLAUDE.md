@@ -15,11 +15,11 @@ The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one tas
 - Pinned versions live in `versions.md`. Never upgrade anything without being asked.
 - Every tunable lives in a `config/` profile (`real`, `sim`, `demo`); nothing is hardcoded. Each routing rule has a feature flag. Experiments are YAML files in `experiments/` (D11).
 - Infra wait times (install and readiness timeouts in `infra/` scripts) are not experiment tunables: they stay in the script as a named constant with a comment saying why, not in `config/`.
-- Headers and the trace format follow the versioned schemas in `schemas/`; contract tests must pass in every component that reads or writes them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run, `request-id` on app backend lines outside a run (D12).
+- Headers, the trace format, the run request and the run events follow the versioned schemas in `schemas/`; contract tests must pass in every component that reads or writes them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run, `request-id` on app backend lines outside a run (D12).
 
 ## Layout
 - `config/` profiles: real, sim, demo
-- `schemas/` versioned JSON schemas for headers, traces and the run request
+- `schemas/` versioned JSON schemas for headers, traces, the run request and the run events
 - `infra/` cluster setup, Helm values, manifests
 - `gateway/` Go scheduling plugin
 - `agent/` Python FastAPI agent runtime and tools
