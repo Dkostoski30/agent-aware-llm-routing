@@ -13,6 +13,30 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.6d + P1.6e · red (no-go, both undone)
+Command: `make up PROFILE=demo` · `make go-no-go`, twice: with P1.6d and P1.6e, then with P1.6d alone
+Result:
+- P1.6d + P1.6e (agent `thesis/agent:a7184f58c573`, prompt with the off-topic sentence): required 7/10, auto 7/10,
+  0 invalid calls. No-go.
+- P1.6d alone (same agent, sentence taken out as card 15e says): required 8/10, auto 6/10, 0 invalid calls. No-go.
+  `demo-go-no-go-1f9b63bc24ca-a7184f58c573.csv` is on branch `wip/p1.6d-calculator-expression` with the code that
+  made it; the first run's CSV had the same name and was overwritten.
+- group-total ("total revenue of the North region"): 1/4 in the first run, 0/4 in the second, against 4/4 in P1.6c.
+  In every run read from Redis the model called group_by(region, revenue, sum), got North's 14351.1, then called
+  calculator("14351.1 + 11341.8 + 10622.2 + 9551.0") and answered 45,866.10.
+- two-step, auto: 0/2 in both runs, as in P1.6c. The answer reads right ("Widget ... 15116.5"), but the model
+  counted rows per product (all tie at 12) and compared only Widget and Gadget, so Widget is a guess and the
+  scorer's expected group_by(product, units, sum) call is missing. required two-step lost one seed in the first run
+  (Gizmo, the most revenue, named as the most units).
+Notes:
+- The whole-expression calculator is the cause, not the off-topic sentence: without the sentence group-total still
+  fails every run. With one operation per call (P1.6c) the 1.7B never added the groups; an expression invites it.
+- Rule 8: two no-gos with this calculator, so P1.6d and P1.6e are undone and Gate 1 stands on P1.6c (required
+  10/10). Decided with the user: next, P1.6f offers the calculator only on runs without files, on a green gate, and
+  starts from the saved branch. The 0.6B keeps answering 2x2x2 with 4 until then.
+- go_no_go.py names its result after the experiment file and the agent image tag, not the profile, so a run with
+  only a prompt change overwrites the previous result. Reported, not fixed (outside these cards).
+
 ### 2026-10-28 · P1.5 · green
 Command: on the demo profile `make smoke` · `kubectl scale deployment/agent --replicas=0` · `make smoke` ·
 `kubectl scale deployment/agent --replicas=1` · `make smoke` · `make agent-check`; then `make down && make up` (real)
