@@ -1,0 +1,42 @@
+# Run history of the agent runtime (D7, P1.3b): one Redis, no persistence. A run's history is short-lived state
+# (agent.history_ttl_seconds), so a restart that loses it costs only the step view of past runs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+    spec:
+      containers:
+        - name: redis
+          # Redis 8.10.2 (2026-09-17), the newest release at least two weeks old on 2026-10-27 (versions.md).
+          image: redis:8.10.2-alpine@sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b
+          # --save "" and --appendonly no: no RDB snapshots and no append-only file, so nothing is written to disk.
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: default
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

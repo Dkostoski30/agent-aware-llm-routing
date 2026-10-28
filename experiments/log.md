@@ -13,6 +13,48 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.3b · green
+Command: `make down && make up` on a fresh cluster (the night left 4 vLLM pods Unknown and 2 never Ready after k3s
+restarted), then `make agent-check`
+Result:
+- `make up` (2026-10-27) exit 0: deploy-agent built `thesis/agent:1027ead9b883` (~220 MB), imported it into k3s in
+  9.3 s, and rolled out redis and agent; both Running 1/1 next to the two vLLM pods, the Gateway and the EPP.
+- `make agent-check` OK: run `run-bcf08c6a0ef0`, "What is 7 times 8?" seed 7. Step 1 `calculator multiply(7,8)` ->
+  56, step 2 "The result is 56.". Access log: `{"step":"1","expected-steps":"2","endpoint":"10.42.0.12:8000"}` and
+  step 2 on the same pod. Redis `thesis:run:run-bcf08c6a0ef0`: status done, step 2, expected_steps 2,
+  invalid_calls 0, 5 messages.
+Notes:
+- expected-steps 2 in the access log is the profile's new value, so a ConfigMap change reaches the pod through the
+  thesis/config-hash restart (P1.6b switches the D10 mode this way).
+- The run took 26.8 s (created_ms to updated_ms), against ~3 s per run on the warm cluster the day before: most likely
+  the first requests to freshly loaded pods. RUN_TIMEOUT_SECONDS (300 s) covers it; watch it in P1.5.
+- Both steps landed on one pod, as on 2026-10-27: nothing pins a run before P3.3, so this is the default picker's
+  prefix-cache scorer matching the shared prompt.
+
+### 2026-10-27 · P1.3b model check · done
+Command: `make down && make up` (exit 0; redis and agent Running 1/1 next to both vLLM pods), then `make agent-check`
+with the first task "What is 7 times 8 plus 3?" (answer 59), then 10 seeds per variant: the agent loop run from the host
+against the Gateway's ClusterIP (scratch script, not in the repo), config/real.yaml unless noted
+Result:
+- Infrastructure green on the first task: access-log lines `{"step":"1","expected-steps":"3","endpoint":"10.42.0.13:8000"}`
+  and step 2 on the same pod; Redis hash `thesis:run:run-58ebd4b24aa6` with status done, step 2, 5 messages. The answer
+  was 21, so the check failed.
+- Config prompt, seeds 1-10: 0/10. 9 seeds called `multiply(7,3)` and answered 21; seed 5 called `multiply(7,8)` and
+  answered 56 without the second operation.
+- Prompt telling it to split the question into operations and use the previous result: 0/10. Both calls in one response
+  (`multiply(7,8)` and `add(7,3)` in parallel, before 56 is known), answers like "56 and 10".
+- `parallel_tool_calls: false` (vLLM v0.31.0 keeps only the first generated call, `tool_calls[:1]`), either prompt: 0/10.
+  The model answers right after the first result; no run made a second call.
+- "What is 7 times 8?" with the config prompt: 10/10, `multiply(7,8)` then "The result is 56.", 2 calls each.
+Notes:
+- The 0.6B cannot chain two dependent tool calls with these prompts: it merges the operations, sends them at once with
+  the question's numbers, or stops after the first result. CLAUDE.md rule 8 stopped the prompt attempts after two.
+- Decision (2026-10-27): the calculator task of make agent-check and make smoke (P1.5) is "What is 7 times 8?", answer 56;
+  agent.expected_steps_default is 2 in every profile. It still proves a chain of calls sharing one context through every
+  layer. Multi-step quality is measured by P1.6b on the 1.7B demo model.
+- For the thesis: real-profile runs recorded on the 0.6B (P2.2) will be short, so long agent traces for the experiments
+  come from the converted AgentProcessBench traces (P2.4), not from the 0.6B's own runs.
+
 ### 2026-10-27 · P1.2 · green
 Command: `make down && make up` · `make gateway-check` · `kubectl top pods -A` · `kubectl top nodes`, one sequence
 on a fresh cluster with the final files (16:21 UTC, after the review fixes below)

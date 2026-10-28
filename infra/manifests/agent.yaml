@@ -1,0 +1,65 @@
+# The agent runtime (P1.3a, P1.3b): runs tasks as chains of LLM calls through the Gateway, history in Redis.
+# infra/deploy-agent.sh sets the image (tagged with a hash of the build context) and the thesis/config-hash
+# annotation before it applies this file; the placeholders below are never applied as they are.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent
+      annotations:
+        # Hash of the profile in the ConfigMap agent-config: a changed profile changes the pod template, so the pod
+        # restarts and reads it (P1.6b switches agent.tool_choice this way).
+        thesis/config-hash: set-by-deploy-agent
+    spec:
+      containers:
+        - name: agent
+          image: set-by-deploy-agent
+          # The image is imported into k3s by infra/deploy-agent.sh; there is no registry to pull it from.
+          imagePullPolicy: Never
+          env:
+            - name: THESIS_CONFIG
+              value: /etc/thesis/profile.yaml
+            - name: THESIS_SCHEMAS_DIR
+              value: /app/schemas
+            # The Gateway every LLM call goes through (infra/manifests/inference-gateway.yaml), port 80.
+            - name: GATEWAY_URL
+              value: http://inference-gateway.default.svc.cluster.local
+            - name: REDIS_URL
+              value: redis://redis.default.svc.cluster.local:6379/0
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/thesis
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: agent-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  namespace: default
+spec:
+  selector:
+    app.kubernetes.io/name: agent
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

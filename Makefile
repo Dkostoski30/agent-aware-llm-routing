@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check up down grafana smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward up down grafana smoke replay experiment
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -100,6 +100,19 @@ service-check:
 gateway-check:
 	bash infra/checks/gateway_check.sh
 
+# Redis and the agent runtime, image built from the working tree, config from config/$(PROFILE).yaml (P1.3b).
+agent-deploy:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make agent-deploy PROFILE=real|sim|demo"; exit 2; fi
+	bash infra/deploy-agent.sh $(PROFILE)
+
+# A calculator task through the agent: right answer, every call in the Gateway's access log, history in Redis (P1.3b).
+agent-check:
+	bash infra/checks/agent_check.sh
+
+# The agent's API on http://localhost:8080 until Ctrl+C; the UI's dev server proxies /api to it (P1.4).
+agent-forward:
+	kubectl port-forward svc/agent 8080:8080
+
 # The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 up:
@@ -109,6 +122,7 @@ up:
 	bash infra/download-model.sh $(or $(PROFILE),real)
 	$(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real)
 	bash infra/install-gateway.sh
+	bash infra/deploy-agent.sh $(or $(PROFILE),real)
 
 # Uninstalls what make up installs and stops k3s; keeps the k3s install, its images and the model cache (P1.0).
 down:

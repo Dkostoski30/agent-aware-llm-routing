@@ -46,15 +46,16 @@ agent:
   # vLLM constrains every call to the tool schemas and the run ends with final_answer: a malformed call is
   # impossible, which the demo's correctness needs most (D10). P1.6b compares both modes on this model.
   tool_choice: required
-  # Safety cap only (D1): about 3x the 3 calls the calculator task needs, so a model that keeps calling tools is
-  # stopped well before it fills max_model_len.
+  # Safety cap only (D1): 5x the 2 calls the calculator task needs, so a model that keeps calling tools is stopped
+  # well before it fills max_model_len.
   max_steps: 10
   # First guess, not measured: a run with three invalid calls (per run, not in a row) is not converging. P1.6b counts
   # the real retries per run.
   max_invalid_calls: 3
-  # The calculator task: two tool calls and the answer. P2.4 replaces it with a value per task type from recorded
-  # runs (D1); D13 updates it once the scenario is picked.
-  expected_steps_default: 3
+  # The calculator task "What is 7 times 8?": one tool call and the answer. The 0.6B cannot chain two operations
+  # (P1.3b, experiments/log.md). P2.4 replaces it with a value per task type from recorded runs (D1); D13 updates it
+  # once the scenario is picked.
+  expected_steps_default: 2
   # Carried over from real: P0.4's p95 of 9.5 s (4 requests in flight per replica) was measured on the 0.6B, and the
   # 1.7B single replica is not measured under load yet (P1.6b). 120 s is still more than 10x that p95, so it bounds a
   # stuck call, not a slow one.
