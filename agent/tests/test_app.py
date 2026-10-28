@@ -20,6 +20,9 @@ from fastapi.testclient import TestClient
 RUN_REQUEST_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "run-request.v1.json"
 TASK = "What is 7 times 8 plus 3?"
 EXPECTED_STEPS = 3
+SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
+MAX_FILE_BYTES = len(SALES_CSV)
+SALES_FILE = {"id": "sales", "name": "sales.csv", "content": SALES_CSV}
 
 
 def make_config() -> AgentConfig:
@@ -33,6 +36,9 @@ def make_config() -> AgentConfig:
         history_ttl_seconds=60,
         sampling=Sampling(temperature=0.7, top_p=0.8, top_k=20),
         system_prompt="You are a calculator agent.",
+        max_file_bytes=MAX_FILE_BYTES,
+        max_files=2,
+        max_result_rows=20,
     )
 
 
@@ -54,9 +60,13 @@ class MemoryStore:
 
     def __init__(self) -> None:
         self.saves: list[tuple[RunRecord, list[dict[str, Any]]]] = []
+        self.files: dict[str, list[dict[str, str]]] = {}
 
     async def save(self, record: RunRecord, messages: list[dict[str, Any]]) -> None:
         self.saves.append((record, list(messages)))
+
+    async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
+        self.files[run_id] = files
 
     async def get(self, run_id: str) -> tuple[RunRecord, list[dict[str, Any]]] | None:
         found = [save for save in self.saves if save[0].run_id == run_id]
@@ -136,6 +146,51 @@ def test_invalid_request_is_rejected_before_a_run_starts(body: dict[str, Any] | 
     assert response.status_code == 422
     assert service.store.saves == []
     assert service.requests == []
+
+
+@pytest.mark.parametrize(
+    ("files", "detail_parts"),
+    [
+        ([SALES_FILE, {**SALES_FILE, "id": "b"}, {**SALES_FILE, "id": "c"}], ["agent.max_files"]),
+        ([{**SALES_FILE, "content": SALES_CSV + "x"}], ["agent.max_file_bytes"]),
+        ([SALES_FILE, SALES_FILE], ["duplicate file id"]),
+        ([{**SALES_FILE, "content": "a,a\n1,2\n"}], ["duplicate column"]),
+        ([{**SALES_FILE, "id": "Sales.csv"}], ["not a run-request.v1"]),
+    ],
+    ids=["too-many", "too-big", "duplicate-id", "bad-csv", "id-not-a-slug"],
+)
+def test_file_the_run_cannot_use_is_rejected_before_it_starts(
+    files: list[dict[str, str]], detail_parts: list[str]
+) -> None:
+    service = Service([text("59")])
+    response = service.client.post("/runs", json={"task": TASK, "files": files})
+    assert response.status_code == 422
+    for part in detail_parts:
+        assert part in response.json()["detail"]
+    assert (service.store.saves, service.store.files, service.requests) == ([], {}, [])
+
+
+def test_files_are_saved_with_the_run_and_reach_the_tools() -> None:
+    arguments = {"file": "sales", "by": "region", "value": "revenue", "agg": "sum"}
+    call = {"name": "group_by", "arguments": json.dumps(arguments)}
+    group = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": call}],
+    }
+    service = Service([group, text("South")])
+    run_id = service.start({"task": TASK, "files": [SALES_FILE]})
+    assert service.store.files == {run_id: [SALES_FILE]}
+    run = service.client.get(f"/runs/{run_id}").json()
+    assert (run["status"], run["answer"]) == ("done", "South")
+    result = run["steps"][0]["tool_calls"][0]["result"]
+    assert result["rows"][0] == {"group": "South", "sum": 380.0}
+
+
+def test_a_run_without_files_saves_an_empty_file_list() -> None:
+    service = Service([text("59")])
+    run_id = service.start({"task": TASK})
+    assert service.store.files == {run_id: []}
 
 
 def test_unknown_run_is_404() -> None:

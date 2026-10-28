@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 
 from agent_runtime import logs
 from agent_runtime.config import AgentConfig, load_config
+from agent_runtime.csv_tools import FileError, Table, read_files
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import initial_messages, run_task
 from agent_runtime.store import RedisStore, RunRecord, RunStore
@@ -80,12 +81,12 @@ def create_app(
     validator = Draft202012Validator(run_request_schema)
     app = FastAPI()
 
-    async def execute(record: RunRecord, seed: int | None) -> None:
+    async def execute(record: RunRecord, seed: int | None, tables: list[Table]) -> None:
         async def save_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
             updated = replace(record, step=step, invalid_calls=invalid_calls, updated_ms=_now_ms())
             await store.save(updated, messages)
 
-        result = await run_task(record.task, record.run_id, seed, config, llm, save_step)
+        result = await run_task(record.task, record.run_id, seed, config, llm, save_step, tables)
         final = replace(
             record,
             status=result.status,
@@ -106,6 +107,11 @@ def create_app(
         violation = best_match(validator.iter_errors(body))
         if violation is not None:
             raise HTTPException(422, f"not a run-request.v1: {violation.message}")
+        files = body.get("files", [])
+        try:
+            tables = read_files(files, config.max_files, config.max_file_bytes)
+        except FileError as error:
+            raise HTTPException(422, f"files: {error}") from error
         now = _now_ms()
         record = RunRecord(
             run_id=f"run-{secrets.token_hex(6)}",
@@ -119,9 +125,11 @@ def create_app(
             created_ms=now,
             updated_ms=now,
         )
-        # Saved before 202, so a GET right after it finds the run instead of a 404.
+        # Saved before 202, so a GET right after it finds the run instead of a 404. The files first,
+        # so a saved run always has its files (P4.4 failover reads both).
+        await store.save_files(record.run_id, files)
         await store.save(record, initial_messages(record.task, config))
-        background.add_task(execute, record, body.get("seed"))
+        background.add_task(execute, record, body.get("seed"), tables)
         return {"run_id": record.run_id}
 
     @app.get("/runs/{run_id}")

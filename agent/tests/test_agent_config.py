@@ -32,3 +32,11 @@ def test_unknown_tool_choice_is_rejected(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump(profile))
     with pytest.raises(ValueError, match="tool_choice"):
         load_config(path)
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+def test_profile_sets_the_file_and_result_limits(profile: str) -> None:
+    config = load_config(CONFIG_DIR / f"{profile}.yaml")
+    assert config.max_file_bytes > 0
+    assert config.max_files > 0
+    assert config.max_result_rows > 0

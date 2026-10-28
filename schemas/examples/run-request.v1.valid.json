@@ -1,4 +1,11 @@
 {
-  "task": "What is 7 times 8 plus 3?",
-  "seed": 7
+  "task": "Which region had the highest total revenue?",
+  "seed": 7,
+  "files": [
+    {
+      "id": "sales",
+      "name": "sales.csv",
+      "content": "region,revenue\nNorth,350.5\nSouth,380\nEast,30\n"
+    }
+  ]
 }
