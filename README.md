@@ -39,7 +39,7 @@ make reset-app   # wipe app users, chats and files (make down keeps them)
 
 ```
 config/        profiles: real, sim, demo
-schemas/       versioned JSON schemas: headers, trace, run request
+schemas/       versioned JSON schemas: headers, trace, run request, run events
 infra/         setup scripts, Helm values, manifests
 gateway/       Go Endpoint Picker plugin
 agent/         Python agent runtime, tools, run tracker
