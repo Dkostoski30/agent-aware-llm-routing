@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward up down grafana smoke replay experiment go-no-go
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke replay experiment go-no-go
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -112,6 +112,16 @@ agent-check:
 # The agent's API on http://localhost:8080 until Ctrl+C; the UI's dev server proxies /api to it (P1.4).
 agent-forward:
 	kubectl port-forward svc/agent 8080:8080
+
+# The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
+# forwarding; it proxies /api to make agent-forward (ui/proxy.conf.json). profile.json feeds the top bar's chip, so
+# PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
+ui:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make ui PROFILE=real|sim|demo"; exit 2; fi
+	cd ui && npm ci --no-audit --no-fund
+	yq -e -o json '{"profile": "$(PROFILE)", "model": (.model.name | split("/") | .[-1])}' config/$(PROFILE).yaml \
+		> ui/public/profile.json
+	cd ui && npx --no-install ng serve
 
 # The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.

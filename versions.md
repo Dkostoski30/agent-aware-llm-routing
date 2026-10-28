@@ -71,6 +71,28 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 | uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25) |
 | redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
 
+## UI packages
+
+Pinned exactly in `ui/package.json` (P1.4a); packages they pull in are pinned by `ui/package-lock.json` only.
+`ng new` (Angular CLI 22.2.2) generated the first block with `^` ranges; each pin is the newest release at least two
+weeks old on 2026-10-28, so a few are one patch below what `ng new` installed. No UI library (D14).
+
+| Package | Version | Why |
+|---|---|---|
+| @angular/core, common, compiler, forms, platform-browser, router | 22.2.3 | `ng new` (2026-10-14) |
+| @angular/compiler-cli | 22.2.3 | `ng new`, matches the framework |
+| @angular/build, @angular/cli | 22.2.2 | `ng new`; same as the global Angular CLI (22.2.4 was 6 days old) |
+| typescript | 6.0.3 | `ng new` (`@angular/build` 22.2 takes >=6.0 <6.1) |
+| rxjs | 7.8.2 | `ng new` |
+| tslib | 2.8.1 | `ng new` |
+| vitest | 5.0.4 | `ng new`'s test runner (5.0.5 was 13 days old) |
+| jsdom | 30.1.2 | `ng new`, the DOM vitest runs in (30.1.3 was 13 days old) |
+| prettier | 3.9.10 | `ng new` |
+| angular-eslint | 22.6.0 | `ng add angular-eslint`, for the eslint pre-commit hook (P0.0) |
+| eslint | 10.12.0 | `ng add angular-eslint` (10.13.0 was 12 days old) |
+| @eslint/js | 10.0.1 | `ng add angular-eslint` |
+| typescript-eslint | 8.71.2 | `ng add angular-eslint` (8.72.0 was 9 days old) |
+
 ## Container and cluster
 
 Docker and the Toolkit are pinned in `infra/install-docker-gpu.sh` (apt, exact versions). Unlike the dev tools,
