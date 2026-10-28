@@ -93,7 +93,8 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | Endpoint Picker (llm-d-router, Helm chart `llm-d-router-gateway`) | v0.11.0 (2026-09-27; v1.0.0 of 2026-10-16 was 11 days old), chart digest `sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0`, image `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf`. Built on GAIE v1.5.0; its InferencePool fields match the v1.6.2 CRD. Pinned in `infra/install-gateway.sh` and `infra/helm/router-values.yaml` |
 | KEDA | |
 | kube-prometheus-stack (Helm chart) | 92.3.0 (2026-10-10, the newest release at least two weeks old on 2026-10-26): Prometheus Operator v0.94.1, Prometheus v3.15.0, Grafana 13.2.3, kube-state-metrics v2.20.0, k8s-sidecar 2.14.1. Pinned in `infra/install-monitoring.sh` |
-| Redis | |
+| Redis (image `redis`) | 8.10.2-alpine (2026-09-17, the newest release at least two weeks old on 2026-10-27; 8.10.3 was a day old), digest `sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b`, no persistence (D7). Pinned in `infra/manifests/redis.yaml` (P1.3b) |
+| Agent runtime base image (`python`) | 3.12.15-slim (2026-09-30, the newest 3.12 release at least two weeks old on 2026-10-27; 3.12.16 was two days old), digest `sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704`. The built image is ~220 MB. Pinned in `agent/Dockerfile` (P1.3b) |
 | SQLite (Python `sqlite3`, app backend) | |
 | llm-d-inference-sim | |
 

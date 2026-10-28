@@ -25,7 +25,11 @@ uninstall_release() {
 }
 
 if systemctl is-active --quiet k3s; then
-  # Reverse order of make up. The Gateway goes first, while its controller still runs to remove the proxy it created.
+  # Reverse order of make up: the agent runtime and Redis first (infra/deploy-agent.sh). Then the Gateway, while its
+  # controller still runs to remove the proxy it created.
+  kubectl delete -f "$REPO_ROOT/infra/manifests/agent.yaml" -f "$REPO_ROOT/infra/manifests/redis.yaml" \
+    --ignore-not-found --wait --timeout "$UNINSTALL_TIMEOUT"
+  kubectl delete configmap agent-config --ignore-not-found
   # A cluster from before P1.2 has no agentgateway CRDs, and kubectl delete fails on a kind it does not know.
   if kubectl get crd agentgatewayparameters.agentgateway.dev >/dev/null 2>&1; then
     kubectl delete -f "$REPO_ROOT/infra/manifests/inference-gateway.yaml" --ignore-not-found --wait \
