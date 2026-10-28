@@ -1,21 +1,25 @@
-"""The run API (P1.3a-2): POST /runs, GET /runs/{id}, /healthz, history saved after every step.
+"""The run API (P1.3a-2, P1.4b-1): POST /runs, GET /runs/{id}, its events over SSE, /healthz,
+history saved after every step.
 
 The LLM is httpx.MockTransport with scripted replies; the store is an in-memory class behind the
 RunStore interface, so these tests need no Redis. TestClient finishes a request's background task
-before it returns, so a run is over when POST /runs answers.
+before it returns, so a run is over when POST /runs answers. The live part of the event stream is
+tested on run_events with a store that returns a scripted snapshot per read, so a test decides what
+each poll sees. Every event a test gets is validated against schemas/run-events.v1.json (D12).
 """
 
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
-from agent_runtime.app import create_app
+from agent_runtime.app import create_app, run_events
 from agent_runtime.config import AgentConfig, Sampling
-from agent_runtime.store import RunRecord
+from agent_runtime.store import RunRecord, RunStatus, RunStore
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 
 RUN_REQUEST_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "run-request.v1.json"
 TASK = "What is 7 times 8 plus 3?"
@@ -40,6 +44,7 @@ def make_config() -> AgentConfig:
         max_files=2,
         max_result_rows=20,
         result_decimals=2,
+        events_poll_seconds=0.01,
     )
 
 
@@ -293,3 +298,199 @@ def test_steps_show_invalid_calls_and_rejected_answers() -> None:
     assert "could not be parsed" in steps[1]["error"]
     assert steps[2]["tool_calls"][0]["result"] == {"result": 56}
     assert (steps[3]["content"], steps[3]["error"]) == ("56", None)
+
+
+EVENTS_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "run-events.v1.json"
+VALIDATOR = Draft202012Validator(json.loads(EVENTS_SCHEMA.read_text()))
+RUN_ID = "run-0123456789ab"
+CREATED_MS = 1_000
+
+Snapshot = tuple[RunRecord, list[dict[str, Any]]] | None
+
+
+def checked(events: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, dict[str, Any]]]:
+    for _, data in events:
+        VALIDATOR.validate(data)
+    return events
+
+
+def saved_record(step: int, status: RunStatus = "running", answer: str | None = None) -> RunRecord:
+    """The run's record after step; every step takes 100 ms."""
+    return RunRecord(
+        run_id=RUN_ID,
+        status=status,
+        task=TASK,
+        step=step,
+        expected_steps=3,
+        invalid_calls=0,
+        answer=answer,
+        error=None,
+        created_ms=CREATED_MS,
+        updated_ms=CREATED_MS + 100 * step,
+    )
+
+
+def tool_result(result: dict[str, Any]) -> dict[str, Any]:
+    return {"role": "tool", "tool_call_id": "call-1", "content": json.dumps(result)}
+
+
+# The saves of a run that multiplies, adds and answers, as the agent writes them.
+STEP_0 = [
+    {"role": "system", "content": "You are a calculator agent."},
+    {"role": "user", "content": TASK},
+]
+STEP_1 = [*STEP_0, calc("multiply", 7, 8), tool_result({"result": 56})]
+STEP_2 = [*STEP_1, calc("add", 56, 3), tool_result({"result": 59})]
+DONE = [*STEP_2, {"role": "assistant", "content": "59"}]
+
+
+class ScriptedStore:
+    """Returns the next snapshot on every read and the last one once the script runs out."""
+
+    def __init__(self, snapshots: list[Snapshot]) -> None:
+        self.snapshots = snapshots
+        self.reads = 0
+
+    async def get(self, run_id: str) -> Snapshot:
+        assert run_id == RUN_ID
+        snapshot = self.snapshots[min(self.reads, len(self.snapshots) - 1)]
+        self.reads += 1
+        return snapshot
+
+
+async def collect(store: ScriptedStore) -> list[tuple[str, dict[str, Any]]]:
+    reader = run_events(cast(RunStore, store), RUN_ID, 0)
+    events = [(event.event or "", event.data) async for event in reader]
+    return checked(events)
+
+
+def kinds(events: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    return [f"{name} {data['step']}" if name == "step" else name for name, data in events]
+
+
+@pytest.mark.anyio
+async def test_saved_steps_then_live_steps_then_end() -> None:
+    store = ScriptedStore(
+        [
+            (saved_record(0), STEP_0),
+            (saved_record(1), STEP_1),
+            (saved_record(1), STEP_1),
+            (saved_record(2), STEP_2),
+            (saved_record(3, "done", "59"), DONE),
+        ]
+    )
+    events = await collect(store)
+    assert kinds(events) == ["run", "step 1", "step 2", "step 3", "end"]
+    assert store.reads == 5
+    assert events[0][1] == {
+        "run_id": RUN_ID,
+        "task": TASK,
+        "expected_steps": 3,
+        "created_ms": CREATED_MS,
+    }
+    assert events[1][1] == {
+        "run_id": RUN_ID,
+        "step": 1,
+        "expected_steps": 3,
+        "content": None,
+        "tool_calls": [
+            {
+                "name": "calculator",
+                "arguments": {"op": "multiply", "a": 7, "b": 8},
+                "result": {"result": 56},
+            }
+        ],
+        "error": None,
+    }
+    assert (events[3][1]["content"], events[3][1]["tool_calls"]) == ("59", [])
+    assert events[4][1] == {
+        "run_id": RUN_ID,
+        "status": "done",
+        "answer": "59",
+        "error": None,
+        "steps": 3,
+        "invalid_calls": 0,
+        "elapsed_ms": 300,
+    }
+
+
+@pytest.mark.anyio
+async def test_a_stream_opened_mid_run_gets_the_earlier_steps_again() -> None:
+    # The first stream loses its connection after step 1; here the run expiring ends it.
+    first = await collect(ScriptedStore([(saved_record(1), STEP_1), None]))
+    reconnect = await collect(
+        ScriptedStore([(saved_record(2), STEP_2), (saved_record(3, "done", "59"), DONE)])
+    )
+    assert kinds(first) == ["run", "step 1"]
+    assert kinds(reconnect) == ["run", "step 1", "step 2", "step 3", "end"]
+    assert reconnect[1] == first[1]
+
+
+@pytest.mark.anyio
+async def test_a_run_that_expires_mid_stream_closes_without_an_end() -> None:
+    store = ScriptedStore([(saved_record(1), STEP_1), None])
+    assert kinds(await collect(store)) == ["run", "step 1"]
+    assert store.reads == 2
+
+
+@pytest.mark.anyio
+async def test_final_answer_call_has_no_result() -> None:
+    final_call = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": "call-2", "function": {"name": "final_answer", "arguments": '{"answer": "56"}'}}
+        ],
+    }
+    store = ScriptedStore([(saved_record(2, "done", "56"), [*STEP_1, final_call])])
+    events = await collect(store)
+    assert kinds(events) == ["run", "step 1", "step 2", "end"]
+    assert events[2][1]["tool_calls"] == [
+        {"name": "final_answer", "arguments": {"answer": "56"}, "result": None}
+    ]
+
+
+def stream(service: Service, run_id: str) -> list[tuple[str, dict[str, Any]]]:
+    response = service.client.get(f"/runs/{run_id}/events")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = []
+    for block in response.text.strip().split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines())
+        events.append((fields["event"], json.loads(fields["data"])))
+    return checked(events)
+
+
+def test_finished_run_streams_its_steps_and_answer_then_closes() -> None:
+    service = Service([calc("multiply", 7, 8), calc("add", 56, 3), text("59")])
+    run_id = service.start({"task": TASK})
+    events = stream(service, run_id)
+    assert kinds(events) == ["run", "step 1", "step 2", "step 3", "end"]
+    assert {data["run_id"] for _, data in events} == {run_id}
+    end = events[-1][1]
+    assert (end["status"], end["answer"], end["steps"]) == ("done", "59", 3)
+    assert stream(service, run_id) == events
+
+
+def test_invalid_calls_reach_the_stream() -> None:
+    broken = text('<tool_call>\n{"name": "calculator", "arguments": {"op": "add"\n</tool_call>')
+    service = Service([calc("pow", 2, 3), broken, calc("multiply", 7, 8), text("56")])
+    events = stream(service, service.start({"task": TASK}))
+    steps = [data for name, data in events if name == "step"]
+    assert "'multiply'" in steps[0]["tool_calls"][0]["result"]["error"]
+    assert "could not be parsed" in steps[1]["error"]
+    assert (events[-1][1]["answer"], events[-1][1]["invalid_calls"]) == ("56", 2)
+
+
+def test_failed_run_ends_with_its_error() -> None:
+    service = Service([], failure=httpx.Response(500, json={"error": "scripted failure"}))
+    events = stream(service, service.start({"task": TASK}))
+    assert kinds(events) == ["run", "end"]
+    end = events[-1][1]
+    assert (end["status"], end["answer"], end["steps"]) == ("failed", None, 1)
+    assert "500" in end["error"]
+
+
+def test_events_of_an_unknown_run_is_404() -> None:
+    response = Service([]).client.get("/runs/run-000000000000/events")
+    assert response.status_code == 404

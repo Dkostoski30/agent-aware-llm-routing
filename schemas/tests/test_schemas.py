@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = SCHEMAS_DIR / "examples"
-SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1"]
+SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1", "run-events.v1"]
 REMOVE = object()
 
 
@@ -179,3 +179,90 @@ def test_run_request_file_rules(field: str, value: object, accepted: bool) -> No
     request = valid_example("run-request.v1")
     request["files"] = [with_change(request["files"][0], field, value)]
     assert validator_for("run-request.v1").is_valid(request) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("content", "56", True),
+        ("tool_calls", [], True),
+        ("error", "Error: answer with a call to one of the tools: calculator", True),
+        ("run_id", REMOVE, False),
+        ("step", REMOVE, False),
+        ("expected_steps", REMOVE, False),
+        ("content", REMOVE, False),
+        ("tool_calls", REMOVE, False),
+        ("error", REMOVE, False),
+        ("run_id", "", False),
+        ("step", 0, False),
+        ("step", "1", False),
+        ("expected_steps", 0, False),
+        ("tool_calls", {}, False),
+        ("pod", "vllm-0", False),
+    ],
+)
+def test_step_event_rules(field: str, value: object, accepted: bool) -> None:
+    event = with_change(valid_example("run-events.v1"), field, value)
+    assert validator_for("run-events.v1").is_valid(event) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("arguments", '{"op": "add"', True),
+        ("result", None, True),
+        ("result", {"error": "op must be one of add, subtract, multiply, divide"}, True),
+        ("name", REMOVE, False),
+        ("arguments", REMOVE, False),
+        ("result", REMOVE, False),
+        ("name", "", False),
+        ("result", 56, False),
+        ("id", "call-1", False),
+    ],
+)
+def test_step_event_tool_call_rules(field: str, value: object, accepted: bool) -> None:
+    event = valid_example("run-events.v1")
+    event["tool_calls"] = [with_change(event["tool_calls"][0], field, value)]
+    assert validator_for("run-events.v1").is_valid(event) is accepted
+
+
+RUN_EVENT = {
+    "run_id": "run-0a1b2c3d4e5f",
+    "task": "What is 7 times 8?",
+    "expected_steps": 2,
+    "created_ms": 1793102400123,
+}
+END_EVENT = {
+    "run_id": "run-0a1b2c3d4e5f",
+    "status": "done",
+    "answer": "56",
+    "error": None,
+    "steps": 2,
+    "invalid_calls": 0,
+    "elapsed_ms": 1840,
+}
+
+
+@pytest.mark.parametrize(
+    ("event", "field", "value", "accepted"),
+    [
+        (RUN_EVENT, "task", "x", True),
+        (RUN_EVENT, "task", "", False),
+        (RUN_EVENT, "created_ms", REMOVE, False),
+        (RUN_EVENT, "created_ms", -1, False),
+        (RUN_EVENT, "expected_steps", 0, False),
+        (END_EVENT, "status", "failed", True),
+        (END_EVENT, "answer", None, True),
+        (END_EVENT, "status", "running", False),
+        (END_EVENT, "steps", 0, False),
+        (END_EVENT, "invalid_calls", -1, False),
+        (END_EVENT, "elapsed_ms", REMOVE, False),
+        (END_EVENT, "elapsed_ms", 1.5, False),
+        (END_EVENT, "task", "What is 7 times 8?", False),
+    ],
+)
+def test_run_and_end_event_rules(
+    event: dict[str, Any], field: str, value: object, accepted: bool
+) -> None:
+    changed = with_change(event, field, value)
+    assert validator_for("run-events.v1").is_valid(changed) is accepted

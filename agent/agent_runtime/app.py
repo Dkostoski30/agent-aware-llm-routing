@@ -1,16 +1,20 @@
-"""The agent runtime's HTTP API: start a run, read it back, health (P1.3a-2)."""
+"""The agent runtime's HTTP API: start a run, read it back, stream its events, health
+(P1.3a-2, P1.4b-1)."""
 
+import asyncio
 import json
 import os
 import secrets
 import time
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 from redis.asyncio import Redis
@@ -69,6 +73,50 @@ def steps_view(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif message["role"] == "user" and steps:
             steps[-1]["error"] = message["content"]
     return steps
+
+
+async def run_events(
+    store: RunStore, run_id: str, poll_seconds: float
+) -> AsyncIterator[ServerSentEvent]:
+    """The run's events (schemas/run-events.v1.json): run, one step per saved step, then end.
+
+    Every poll reads the run from the store and sends the steps not sent yet, so a stream opened
+    mid-run first replays the earlier steps. A step is saved whole, after its tools ran, so a sent
+    step never changes. The stream ends after end, or without it once the run has expired.
+    """
+    found = await store.get(run_id)
+    if found is None:
+        return
+    record, _ = found
+    run = {
+        "run_id": record.run_id,
+        "task": record.task,
+        "expected_steps": record.expected_steps,
+        "created_ms": record.created_ms,
+    }
+    yield ServerSentEvent(event="run", data=run)
+    sent = 0
+    while found is not None:
+        record, messages = found
+        steps = steps_view(messages)
+        for step in steps[sent:]:
+            fields = {"run_id": record.run_id, "expected_steps": record.expected_steps, **step}
+            yield ServerSentEvent(event="step", data=fields)
+        sent = len(steps)
+        if record.status != "running":
+            end = {
+                "run_id": record.run_id,
+                "status": record.status,
+                "answer": record.answer,
+                "error": record.error,
+                "steps": record.step,
+                "invalid_calls": record.invalid_calls,
+                "elapsed_ms": record.updated_ms - record.created_ms,
+            }
+            yield ServerSentEvent(event="end", data=end)
+            return
+        await asyncio.sleep(poll_seconds)
+        found = await store.get(run_id)
 
 
 def create_app(
@@ -148,6 +196,20 @@ def create_app(
             "invalid_calls": record.invalid_calls,
             "steps": steps_view(messages),
         }
+
+    async def known_run(run_id: str) -> None:
+        """Answers 404 before the stream starts; once it has started, the status is already 200."""
+        if await store.get(run_id) is None:
+            raise HTTPException(404, f"unknown run {run_id}")
+
+    @app.get(
+        "/runs/{run_id}/events",
+        response_class=EventSourceResponse,
+        dependencies=[Depends(known_run)],
+    )
+    async def stream_run(run_id: str) -> AsyncIterator[ServerSentEvent]:
+        async for event in run_events(store, run_id, config.events_poll_seconds):
+            yield event
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
