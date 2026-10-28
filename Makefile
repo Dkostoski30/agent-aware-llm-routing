@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward up down grafana smoke replay experiment
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward up down grafana smoke replay experiment go-no-go
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
 test:
@@ -132,6 +132,11 @@ down:
 # anonymous users see the dashboards without a login (P1.1).
 grafana:
 	kubectl port-forward --namespace monitoring svc/monitoring-grafana 3000:80
+
+# 5 CSV questions x 2 seeds on the demo model in each D10 mode, scored, one CSV row per run in experiments/results/
+# (P1.6b). Needs make up PROFILE=demo; restarts the agent once per mode and puts config/demo.yaml back at the end.
+go-no-go:
+	uv run --locked python experiments/go_no_go.py experiments/demo-go-no-go.yaml
 
 smoke:
 	@echo "not implemented yet: P1.5"; exit 1

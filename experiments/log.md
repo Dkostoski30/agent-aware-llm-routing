@@ -13,6 +13,48 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-28 · P1.6b · red (no-go)
+Command: `make down && make up PROFILE=demo` · `make test` · `make go-no-go`, run three times (see notes)
+Result:
+- `make up PROFILE=demo` exit 0: `thesis/agent:c61bb199c383` imported in 8.3 s; redis and agent Running 1/1 next to
+  one vLLM pod (Qwen3-1.7B-GPTQ-Int8).
+- `make test`: 311 passed, 32 of them the new scorer tests.
+- Final scorer, `experiments/results/demo-go-no-go-9440b109d5fa.csv`, 20 rows: required 6/10 correct, 0 invalid
+  calls; auto 7/10 correct, 1 invalid call (group-mean seed 1, corrected on the retry). Decision: no-go.
+  config/demo.yaml keeps agent.tool_choice required.
+- Per question, both modes and seeds together: summary 4/4, group-total 4/4, group-mean 4/4, compare 1/4,
+  two-step 0/4.
+- required takes 3-6 steps and 6-15 s per run, auto 2-4 steps and 3-13 s: in required mode the model opens with
+  csv_summary on most questions and needs one more call for final_answer.
+Notes:
+- First run, scored as planned (a number in the answer within 1%, the expected tool ran): required 10/10,
+  auto 9/10, "go". The run histories in Redis showed it passed wrong runs:
+  - compare: all 4 runs called `compare(left=North, right=South)`, got `difference: -3728.9`, and 3 answered
+    "North made $3,728.90 less than South". The scorer read numbers without their sign.
+  - two-step: all 4 runs ranked the products with `group_by(agg=count)`. Every product has 12 rows, so the top
+    product was a guess: Widget 3 times (right by luck, one of them also saying Widget sold "a total of 12" units,
+    not 617), Gadget once.
+- Scorer strengthened (decided 2026-10-28): `expected_calls` names a call's arguments where the number does not
+  prove the call (two-step: group_by by product, value units, agg sum), and `wrong_if_matches` rejects a compare
+  answer that says North is lower. Re-scoring the first run's 20 histories from Redis gave 6/10 and 7/10, the
+  same as by hand.
+- Second run crashed when it switched to auto: its first auto run ended with final_answer, so the old required
+  pod answered it. That pod was still terminating after `kubectl rollout status` returned, and the script's pooled
+  keep-alive connection still led to it; the next poll was refused when it exited. Fixed in go_no_go.py: the
+  switch waits until the old pod is deleted, each mode gets a new HTTP client, and every done run is checked for
+  the mode that served it (final_answer only in required). The first run was clean: all 10 required runs ended
+  with final_answer, none of the 10 auto runs did.
+- Third run, before that fix: the same 20 answers word for word as the first run. With fixed seeds the demo model
+  is deterministic here, so a tool change can be compared run for run.
+- The failures are in how two tool results read, not in the model: the three single-aggregate kinds are 12/12 in
+  both modes. Next (decided 2026-10-28): a card that makes compare name the higher group with a positive
+  difference and gives group_by's row count a name that cannot pass for a total, then `make go-no-go` on the
+  unchanged experiment. Fine-tuning was considered and dropped: GPTQ weights cannot be trained, QLoRA on the FP16
+  1.7B barely fits the ~3.2 GiB of free VRAM, it needs new dependencies and training data, and it does not target
+  the two misreadings.
+- Answers copy floats as they come ("17.833333333333332"). Not wrong, but worth rounding in the tool results in the
+  same card.
+
 ### 2026-10-28 · P1.3b · green
 Command: `make down && make up` on a fresh cluster (the night left 4 vLLM pods Unknown and 2 never Ready after k3s
 restarted), then `make agent-check`
