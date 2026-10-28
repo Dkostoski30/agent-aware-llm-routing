@@ -28,6 +28,7 @@ SYSTEM_PROMPT = "You are a calculator agent."
 MAX_STEPS = 4
 MAX_INVALID_CALLS = 2
 MAX_RESULT_ROWS = 20
+RESULT_DECIMALS = 2
 SALES = parse_file(
     "sales", "sales.csv", (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 )
@@ -47,6 +48,7 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_file_bytes=1000,
         max_files=2,
         max_result_rows=MAX_RESULT_ROWS,
+        result_decimals=RESULT_DECIMALS,
     )
 
 
@@ -390,7 +392,7 @@ async def test_csv_tool_result_is_fed_back(mode: ToolChoice) -> None:
     script = [calls(group("region", "revenue", "sum")), final(mode, "South")]
     result, llm = await run(mode, ScriptedLLM(script), tables=[SALES])
     assert (result.status, result.answer, result.invalid_calls) == ("done", "South", 0)
-    expected = group_by(SALES, "region", "revenue", "sum", MAX_RESULT_ROWS)
+    expected = group_by(SALES, "region", "revenue", "sum", MAX_RESULT_ROWS, RESULT_DECIMALS)
     assert llm.bodies()[1]["messages"][-1] == {
         "role": "tool",
         "tool_call_id": "call-1",

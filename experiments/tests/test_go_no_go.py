@@ -12,6 +12,8 @@ from go_no_go import (
     is_correct,
     load_experiment,
     numbers_in,
+    ready_pod_ip,
+    result_path,
     served_mode,
 )
 
@@ -213,6 +215,13 @@ def test_is_correct_checks_the_arguments_a_question_names(calls: list[Call], cor
         ("The North region made $3,728.90 less revenue than the South region.", False),
         ("The North region made $3728.90 less than the South region in revenue.", False),
         ("The total revenue for the North region is $3728.90 more than the South region.", True),
+        # The compare summary sentence, copied by the model in P1.6c: "more" after South's value
+        # is the percentage of North's lead, not a claim about South.
+        (
+            "North's sum of revenue (14351.1) is 3728.9 higher than South's (10622.2), 35.1% more.",
+            True,
+        ),
+        ("North's revenue is 3,728.90 lower than South's.", False),
         # The same fact from the other side, and the opposite claim from the other side.
         ("South made 3,728.90 less than North.", True),
         ("South made 3,728.90 more than North.", False),
@@ -257,3 +266,58 @@ def test_served_mode(body: dict[str, Any], mode: str | None) -> None:
 )
 def test_decide(correct: dict[str, int], decision: str | None) -> None:
     assert decide(correct, threshold=9) == decision
+
+
+def test_result_path_carries_the_experiment_hash_and_the_agent_image_tag() -> None:
+    """A result is tied to the experiment file and to the agent code that produced it (D11)."""
+    experiment = load_experiment(EXPERIMENT)
+    path = result_path(experiment, "thesis/agent:c61bb199c383")
+    assert path == EXPERIMENT.parent / "results" / (
+        f"demo-go-no-go-{experiment.hash}-c61bb199c383.csv"
+    )
+
+
+def pod(ip: str, ready: str = "True", deleting: bool = False) -> dict[str, Any]:
+    """A pod as kubectl get pods -o json lists it: the conditions carry their timestamps too, as
+    real ones do (a first version compared whole condition dicts and never found a Ready pod)."""
+    metadata: dict[str, Any] = {"name": f"agent-{ip}"}
+    if deleting:
+        metadata["deletionTimestamp"] = "2026-10-28T01:16:32Z"
+    conditions = [
+        {
+            "type": kind,
+            "status": status,
+            "lastProbeTime": None,
+            "lastTransitionTime": "2026-10-28T01:16:31Z",
+        }
+        for kind, status in [("Initialized", "True"), ("Ready", ready), ("ContainersReady", ready)]
+    ]
+    return {"metadata": metadata, "status": {"podIP": ip, "conditions": conditions}}
+
+
+@pytest.mark.parametrize(
+    ("pods", "ip"),
+    [
+        ([pod("10.42.0.33")], "10.42.0.33"),
+        # The old pod of the last mode, still terminating.
+        ([pod("10.42.0.32", deleting=True), pod("10.42.0.33")], "10.42.0.33"),
+    ],
+)
+def test_ready_pod_ip(pods: list[dict[str, Any]], ip: str) -> None:
+    assert ready_pod_ip({"items": pods}) == ip
+
+
+@pytest.mark.parametrize(
+    "pods",
+    [
+        [],
+        [pod("10.42.0.33", ready="False")],
+        [pod("10.42.0.32", deleting=True)],
+        # The Deployment has one replica; two Ready pods mean a rollout is still going.
+        [pod("10.42.0.32"), pod("10.42.0.33")],
+    ],
+    ids=["none", "not-ready", "only-terminating", "two-ready"],
+)
+def test_ready_pod_ip_needs_exactly_one_ready_pod(pods: list[dict[str, Any]]) -> None:
+    with pytest.raises(RuntimeError, match="Ready agent pod"):
+        ready_pod_ip({"items": pods})

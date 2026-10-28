@@ -40,3 +40,4 @@ def test_profile_sets_the_file_and_result_limits(profile: str) -> None:
     assert config.max_file_bytes > 0
     assert config.max_files > 0
     assert config.max_result_rows > 0
+    assert config.result_decimals >= 0

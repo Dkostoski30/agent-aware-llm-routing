@@ -34,6 +34,7 @@ from agent_runtime.tools import (
 
 SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 MAX_ROWS = 20
+DECIMALS = 2
 
 
 def sales() -> Table:
@@ -119,7 +120,7 @@ def test_parse_rejects_what_the_tools_cannot_read(content: str, error_parts: lis
 
 
 def test_csv_summary() -> None:
-    assert csv_summary(sales(), MAX_ROWS) == {
+    assert csv_summary(sales(), MAX_ROWS, DECIMALS) == {
         "file": "sales",
         "row_count": 5,
         "column_count": 4,
@@ -133,9 +134,16 @@ def test_csv_summary() -> None:
 
 
 def test_csv_summary_lists_at_most_max_rows_columns() -> None:
-    result = csv_summary(sales(), 2)
+    result = csv_summary(sales(), 2, DECIMALS)
     assert result["column_count"] == 4
     assert [column["name"] for column in result["columns"]] == ["region", "product"]
+
+
+def test_csv_summary_rounds_to_decimals() -> None:
+    table = parse_file("t", "t.csv", "a\n1\n2\n2.004\n")
+    assert csv_summary(table, MAX_ROWS, DECIMALS)["columns"] == [
+        {"name": "a", "type": "number", "min": 1.0, "max": 2.0, "mean": 1.67}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -144,16 +152,16 @@ def test_csv_summary_lists_at_most_max_rows_columns() -> None:
         ("region", "revenue", "sum", [("South", 380.0), ("North", 350.5), ("East", 30.0)]),
         ("region", "revenue", "mean", [("South", 190.0), ("North", 175.25), ("East", 30.0)]),
         ("region", "units", "sum", [("North", 15.0), ("South", 8.0), ("East", 3.0)]),
-        # count is rows: South's empty units cell still counts, so units and revenue agree.
-        ("region", "units", "count", [("North", 2), ("South", 2), ("East", 1)]),
-        ("region", "revenue", "count", [("North", 2), ("South", 2), ("East", 1)]),
+        # row_count is rows: South's empty units cell still counts, so units and revenue agree.
+        ("region", "units", "row_count", [("North", 2), ("South", 2), ("East", 1)]),
+        ("region", "revenue", "row_count", [("North", 2), ("South", 2), ("East", 1)]),
         ("region", "units", "min", [("South", 8.0), ("North", 5.0), ("East", 3.0)]),
         ("region", "units", "max", [("North", 10.0), ("South", 8.0), ("East", 3.0)]),
         ("product", "revenue", "sum", [("Gadget", 550.0), ("Widget", 210.5)]),
     ],
 )
 def test_group_by(by: str, value: str, agg: str, rows: list[tuple[str, float]]) -> None:
-    assert group_by(sales(), by, value, agg, MAX_ROWS) == {
+    assert group_by(sales(), by, value, agg, MAX_ROWS, DECIMALS) == {
         "file": "sales",
         "by": by,
         "value": value,
@@ -164,77 +172,160 @@ def test_group_by(by: str, value: str, agg: str, rows: list[tuple[str, float]]) 
 
 
 def test_group_by_shows_at_most_max_rows_groups() -> None:
-    result = group_by(sales(), "region", "revenue", "sum", 2)
+    result = group_by(sales(), "region", "revenue", "sum", 2, DECIMALS)
     assert result["group_count"] == 3
     assert result["rows"] == [{"group": "South", "sum": 380.0}, {"group": "North", "sum": 350.5}]
 
 
+def test_group_by_rounds_to_decimals() -> None:
+    table = parse_file("t", "t.csv", "team,score\na,1\na,2\na,2\nb,1\n")
+    assert group_by(table, "team", "score", "mean", MAX_ROWS, DECIMALS)["rows"] == [
+        {"group": "a", "mean": 1.67},
+        {"group": "b", "mean": 1.0},
+    ]
+
+
+def test_row_count_includes_a_group_whose_value_cells_are_all_empty() -> None:
+    table = parse_file("t", "t.csv", "team,score\na,\na,\nb,5\n")
+    assert group_by(table, "team", "score", "row_count", MAX_ROWS, DECIMALS)["rows"] == [
+        {"group": "a", "row_count": 2},
+        {"group": "b", "row_count": 1},
+    ]
+    assert group_by(table, "team", "score", "sum", MAX_ROWS, DECIMALS)["rows"] == [
+        {"group": "b", "sum": 5.0}
+    ]
+
+
 def test_compare() -> None:
-    result = compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS)
+    result = compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS)
     assert result == {
         "file": "sales",
         "by": "region",
         "value": "revenue",
         "agg": "sum",
-        "left": {"group": "North", "sum": 350.5},
-        "right": {"group": "South", "sum": 380.0},
+        "higher": {"group": "South", "sum": 380.0},
+        "lower": {"group": "North", "sum": 350.5},
         "difference": 29.5,
-        "percent_change": pytest.approx(29.5 / 350.5 * 100),
+        "percent_more": 8.42,
+        "summary": (
+            "South's sum of revenue (380.0) is 29.5 higher than North's (350.5), 8.42% more."
+        ),
     }
 
 
-def test_compare_a_decrease_is_negative() -> None:
-    result = compare(sales(), "product", "units", "sum", "Widget", "Gadget", MAX_ROWS)
-    assert (result["difference"], result["percent_change"]) == (
-        -16.0,
-        pytest.approx(-16 / 21 * 100),
-    )
+def test_compare_does_not_depend_on_which_group_is_left() -> None:
+    """P1.6b: given a signed right-minus-left difference, the model read it backwards."""
+    north_first = compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS)
+    south_first = compare(sales(), "region", "revenue", "sum", "South", "North", MAX_ROWS, DECIMALS)
+    assert north_first == south_first
 
 
-def test_count_includes_a_group_whose_value_cells_are_all_empty() -> None:
-    table = parse_file("t", "t.csv", "team,score\na,\na,\nb,5\n")
-    assert group_by(table, "team", "score", "count", MAX_ROWS)["rows"] == [
-        {"group": "a", "count": 2},
-        {"group": "b", "count": 1},
-    ]
-    assert group_by(table, "team", "score", "sum", MAX_ROWS)["rows"] == [{"group": "b", "sum": 5.0}]
+def scores(content: str) -> Table:
+    return parse_file("scores", "scores.csv", "team,score\n" + content)
 
 
-def test_compare_from_zero_has_no_percent_change() -> None:
-    table = parse_file("scores", "scores.csv", "team,score\na,0\nb,5\n")
-    result = compare(table, "team", "score", "sum", "a", "b", MAX_ROWS)
-    assert (result["difference"], result["percent_change"]) == (5.0, None)
+@pytest.mark.parametrize(
+    ("content", "agg", "higher", "lower", "difference", "percent_more", "summary"),
+    [
+        (
+            "a,5\nb,5\n",
+            "sum",
+            ("a", 5.0),
+            ("b", 5.0),
+            0.0,
+            0.0,
+            "a's and b's sum of score are equal (5.0).",
+        ),
+        # A change from 0 has no percentage.
+        (
+            "a,0\nb,5\n",
+            "sum",
+            ("b", 5.0),
+            ("a", 0.0),
+            5.0,
+            None,
+            "b's sum of score (5.0) is 5.0 higher than a's (0.0).",
+        ),
+        # The percentage is of the lower value's size, so it stays positive.
+        (
+            "a,-10\nb,5\n",
+            "sum",
+            ("b", 5.0),
+            ("a", -10.0),
+            15.0,
+            150.0,
+            "b's sum of score (5.0) is 15.0 higher than a's (-10.0), 150.0% more.",
+        ),
+        # Rounded in the fields and in the sentence: a's mean is 1.6666..., the difference 0.6666...
+        (
+            "a,1\na,2\na,2\nb,1\n",
+            "mean",
+            ("a", 1.67),
+            ("b", 1.0),
+            0.67,
+            66.67,
+            "a's mean of score (1.67) is 0.67 higher than b's (1.0), 66.67% more.",
+        ),
+        # row_count is not a statistic of the value column, so the sentence does not name it.
+        (
+            "a,1\na,2\nb,1\n",
+            "row_count",
+            ("a", 2),
+            ("b", 1),
+            1,
+            100.0,
+            "a's row count (2) is 1 higher than b's (1), 100.0% more.",
+        ),
+    ],
+    ids=["equal", "lower-is-zero", "lower-is-negative", "rounded", "row-count"],
+)
+def test_compare_cases(
+    content: str,
+    agg: str,
+    higher: tuple[str, float],
+    lower: tuple[str, float],
+    difference: float,
+    percent_more: float | None,
+    summary: str,
+) -> None:
+    result = compare(scores(content), "team", "score", agg, "a", "b", MAX_ROWS, DECIMALS)
+    assert result["higher"] == {"group": higher[0], agg: higher[1]}
+    assert result["lower"] == {"group": lower[0], agg: lower[1]}
+    assert (result["difference"], result["percent_more"]) == (difference, percent_more)
+    assert result["summary"] == summary
 
 
 @pytest.mark.parametrize(
     ("call", "error_parts"),
     [
         (
-            lambda t: group_by(t, "region", "product", "sum", MAX_ROWS),
+            lambda t: group_by(t, "region", "product", "sum", MAX_ROWS, DECIMALS),
             ["'product'", "text column", "units, revenue"],
         ),
         (
-            lambda t: compare(t, "region", "region", "count", "North", "South", MAX_ROWS),
+            lambda t: compare(
+                t, "region", "region", "row_count", "North", "South", MAX_ROWS, DECIMALS
+            ),
             ["'region'", "text column", "units, revenue"],
         ),
         (
-            lambda t: group_by(t, "team", "revenue", "sum", MAX_ROWS),
+            lambda t: group_by(t, "team", "revenue", "sum", MAX_ROWS, DECIMALS),
             ["'team'", "not in sales", "region, product, units, revenue"],
         ),
         (
-            lambda t: group_by(t, "region", "score", "sum", MAX_ROWS),
+            lambda t: group_by(t, "region", "score", "sum", MAX_ROWS, DECIMALS),
             ["'score'", "not in sales"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "north", "South", MAX_ROWS),
+            lambda t: compare(t, "region", "revenue", "sum", "north", "South", MAX_ROWS, DECIMALS),
             ["'north'", "not a group of region", "East, North, South"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "North", "West", MAX_ROWS),
+            lambda t: compare(t, "region", "revenue", "sum", "North", "West", MAX_ROWS, DECIMALS),
             ["'West'", "East, North, South"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "North", "West", 2),
+            lambda t: compare(t, "region", "revenue", "sum", "North", "West", 2, DECIMALS),
             ["'West'", "East, North", "first 2 of 3"],
         ),
     ],
@@ -257,7 +348,7 @@ def test_data_errors_name_what_is_allowed(call: Any, error_parts: list[str]) -> 
 
 def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
     arguments = {"file": "sales", "by": "region", "value": "product", "agg": "sum"}
-    result = run_tool(GROUP_BY, arguments, {"sales": sales()}, MAX_ROWS)
+    result = run_tool(GROUP_BY, arguments, {"sales": sales()}, MAX_ROWS, DECIMALS)
     assert list(result) == ["error"]
     assert "text column" in result["error"]
 
@@ -265,12 +356,13 @@ def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
 @pytest.mark.parametrize(
     ("name", "arguments", "expected"),
     [
-        (CALCULATOR, {"op": "add", "a": 1, "b": 2}, {"result": 3}),
-        (CSV_SUMMARY, {"file": "sales"}, csv_summary(sales(), MAX_ROWS)),
+        # The calculator is not rounded: its result feeds the next operation.
+        (CALCULATOR, {"op": "divide", "a": 1, "b": 3}, {"result": 1 / 3}),
+        (CSV_SUMMARY, {"file": "sales"}, csv_summary(sales(), MAX_ROWS, DECIMALS)),
         (
             GROUP_BY,
             {"file": "sales", "by": "region", "value": "revenue", "agg": "sum"},
-            group_by(sales(), "region", "revenue", "sum", MAX_ROWS),
+            group_by(sales(), "region", "revenue", "sum", MAX_ROWS, DECIMALS),
         ),
         (
             COMPARE,
@@ -282,7 +374,7 @@ def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
                 "left": "North",
                 "right": "South",
             },
-            compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS),
+            compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS),
         ),
     ],
 )
@@ -290,7 +382,8 @@ def test_run_tool_runs_the_named_tool_on_the_named_file(
     name: str, arguments: dict[str, Any], expected: dict[str, Any]
 ) -> None:
     other = parse_file("other", "other.csv", "region,revenue\nNorth,1\n")
-    assert run_tool(name, arguments, {"other": other, "sales": sales()}, MAX_ROWS) == expected
+    tables = {"other": other, "sales": sales()}
+    assert run_tool(name, arguments, tables, MAX_ROWS, DECIMALS) == expected
 
 
 def two_tables() -> list[Table]:
@@ -319,7 +412,7 @@ def test_per_run_schemas_list_exactly_the_runs_files_and_columns() -> None:
         properties = tools[name]["properties"]
         assert properties["by"]["enum"] == columns
         assert properties["value"]["enum"] == columns
-        assert properties["agg"]["enum"] == ["sum", "mean", "count", "min", "max"]
+        assert properties["agg"]["enum"] == ["sum", "mean", "row_count", "min", "max"]
         assert tools[name]["required"] == list(properties)
         assert tools[name]["additionalProperties"] is False
     assert list(tools[CSV_SUMMARY]["properties"]) == ["file"]
@@ -354,7 +447,7 @@ def test_a_run_without_files_offers_no_csv_tools(mode: ToolChoice, names: list[s
         ),
         (
             {"file": "sales", "by": "region", "value": "revenue", "agg": "median"},
-            ["'median'", "'sum'", "'mean'", "'count'", "'min'", "'max'"],
+            ["'median'", "'sum'", "'mean'", "'row_count'", "'min'", "'max'"],
         ),
         ({"file": "sales", "by": "region", "value": "revenue"}, ["'agg' is a required property"]),
     ],

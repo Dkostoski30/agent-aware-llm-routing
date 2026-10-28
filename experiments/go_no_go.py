@@ -2,13 +2,15 @@
 
 Sends every question of an experiment file once per seed through the agent runtime in k3s, with the
 experiment's CSV attached, in each D10 mode. Scores every run, writes one row per run to
-results/<experiment>-<hash>.csv next to the experiment file (D11) and prints the score per mode and
-the decision.
+results/<experiment>-<hash>-<agent image tag>.csv next to the experiment file (D11) and prints the
+score per mode and the decision.
 
 The mode is switched the way the cluster is configured, not by a code path: the profile with
 agent.tool_choice set goes into the ConfigMap agent-config, and the thesis/config-hash annotation
 restarts the agent on it (infra/deploy-agent.sh). The profile from config/ is put back at the end,
-also after a failure or Ctrl+C.
+also after a failure or Ctrl+C. Runs go to the restarted pod's IP, not to the Service: right after a
+restart the node's Service rules lagged behind for more than 10 s and still led to the deleted pod
+(P1.6c, experiments/log.md).
 
 Usage: go_no_go.py EXPERIMENT_YAML
 """
@@ -34,11 +36,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# The agent's Service (infra/manifests/agent.yaml). The host is the k3s node, so its ClusterIP is
-# reachable from here (as in infra/checks/agent_check.sh).
-AGENT_SERVICE = "agent"
-AGENT_PORT = 8080
+# The agent's Deployment and its pods (infra/manifests/agent.yaml). The host is the k3s node, so a
+# pod IP is reachable from here.
+AGENT_DEPLOYMENT = "agent"
 AGENT_PODS = "app.kubernetes.io/name=agent"
+AGENT_PORT = 8080
 # The agent image is already in k3s, so a restarted pod is Ready in seconds; 120 s also covers a
 # node that is busy loading a model. Also the wait for the old pod to go, which uvicorn's shutdown
 # keeps within the 30 s default grace period.
@@ -236,7 +238,7 @@ def apply_profile(text: str) -> None:
     so putting back the file from config/ leaves the pod template deploy-agent.sh made.
 
     Returns once the old pod is deleted, not only when the new one is Ready: until then a pooled
-    connection or a Service route not yet updated still reaches the old pod and its profile.
+    connection still reaches the old pod and its profile.
     """
     configmap = {
         "apiVersion": "v1",
@@ -249,7 +251,7 @@ def apply_profile(text: str) -> None:
     patch = {
         "spec": {"template": {"metadata": {"annotations": {"thesis/config-hash": config_hash}}}}
     }
-    deployment = json.loads(kubectl("get", "deployment", AGENT_SERVICE, "-o", "json"))
+    deployment = json.loads(kubectl("get", "deployment", AGENT_DEPLOYMENT, "-o", "json"))
     if (
         deployment["spec"]["template"]["metadata"]["annotations"]["thesis/config-hash"]
         == config_hash
@@ -257,10 +259,28 @@ def apply_profile(text: str) -> None:
         # Already running this profile: the patch would change nothing and replace no pod.
         return
     old_pods = kubectl("get", "pods", "--selector", AGENT_PODS, "--output", "name").split()
-    kubectl("patch", "deployment", AGENT_SERVICE, "--patch", json.dumps(patch))
-    kubectl("rollout", "status", f"deployment/{AGENT_SERVICE}", f"--timeout={ROLLOUT_TIMEOUT}")
+    kubectl("patch", "deployment", AGENT_DEPLOYMENT, "--patch", json.dumps(patch))
+    kubectl("rollout", "status", f"deployment/{AGENT_DEPLOYMENT}", f"--timeout={ROLLOUT_TIMEOUT}")
     if old_pods:
         kubectl("wait", "--for=delete", *old_pods, f"--timeout={ROLLOUT_TIMEOUT}")
+
+
+def ready_pod_ip(pods: Mapping[str, Any]) -> str:
+    """The IP of the one Ready agent pod that is not being deleted, from kubectl get pods -o json.
+    The Deployment has one replica, so anything else means the switch is not finished."""
+    ready = [
+        item["status"]["podIP"]
+        for item in pods["items"]
+        if "deletionTimestamp" not in item["metadata"]
+        and any(
+            condition["type"] == "Ready" and condition["status"] == "True"
+            for condition in item["status"].get("conditions", [])
+        )
+    ]
+    if len(ready) != 1:
+        raise RuntimeError(f"expected one Ready agent pod, found {len(ready)}")
+    ip: str = ready[0]
+    return ip
 
 
 def with_mode(profile_text: str, mode: str) -> str:
@@ -340,9 +360,17 @@ def run_mode(
     return rows
 
 
-def report(experiment: Experiment, rows: Sequence[Mapping[str, Any]]) -> None:
+def result_path(experiment: Experiment, agent_image: str) -> Path:
+    """results/<experiment>-<hash>-<agent image tag>.csv next to the experiment file. The tag is a
+    hash of the agent's build context (infra/deploy-agent.sh), so a result is tied to the agent
+    code that produced it as well as to the experiment file (D11)."""
+    tag = agent_image.rsplit(":", 1)[1]
+    name = f"{experiment.path.stem}-{experiment.hash}-{tag}.csv"
+    return experiment.path.parent / "results" / name
+
+
+def report(experiment: Experiment, rows: Sequence[Mapping[str, Any]], results: Path) -> None:
     """Writes the result CSV and prints the score per mode and the decision."""
-    results = experiment.path.parent / "results" / f"{experiment.path.stem}-{experiment.hash}.csv"
     results.parent.mkdir(exist_ok=True)
     with results.open("w", newline="") as out:
         writer = csv.DictWriter(out, fieldnames=COLUMNS)
@@ -394,22 +422,31 @@ def main() -> None:
             f"go-no-go: the agent runs {running['model']['name']}, profile {experiment.profile} is "
             f"{profile['model']['name']}: run make up PROFILE={experiment.profile} first"
         )
-    agent_ip = kubectl("get", "service", AGENT_SERVICE, "-o", "jsonpath={.spec.clusterIP}")
+    # The image the switches keep: they change the profile, not the code.
+    agent_image = kubectl(
+        "get",
+        "deployment",
+        AGENT_DEPLOYMENT,
+        "-o",
+        "jsonpath={.spec.template.spec.containers[0].image}",
+    )
 
     rows: list[dict[str, Any]] = []
     try:
         for mode in experiment.modes:
             print(f"go-no-go: agent.tool_choice {mode}, restarting the agent", flush=True)
             apply_profile(with_mode(profile_text, mode))
+            pods = json.loads(kubectl("get", "pods", "--selector", AGENT_PODS, "-o", "json"))
             # A new client per mode, so no pooled connection leads to the pod of the last mode.
             with httpx.Client(
-                base_url=f"http://{agent_ip}:{AGENT_PORT}", timeout=REQUEST_TIMEOUT_SECONDS
+                base_url=f"http://{ready_pod_ip(pods)}:{AGENT_PORT}",
+                timeout=REQUEST_TIMEOUT_SECONDS,
             ) as client:
                 rows += run_mode(client, experiment, mode, expected, tolerance, run_timeout)
     finally:
         print(f"go-no-go: putting back {profile_path}", flush=True)
         apply_profile(profile_text)
-    report(experiment, rows)
+    report(experiment, rows, result_path(experiment, agent_image))
 
 
 if __name__ == "__main__":
