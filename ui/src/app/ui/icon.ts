@@ -9,6 +9,8 @@ const ICONS = {
     'M3.5 3h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM2.5 6.5h11M6.5 6.5V13',
   doc: 'M4 2.5h5l3 3v8H4zM9 2.5v3h3M6 9h4M6 11h3',
   chat: 'M4.5 2.5h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H7.5L4.5 13.5V11h0a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2z',
+  warn: 'M8 2.5l6 10.5H2zM8 6.5v3M8 11.3h.01',
+  clock: 'M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM8 5v3.2l2 1.3',
 };
 
 export type IconName = keyof typeof ICONS;
