@@ -146,16 +146,18 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 
 | ID | Track | Task | Done when |
 |---|---|---|---|
-| P2.1 | Routing | Tools for the other 2 demo scenarios (D10): contracts (`read_document`, `extract_clauses`, `diff_clauses`), support (`get_order`, `get_policy`, `draft_reply`); the CSV tools (`csv_summary`, `group_by`, `compare`) exist since P1.6a; enum arguments, both D10 modes, parallel tool calls; files come from the run request by ID (D13) | Each tool has a unit test; the contracts task reads documents in parallel |
-| P2.2 | Routing | Call recorder: every LLM call logged (run-id, step, prompt tokens, pod, TTFT, duration, gap since previous call) | A run produces one JSONL line per call with all fields |
-| P2.3 | Routing | Trace format + replayer: arrival patterns (steady, burst), inter-call gaps (D9), fixed seed | Replaying 20 recorded runs reproduces the same call sequence and gaps twice in a row |
+| P2.1 | Routing | Tools for the other 2 demo scenarios (D10): contracts (`read_document`, `extract_clauses`, `diff_clauses`), support (`get_order`, `get_policy`, `draft_reply`); the CSV tools (`csv_summary`, `group_by`, `compare`) exist since P1.6a; enum arguments, both D10 modes, parallel tool calls; files come from the run request by ID (D13), support's orders and policies included. P1.6f (calculator only on runs without files) folded in. Split: P2.1a-1 contracts, P2.1a-2 support, P2.1a-3 calculator + demo go/no-go rerun, P2.1b adapter retrain (cards 20–23, 2026-11-01) | Each tool has a unit test; the contracts task reads documents in parallel (several calls in one reply); demo go/no-go still ≥9/10 |
+| P2.2 | Routing | Call recorder: every LLM call logged (run-id, step, prompt tokens, cached tokens, pod, duration, gap since previous call). No TTFT in agent calls: they stay non-streaming (D6); the replayer and P2.8 measure TTFT (decided 2026-11-01). Split: P2.2a agent records, P2.2b `make record` to trace.v1 | A run produces one JSONL line per call with all fields |
+| P2.3 | Routing | Trace format + replayer: arrival patterns (steady, burst), inter-call gaps (D9), fixed seed, fan-out of steps into parallel calls with one `x-parallel-group` (the P3.6 workload; decided 2026-11-01) | Replaying 20 recorded runs reproduces the same call sequence and gaps twice in a row |
 | P2.4 | Routing | AgentProcessBench converter to the trace format; `expected-steps` per task type derived from recorded runs (D1) | Converted traces pass the schema check; replayer runs them |
-| P2.5 | Routing | First baseline: round-robin vs default picker, defined as `experiments/baseline.yaml` (D11), results to CSV + graph script | `make experiment NAME=baseline` regenerates the CSV and graph from scratch |
+| P2.5 | Routing | First baseline: round-robin vs default picker, defined as `experiments/baseline.yaml` (D11), results to CSV + graph script (matplotlib, loadgen only; decided 2026-11-01) | `make experiment NAME=baseline` regenerates the CSV and graph from scratch |
 | P2.6 | UI | Angular: per-step badges (pod, cache hit, latency) | Badges match the recorder's log for the same run |
 | P2.7 | Autoscaling | Simulator (llm-d-inference-sim) deployed as a pool backend | Replayer runs against simulated pods through the same gateway |
 | P2.8 | Autoscaling | Calibration on the real 0.6B: TTFT and per-token time vs concurrency, cached vs uncached prefill, cold start time (D4) | Calibration table saved in `sim/`; simulator configured from it |
 | P2.9 | Autoscaling | Validation: same replay on 1 real pod vs 1 simulated pod | Error within ~10–15%, table saved; if not, recalibrate |
 | P2.10 | App | App backend skeleton: FastAPI + `sqlite3`, schema (users, sessions, chats, messages, attachments), register/login/logout, `hashlib.scrypt`, session cookie with TTL from config (D7); Deployment + PVC in `infra/` | pytest: register → login → authorized request passes; wrong password and expired session rejected; data survives a pod restart; `make down && make up` keeps users and chats, `make reset-app` wipes them |
+
+Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b, then P2.2a → P2.2b → P2.3 → P2.4 → P2.5 and P2.6 after P2.2a; P2.7 → P2.8 → P2.9 once P2.3 exists; P2.10a/b (split, cards 33–34) is the first to slip into Phase 3's week, since it is not on Gate 2.
 
 **Gate 2:** baseline experiment regenerates from one command; simulator validated.
 
