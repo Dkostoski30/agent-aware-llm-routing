@@ -13,6 +13,173 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-10-31 · P1.7 step 3 · green
+Command: `make test` · `make lint` · `make down` · `make finetune` · `make up PROFILE=real` ·
+`make heldout BASELINE=experiments/results/finetune-heldout-d384c6bd2721-99df636ae969.csv` ·
+`make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml`; on 2026-11-01 `make smoke` · `make down` · `make finetune`
+(the resume check)
+Result:
+- `make finetune` (experiments/finetune-train.yaml, run `13105c818230`, data `6e3ac3eda752`): 3196 examples, 400
+  optimizer steps (2 epochs x 200), 7246 s of training (2 h 01 min, 18.1 s per step), 125.7 min with loading and
+  tokenizing. Loss 1.044 at step 1, 0.03 by epoch 0.15, under 1e-3 from epoch 0.55, 2.832e-05 at the end; mean 0.0224.
+  Peak reserved by torch 1652 MiB. Adapter `~/.cache/thesis/finetune/adapters/b03ea3894e7c`, sha256
+  `b03ea3894e7c…b9ef`. Loss per log step in `~/.cache/thesis/finetune/runs/13105c818230/loss.jsonl`.
+- `make test`: 468 passed, training 22 passed. `make lint` passed.
+- Held-out with the adapter (agent `thesis/agent:f1dd57208cf9`, CSV
+  `experiments/results/finetune-heldout-6e3ac3eda752-f1dd57208cf9-b03ea3894e7c.csv`), against the baseline:
+
+  | kind | required | auto |
+  |---|---|---|
+  | summary | 13 -> 14/14 | 13 -> 14/14 |
+  | group-total | 11 -> 14/14 | 8 -> 14/14 |
+  | group-mean | 7 -> 14/14 | 7 -> 14/14 |
+  | compare | 2 -> 14/14 | 2 -> 14/14 |
+  | two-step | 0 -> 13/14 | 0 -> 14/14 |
+  | arithmetic | 0 -> 14/14 | 0 -> 14/14 |
+  | off-topic | 0 -> 14/14 | 0 -> 14/14 |
+  | all | 33 -> 97/98 | 30 -> 98/98 |
+  | without off-topic | 33 -> 83/84 | 30 -> 84/84 |
+
+  Paired by question: required 64 fixed, 0 broken, McNemar p = 1.08e-19 (without off-topic 50 fixed, p = 1.78e-15);
+  auto 68 fixed, 0 broken, p = 6.78e-21 (54 fixed, p = 1.11e-16). Invalid calls 24 -> 1 (required), 15 -> 0 (auto).
+- Real go/no-go with the adapter (`experiments/results/real-go-no-go-2b9641086502-f1dd57208cf9-b03ea3894e7c.csv`):
+  required 10/10, auto 10/10, 0 invalid calls, against 4/10 and 4/10 for the plain 0.6B and 10/10, 8/10 for the
+  demo's 1.7B (P1.6 rerun). Auto two-step, which the 1.7B gets wrong in both seeds, is right in both.
+- `make smoke` on the adapter: exits 0; run `run-e34304c21a56` ("What is 7 times 8?") done in 54 s, answer "7 times 8
+  is 56.", 2 gateway lines and 2 picks for steps [1,2], both on 10.42.0.13:8000.
+- Resume check, `make finetune` again on the finished run: "resuming from .../runs/13105c818230/checkpoint-400", 0
+  steps trained, loss 1.044 -> 2.832e-05 read back from the checkpoint, adapter
+  `~/.cache/thesis/finetune/adapters/b03ea3894e7c` with the same sha256, peak 1666 MiB.
+Notes:
+- vLLM applies the adapter's weights, which step 1 could not show: the answers changed on 64-68 of 98 questions.
+- The one miss, required heldout-two-step-0061: the model found the route with the highest total weight, then
+  divided that total by 4 itself ("15040.23 / 4 = 3760.06") instead of calling group_by with mean; the pass's only
+  invalid call was in that run.
+- Kept mode: auto. The card's rule (decided 2026-10-30 with the user) is the mode the adapter does best in: auto 98/98
+  against required 97/98 on held-out, 10/10 each on the go/no-go. config/real.yaml already has auto, so it does not
+  change. go-no-go printed "config/real.yaml keeps agent.tool_choice required": its decide() is the demo's rule
+  (required on a tie, D10), and it names the profile's file without reading the profile's mode. Reported, not fixed.
+- Runs take about twice as long on the adapter at the same number of steps: held-out median 8.1 -> 16.1 s (required)
+  and 7.0 -> 11.1 s (auto); go/no-go 11.6 -> 18.1 s and 6.0 -> 15.1 s; mean steps per run 2.46/1.88 -> 2.28/2.28.
+  Each LLM call is slower with --enable-lora; not measured per call. This matters for P2.8, which calibrates the
+  simulator on the real profile. Decided 2026-11-01 with the user: model.lora stays in config/real.yaml until P2.8,
+  which measures time to first token and time per output token with and without the adapter, then picks the profile
+  to calibrate on.
+- The smoke run took 54 s for 2 steps, against 14 s on the plain 0.6B (P1.5) and the held-out median of 11-16 s; one
+  run, cause not measured.
+- The resume check is not the card's Ctrl+C mid-run (decided 2026-11-01 with the user: that needs a new run
+  directory and another 2 h). It shows that a run with checkpoints resumes from the newest one and that the same
+  weights publish to the same adapter directory; resuming mid-epoch is covered only by transformers' Trainer.
+- Training took 2 h, not the planned 1.5 h: 1.2 s per example against the spike's ~1 s estimate. The loss went from
+  7.9e-05 at epoch 0.85 to 2.8e-05 at the end; with no epoch-1 adapter kept, whether it helped is not known.
+- The held-out set shares the generator's phrasings; the go/no-go's hand-written questions on sales.csv are the test
+  of unseen wording, and they are 20/20.
+- The adapter is tied to today's system prompt, tool definitions and result format: P1.6f and P2.1 change them, and
+  then make finetune-data and make finetune have to run again.
+
+### 2026-10-30 · P1.7 step 2 · green (baselines in)
+Command: `make up` · `make heldout` (data hash `d384c6bd2721`) · `make test` · `make lint` · `make finetune-data`
+(data hash `6e3ac3eda752`) · `sha256sum ~/.cache/thesis/finetune/data/*/heldout.jsonl` ·
+`make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml` (on 2026-10-29, same agent `thesis/agent:99df636ae969`)
+Result:
+- `make finetune-data` (experiments/finetune-data.yaml, data hash `6e3ac3eda752`): 3196 training examples from 100
+  trajectories per kind and mode (summary, group-total, group-mean, compare 200 examples each; two-step 300; arithmetic
+  398; off-topic 100), 98 held-out questions (14 per kind). sha256 of train.jsonl + heldout.jsonl
+  `a00a8e7650e4…03ae`. `render.py`: 2,856,844 tokens in all, length p50 926, p95 1156, max 1297; reply max 54 tokens;
+  0 over model.max_model_len 4096.
+- heldout.jsonl is byte-identical under `d384c6bd2721` and `6e3ac3eda752` (sha256 `f919af5aab35…7995`): the held-out
+  split has its own seed, so the baseline scored on `d384c6bd2721` holds for the data step 3 trains on.
+- Held-out baseline, plain Qwen3-0.6B-GPTQ-Int8, real profile, CSV
+  `experiments/results/finetune-heldout-d384c6bd2721-99df636ae969.csv`, 196 rows:
+
+  | kind | required | auto |
+  |---|---|---|
+  | summary | 13/14 | 13/14 |
+  | group-total | 11/14 | 8/14 |
+  | group-mean | 7/14 | 7/14 |
+  | compare | 2/14 | 2/14 |
+  | two-step | 0/14 | 0/14 |
+  | arithmetic | 0/14 | 0/14 |
+  | off-topic | 0/14 | 0/14 |
+  | all | 33/98 | 30/98 |
+
+- Real go/no-go baseline (`experiments/results/real-go-no-go-2b9641086502-99df636ae969.csv`): required 4/10 correct,
+  13 invalid calls; auto 4/10 correct, 7 invalid calls.
+- `make test`: 449 passed, training 9 passed. `make lint`: mypy failed on test_heldout.py's FailingLLM
+  (`raise self._failure` after a branch mypy cannot narrow); it now raises an exception first and a response's status
+  error after, and a success status fails the test.
+Notes:
+- The zeros are the model, not the scorer (required rows read back): arithmetic answers a wrong number, in 11 of 14
+  runs after a single calculator call for a 2-4 operation question (e.g. 3.17 for 209); two-step answers the first
+  step's group or value, not the second; off-topic answers the question itself (14 of 14 runs one step, no tool), as
+  expected: the fixed sentence is only in the training data. Compare mostly subtracts the wrong totals or answers in
+  prose.
+- Training cut from 400 to 100 questions per kind on 2026-10-30, with the user, after this baseline started: ~3,200
+  examples at p50 926 tokens, ~45 min per epoch at step 1's speed.
+- Held-out cut from 100 to 14 per kind on 2026-10-30, with the user: 1400 runs took 4-6 h per pass, and the set is
+  scored twice. ±10 points per mode at 95% still shows a clear gain; per kind (±26) it is only a hint. Step 3 compares
+  against this baseline with BASELINE=<csv>, paired by question (McNemar).
+- The first 1400-run baseline (data hash `0b29e29f172e`) stopped twice: Windows sleep on 2026-10-29 at 287 runs (a
+  re-run on a cluster that wasn't ready wrote over its CSV; heldout.py now appends and resumes), and at 321 runs on
+  heldout-compare-0322's 400 (now a wrong run: only a 5xx or no connection stops the run). Its rows are dropped. Partial
+  required-mode scores at 100 per kind: summary 60/100, group-total 73/100, group-mean 66/100, compare 6/21.
+- An earlier `make heldout` killed before its first row left a 0-byte CSV, which the next run refused (no header).
+  result_csv now flushes the header when it creates the file (test_result_csv_has_the_header_on_disk_before_the_first_row).
+
+### 2026-10-29 · P1.7 step 1, second run · green (go for step 2)
+Command: `make finetune-spike` · `make lora-check` · `make lint`, cluster down; after the first run's two changes
+(logits for the reply only, lora-check comparing base and adapter), decided with the user on 2026-10-28
+Result:
+- Tokenizer files the same as in the first run. 796 MiB of the GPU used, 3300 MiB free before loading.
+- Length 2048: torch peak 1782 MiB, whole GPU 2612 MiB, 1.50 s/step. Length 4096: torch peak 2118 MiB, whole GPU
+  2948 MiB, 3.26 s/step. Both fit, with 1182 MiB left at 4096. LoRA rank 16: 10,092,544 trainable parameters.
+- Spike adapter: `~/.cache/thesis/finetune/spike-adapter`, sha256 `fae2e213e325…7106`.
+- `make lora-check` OK. GPU memory used: 1923 MiB without the adapter, 1954 MiB with it, 31 MiB more (21 MiB in the
+  first run); two real pods with the adapter stay inside the ~160 MiB they leave free.
+- "What is 7 times 8?" with the agent's calculator tool, temperature 0: base and adapter both called
+  calculator(multiply, 7, 8), in auto mode and in required mode. In required mode the content is "" and the call
+  comes back parsed by the hermes parser, which shows the model writes `<tool_call>` tags there too, as the vLLM code
+  says (first run's notes). Step 2 trains both modes on the same turn format.
+- `make lint`: `mypy-training` failed on `loss.backward()`, which torch leaves without type annotations; replaced by
+  the annotated `torch.autograd.backward(loss)`, the same call. `make lint` then passed, `mypy (strict, training)`
+  included.
+Notes:
+- Go for step 2: training fits at max_model_len, vLLM v0.31.0 serves a LoRA adapter on the GPTQ-Int8 0.6B for 21-31
+  MiB, and the template vLLM serves is the base model's.
+- Not shown: that vLLM applies the adapter's weights. The answers were identical, and the spike's loss was 0.000 from
+  the first step (the last 64 tokens of a repeated text are predictable), so its adapter barely moved from zero.
+  Step 3's held-out run on the trained adapter shows it; identical answers there would point to this.
+- Speed for step 2's training size: ~1.5 s per 2048-token example and 3.3 s per 4096-token one, at batch size 1. The
+  real examples' lengths come from step 2's generator.
+- The spike took longer than its 1-hour box, over two sessions: the downloads (~6.5 GB) and the rerun after the
+  first run's failure.
+
+### 2026-10-28 · P1.7 step 1, first run · red (training does not fit as measured)
+Command: `make down` · `uv sync --locked --project training` · `make finetune-spike` · `make lora-check`
+Result:
+- Tokenizer: `tokenizer.json` (sha256 `aeb13307…dae4`) and `tokenizer_config.json`, which holds the chat template
+  (`d5d09f07…8101`), are the same for Qwen/Qwen3-0.6B `c1899de2` and Qwen3-0.6B-GPTQ-Int8 `d3f20e7e`.
+- LoRA rank 16 on all 7 projections: 10,092,544 trainable parameters. 796 MiB of the GPU used before loading.
+- Length 2048: torch reserved 5940 MiB at peak, more than the 4096 MiB GPU, so it ran out of shared system memory
+  (WSL's sysmem fallback); 2.29 s/step. Length 4096: 10688 MiB reserved, an OOM warning, 22.48 s/step. Neither fits.
+- Cause: the logits over the whole vocabulary. The failed allocation was 2,489,319,424 bytes = 4096 tokens x 151,936
+  x 4 bytes, the fp32 logits of one sample; at 2048 they are 1187 MiB, plus their bf16 copy and both gradients.
+- `make lora-check`: vLLM v0.31.0 loads the spike's adapter on the GPTQ-Int8 model and answers as `thesis-spike`.
+  GPU memory used 1891 MiB without the adapter and 1912 MiB with it: 21 MiB per pod, well inside the ~160 MiB two real
+  pods leave. Auto mode answered "The result is 56." without a tool call, so the check failed before required mode.
+- `make lint`: `mypy-training` failed on `enable_input_require_grads` (untyped).
+Notes:
+- vLLM v0.31.0 code, read in the pinned image: the hermes parser has `structural_tag_model = "hermes"`
+  (`tool_parsers/hermes_tool_parser.py:35`), which sets `supports_required_and_named = False`
+  (`tool_parsers/abstract_tool_parser.py:67-70`), so required mode is constrained by a hermes structural tag
+  (`parser/abstract_parser.py:519-549`) and parsed like auto (`:384`). The model writes `<tool_call>` tags in both
+  modes, not a JSON list. Not yet seen in a response: lora-check stopped before its required-mode call.
+- The spike's adapter is not neutral: 10 steps at lr 1e-4 on repeated text. Expecting the base model's tool call from
+  it was the check's mistake; the request alone does not show whether base or adapter skipped the tool.
+- `enable_input_require_grads` removed: transformers 5.19 checkpoints non-reentrantly by default
+  (`modeling_utils.py:3137`), which does not need it.
+- The spike measured "fits" only by printing numbers; peak reserved above the free VRAM should be a failure.
+
 ### 2026-10-28 · P1.6 rerun for Gate 1 · green (go)
 Command: `make agent-deploy PROFILE=demo` · `kubectl delete pod -l app.kubernetes.io/name=vllm
 --field-selector=status.phase=Failed` · `make go-no-go`

@@ -1,0 +1,44 @@
+[project]
+name = "training"
+version = "0.1.0"
+description = "LoRA fine-tuning of the agent's model on generated tool-call trajectories (P1.7)"
+requires-python = "==3.12.*"
+# Its own uv project, not a member of the root workspace (whose members list names only agent), so the root venv,
+# make test and the agent image never install torch. Each pin is the newest release at least two weeks old on
+# 2026-10-28 (versions.md).
+dependencies = [
+    # Its own dependency, not only peft's: transformers' Trainer needs it (P1.7 step 3).
+    "accelerate==1.15.0",
+    # spike.py downloads the tokenizer files with it; the same version as the hf CLI (versions.md, Dev tools).
+    "huggingface-hub==2.2.0",
+    "peft==0.21.2",
+    # The spike and the training read experiments/finetune-train.yaml; the agent's pin.
+    "pyyaml==6.0.3",
+    # The Linux wheel bundles CUDA 13.0, which the Windows driver's CUDA 13.5 runs (versions.md, Machine).
+    "torch==2.14.1",
+    "transformers==5.19.0",
+]
+
+[dependency-groups]
+# The root's pins; the training mypy hook runs mypy in this environment, where torch and transformers are installed.
+# PyYAML ships no type information, so mypy strict needs its stubs. pytest runs training/tests, which need transformers
+# (make test).
+dev = ["mypy==2.4.0", "pytest==9.1.1", "types-pyyaml==6.0.12.20260906"]
+
+[tool.uv]
+# Scripts run in place, like the root's; nothing is installed as a package.
+package = false
+
+# Read by the training mypy hook (.pre-commit-config.yaml, --config-file); the same settings as the root's.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Apart from the root's cache, which the root hook fills from the root venv's packages.
+cache_dir = "training/.mypy_cache"
+
+# Read by make test (pytest -c training/pyproject.toml), which makes training/ the rootdir; the root's pytest skips
+# training/ (--ignore), since the root venv has no torch.
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib", "--strict-markers"]
+# The scripts are tested in place, as the root's experiments are.
+pythonpath = ["."]

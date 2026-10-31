@@ -28,7 +28,8 @@ spec:
         - name: vllm
           image: {{ .Values.image }}
           imagePullPolicy: IfNotPresent
-          # Same flags as infra/local/vllm-common.sh, so a pod behaves like the containers measured in P0.3-P0.5.
+          # Same flags as infra/local/vllm-common.sh, so a pod behaves like the containers measured in P0.3-P0.5, and
+          # with model.lora set the adapter's (P1.7), which only the pods serve.
           args:
             - --model={{ required "model.name from the profile" .Values.model.name }}
             - --revision={{ required "model.revision from the profile" .Values.model.revision }}
@@ -40,6 +41,12 @@ spec:
             - --enable-auto-tool-choice
             - --enable-prefix-caching
             - --enforce-eager
+            {{- with .Values.model.lora }}
+            # The adapter is served next to the base model under its name; a request that names it gets it.
+            - --enable-lora
+            - --lora-modules={{ required "model.lora.name from the profile" .name }}=/adapters/{{ .name }}
+            - --max-lora-rank={{ required "model.lora.max_rank from the profile" .max_rank }}
+            {{- end }}
           env:
             - name: HF_HOME
               value: /hf
@@ -72,6 +79,11 @@ spec:
             # vLLM's API server and engine exchange tensors through shared memory; the default 64 MB is too small.
             - name: shm
               mountPath: /dev/shm
+            {{- with .Values.model.lora }}
+            - name: lora
+              mountPath: /adapters/{{ .name }}
+              readOnly: true
+            {{- end }}
       volumes:
         - name: hf-cache
           hostPath:
@@ -80,3 +92,9 @@ spec:
         - name: shm
           emptyDir:
             medium: Memory
+        {{- if .Values.model.lora }}
+        - name: lora
+          hostPath:
+            path: {{ required "loraHostPath, set by make vllm-deploy from model.lora.path" .Values.loraHostPath }}
+            type: Directory
+        {{- end }}
