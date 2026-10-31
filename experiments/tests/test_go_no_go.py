@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from go_no_go import (
     Question,
+    adapter_id,
     decide,
     expected_value,
     is_correct,
@@ -14,6 +16,7 @@ from go_no_go import (
     numbers_in,
     ready_pod_ip,
     result_path,
+    served_differs,
     served_mode,
 )
 
@@ -321,3 +324,100 @@ def test_ready_pod_ip(pods: list[dict[str, Any]], ip: str) -> None:
 def test_ready_pod_ip_needs_exactly_one_ready_pod(pods: list[dict[str, Any]]) -> None:
     with pytest.raises(RuntimeError, match="Ready agent pod"):
         ready_pod_ip({"items": pods})
+
+
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        # "7 times 8 plus 3".
+        ([["multiply", 8], ["add", 3]], 59.0),
+        ([["multiply", 2], ["multiply", 2]], 28.0),
+        ([["divide", 2], ["subtract", 1]], 2.5),
+    ],
+)
+def test_expected_value_of_an_arithmetic_chain(steps: list[list[Any]], expected: float) -> None:
+    """P1.7: the operations apply left to right from start, and need no CSV rows."""
+    spec = {"kind": "arithmetic", "start": 7, "steps": steps}
+    assert expected_value([], spec) == pytest.approx(expected)
+
+
+REPLY = "I can only do arithmetic and answer questions about attached CSV files."
+OFF_TOPIC = Question(
+    id="off-topic",
+    text="Hi",
+    expected_calls=[],
+    expected={"kind": "fixed_reply", "reply": REPLY},
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "correct"),
+    [
+        (run(REPLY, []), True),
+        # Required mode ends with final_answer, which has no result and is not a tool that ran.
+        (run(REPLY, [("final_answer", {"answer": REPLY}, None)]), True),
+        (run(f"Hello! {REPLY}", []), True),
+        (run("Hello! How can I help you today?", []), False),
+        # A tool that ran: the model computed something for a question that asks for nothing.
+        (run(REPLY, [("calculator", {"op": "add", "a": 1, "b": 1}, {"result": 2})]), False),
+        (run(REPLY, [], status="failed"), False),
+    ],
+)
+def test_is_correct_for_a_fixed_reply(body: dict[str, Any], correct: bool) -> None:
+    """P1.7: an off-topic question is answered with the sentence and no tool."""
+    assert is_correct(body, OFF_TOPIC, None, TOLERANCE) is correct
+
+
+def test_a_numeric_question_needs_an_expected_value() -> None:
+    with pytest.raises(ValueError, match="expected value"):
+        is_correct(run("1,234.5", [GROUP_BY_OK]), ANY_GROUP_BY, None, TOLERANCE)
+
+
+def test_result_path_carries_the_adapter_when_one_is_served() -> None:
+    """P1.7: the baseline and the adapter run share the experiment file and the agent image, so
+    without the adapter in the name the second would overwrite the first."""
+    experiment = load_experiment(EXPERIMENT)
+    path = result_path(experiment, "thesis/agent:c61bb199c383", adapter="fae2e213e325")
+    assert path.name == f"demo-go-no-go-{experiment.hash}-c61bb199c383-fae2e213e325.csv"
+
+
+def test_the_real_profile_go_no_go_asks_what_the_demo_one_asks() -> None:
+    """P1.7 runs the demo questions on the real profile; only the profile may differ."""
+    demo = yaml.safe_load(EXPERIMENT.read_text())
+    real = yaml.safe_load((EXPERIMENT.parent / "real-go-no-go.yaml").read_text())
+    assert real["profile"] == "real"
+    assert {**real, "profile": demo["profile"]} == demo
+
+
+LORA = {
+    "name": "thesis-b03ea3894e7c",
+    "path": "~/.cache/thesis/finetune/adapters/b03ea3894e7c",
+    "sha256": "b03ea3894e7c9823443057bc69ad25748c642db6c9c652bc4eeedc3f6280b9ef",
+    "max_rank": 16,
+}
+BASE = {"name": "Qwen/Qwen3-0.6B-GPTQ-Int8"}
+
+
+def test_adapter_id_is_the_start_of_the_weights_hash_or_none() -> None:
+    """The id result_path takes, so the go/no-go and held-out results of one adapter carry it."""
+    assert adapter_id({**BASE, "lora": LORA}) == "b03ea3894e7c"
+    assert adapter_id(BASE) is None
+
+
+@pytest.mark.parametrize(
+    ("running", "profile", "differs"),
+    [
+        ({**BASE, "lora": LORA}, {**BASE, "lora": LORA}, False),
+        (BASE, BASE, False),
+        (BASE, {**BASE, "lora": LORA}, True),
+        ({**BASE, "lora": LORA}, BASE, True),
+        ({**BASE, "lora": {**LORA, "sha256": "0" * 64}}, {**BASE, "lora": LORA}, True),
+        ({"name": "Qwen/Qwen3-1.7B-GPTQ-Int8"}, BASE, True),
+    ],
+)
+def test_served_differs_when_the_running_agent_has_another_model_or_adapter(
+    running: dict[str, Any], profile: dict[str, Any], differs: bool
+) -> None:
+    """Scoring an agent deployed without the adapter would put the base model's runs in the
+    adapter's file (P1.7)."""
+    assert (served_differs(running, profile) is not None) is differs

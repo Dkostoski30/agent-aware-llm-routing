@@ -1,0 +1,99 @@
+# P1.7 step 2: the generated data (docs/task-cards/19-P1.7-fine-tune-tool-calls.md). make finetune-data writes the
+# training examples and the held-out questions to <output_dir>/<first 12 hex digits of this file's sha256>/, so a
+# changed file never mixes with an old one's data, and results are stamped with that hash (D11).
+output_dir: ~/.cache/thesis/finetune/data
+# The profile whose agent settings the trajectories are run with (system_prompt, result_decimals, max_result_rows,
+# max_files, answer_tolerance): the one that serves the adapter (finetune-train.yaml, served_profile).
+profile: real
+# The training examples teach both D10 modes, and the held-out set is scored in both, as the go/no-go is.
+modes: [required, auto]
+# One seed per split, so changing one split's size does not change the other's draws.
+seeds:
+  train: 1
+  heldout: 2
+# CSVs per split. Each holds dozens of possible questions per kind; 60 and 30 give every kind many files, so no kind
+# leans on a few tables.
+csvs:
+  train: 60
+  heldout: 30
+# Questions per kind; each becomes one trajectory per mode. Held-out: 14 per kind, 98 questions, 196 runs, ~40 min per
+# pass (decided with the user 2026-10-30, down from 100 per kind and 4-6 h): ±10 points per mode at 95%, enough for a
+# clear overall gain; per kind (±26) only a hint. Training: 100 per kind (decided with the user 2026-10-30, down from
+# 400 and ~12,800 examples, a night per epoch): ~3,200 examples, ~45 min per epoch at step 1's ~1 s per example
+# (experiments/log.md). A narrow format (which tool, which enum arguments) is learned from a few thousand examples;
+# raise it if the adapter underfits.
+questions:
+  train: 100
+  heldout: 14
+# The shape of every generated CSV, like experiments/data/sales.csv: one row per combination of the text columns'
+# values, a count column, and an amount column = count x a price per value of the priced column. So the group that
+# counts the most is often not the one with the most amount, and two-step cannot be answered by one call.
+table:
+  # Text columns besides the priced one; sales.csv has two (month, region) besides product.
+  text_columns: 2
+  # Values drawn per text column, inclusive. At least 3, so compare has pairs and two-step has a runner-up; at most
+  # 5, so a CSV has at most 125 rows and every group fits in one tool result (agent.max_result_rows is 20).
+  values_per_column: [3, 5]
+  # Counts per row, inclusive; a range like sales.csv's units.
+  count: [1, 60]
+  # Price per value of the priced column, in cents, inclusive; amount = count x price, written with 2 decimals.
+  price_cents: [150, 4000]
+# Chained arithmetic questions.
+arithmetic:
+  # Operations per question, inclusive: "2x2x2" has 2, "7 times 8 plus 3" has 2. One operation is the calculator task
+  # the 0.6B already answers (P1.3b).
+  operations: [2, 4]
+  # Every number in a question, inclusive; small enough to type, large enough that results rarely repeat an operand.
+  operand: [2, 20]
+# Share of arithmetic and off-topic questions that come with a CSV attached: the runtime offers the calculator next to
+# the CSV tools (P1.6f is not done), so the model sees both tool sets for these kinds.
+with_file_share: 0.5
+# The final answer of an off-topic question, word for word, with no tool call (P1.6e's sentence, decided with the user
+# 2026-10-28). The system prompt does not contain it: the model learns it from the training data.
+off_topic_reply: I can only do arithmetic and answer questions about attached CSV files.
+# Names per split. The two splits share none, and none is a name from experiments/data/sales.csv (its file ID, columns
+# or groups), so no held-out column, group or topic appears in training, and the go/no-go's file stays unseen.
+pools:
+  train:
+    # File IDs (the model names a file by its ID); a file is <id>.csv.
+    files: [shop, cafe, gym, clinic, bakery, garage, studio, hotel]
+    # Text columns and their values.
+    text_columns:
+      city: [Berlin, Lisbon, Oslo, Prague, Vienna, Dublin, Madrid]
+      channel: [Online, Phone, Store, Partner, Kiosk]
+      quarter: [Q1, Q2, Q3, Q4]
+      team: [Alpha, Bravo, Delta, Echo, Foxtrot]
+      season: [Spring, Summer, Autumn, Winter]
+    # The priced column: its value sets the price of a row.
+    priced_columns:
+      plan: [Basic, Plus, Pro, Team, Premium]
+      dish: [Soup, Salad, Pasta, Curry, Burger]
+      service: [Repair, Install, Cleaning, Checkup, Upgrade]
+    # [count column, amount column] pairs.
+    number_columns: [[orders, turnover], [visits, fees], [tickets, charges], [bookings, income]]
+    # Off-topic questions: finetune_data.OFF_TOPIC's templates of each name are filled from the list under it.
+    # Held-out has 102 template x filler combinations and training 128, so the off-topic questions of each split (14
+    # and 100) are all different.
+    off_topic:
+      greeting: [Hi, Hello, Good morning, Hey there, Thanks, Good afternoon]
+      place: [Paris, Tokyo, Nairobi, Lima, Toronto, Sydney, Istanbul, Seoul, Dakar, Oslo Fjord]
+      topic: [the ocean, friendship, autumn leaves, the moon, coffee, mountains, bicycles, the stars, bread, snow]
+      person: [Mozart, Marie Curie, Gandhi, Picasso, Newton, Darwin, Beethoven, Galileo]
+  heldout:
+    files: [store, warehouse, school, farm, airline, museum]
+    text_columns:
+      store: [North Point, Riverside, Hilltop, Lakeview, Old Town, Harbor]
+      department: [Toys, Books, Garden, Kitchen, Sports]
+      week: [W1, W2, W3, W4, W5]
+      shift: [Morning, Noon, Evening, Night]
+      route: [Red, Blue, Green, Yellow]
+    priced_columns:
+      item: [Lamp, Chair, Desk, Shelf, Rug]
+      fruit: [Apple, Mango, Pear, Plum, Cherry]
+      course: [Math, Art, History, Biology, Music]
+    number_columns: [[shipments, weight], [calls, minutes], [passengers, fares]]
+    off_topic:
+      greeting: [Good evening, Howdy, Yo, Greetings, Hiya]
+      place: [Ohrid, Reykjavik, Cairo, Hanoi, Quito, Lagos, Helsinki, Havana]
+      topic: [rain, music, the desert, trains, chess, volcanoes, gardens, the wind]
+      person: [Tesla, Ada Lovelace, Shakespeare, Frida Kahlo, Einstein, Cleopatra]

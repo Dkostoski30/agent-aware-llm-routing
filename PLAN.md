@@ -137,9 +137,10 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P1.3 | Agent runtime v0: loop + calculator tool, non-streaming calls (D6), headers (D1), run history in Redis (D7) | `pytest` with a mocked LLM passes; a real task completes through the gateway; headers visible in gateway logs; history readable from Redis |
 | P1.4 | Angular shell in the design system (D14): tokens and both themes, top bar, New task screen, run view with live step cards (SSE) | Typing a task in the UI shows each step as it happens |
 | P1.5 | `make smoke`: UI-less end-to-end check | One command runs a task through every layer and exits 0 |
-| P1.6 | Practical go/no-go: one demo task (CSV analysis) with high-level tools (D10) on the demo model, 10 runs | ≥9/10 correct results → go. Below that: narrow the tasks, or move the demo to a FINKI GPU server (ask at Checkpoint 1) |
+| P1.6 | Practical go/no-go: one demo task (CSV analysis) with high-level tools (D10) on the demo model, 10 runs | ≥9/10 correct results → go. Below that: narrow the tasks, or move the demo to a FINKI GPU server (ruled out by the user 2026-10-30: everything runs on the laptop) |
+| P1.7 | Fine-tune the 0.6B (after Gate 1, agreed with the mentor at Checkpoint 1): LoRA on Qwen3-0.6B trained on tool-call trajectories that Python generates from the deterministic tools (D10), served on the GPTQ-Int8 0.6B (D8 unchanged). Steps: feasibility spike, data generator + held-out baseline, overnight training (`docs/task-cards/19-P1.7-fine-tune-tool-calls.md`) | The held-out score beats the baseline, and the demo go/no-go questions on the real profile with the adapter reach ≥9/10 in the kept mode |
 
-**Gate 1:** `make smoke` green; P1.6 result known. **Checkpoint 1:** show the walking skeleton to the mentor; ask whether a FINKI GPU server is available for the demo.
+**Gate 1:** `make smoke` green; P1.6 result known. **Checkpoint 1:** show the walking skeleton to the mentor; ~~ask whether a FINKI GPU server is available for the demo~~ (ruled out by the user 2026-10-30: the demo stays on the laptop's RTX 3050).
 
 ### Phase 2: Workload and simulator (2–8.11)
 
