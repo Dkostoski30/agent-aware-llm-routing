@@ -1,0 +1,21 @@
+mode,question,seed,correct,steps,invalid_calls,duration_s,expected,answer,status,error
+required,summary,1,True,4,2,25.2,1274.0583333333334,1274.06,done,
+required,summary,2,True,6,2,18.1,1274.0583333333334,The average revenue per row in the sales.csv file is $1274.06.,done,
+required,group-total,1,False,2,1,6.0,14351.1,0,done,
+required,group-total,2,False,3,2,11.1,14351.1,The total revenue of the North region is $0.,done,
+required,group-mean,1,True,2,0,8.1,17.833333333333332,The average number of units per row for product Gadget in sales.csv is 17.83.,done,
+required,group-mean,2,True,2,0,7.1,17.833333333333332,17.83,done,
+required,compare,1,False,4,0,17.1,3728.8999999999996,North region made $73.0 more in total revenue than the South region.,done,
+required,compare,2,False,3,3,12.1,3728.8999999999996,,failed,3 invalid calls (agent.max_invalid_calls)
+required,two-step,1,False,3,3,10.0,15116.5,,failed,3 invalid calls (agent.max_invalid_calls)
+required,two-step,2,False,3,0,13.1,15116.5,"Gizmo sold the most units in total with a total revenue of $17,931.0.",done,
+auto,summary,1,True,2,0,5.1,1274.0583333333334,"The average revenue per row in the sales.csv file is $1,274.06.",done,
+auto,summary,2,True,2,0,4.0,1274.0583333333334,"The average revenue per row in the ""sales"" CSV file is $1274.06.",done,
+auto,group-total,1,False,2,0,6.0,14351.1,The total revenue for the North region in sales.csv is $297.0.,done,
+auto,group-total,2,False,2,1,6.0,14351.1,The total revenue of the North region cannot be determined from the provided data. Please provide the correct region name.,done,
+auto,group-mean,1,True,2,0,7.0,17.833333333333332,The average number of units per row for the product Gadget in the sales.csv file is 17.83.,done,
+auto,group-mean,2,True,2,0,4.0,17.833333333333332,The average number of units per row for the product Gadget in sales.csv is 17.83.,done,
+auto,compare,1,False,2,1,6.0,3728.8999999999996,The North region did not have a revenue value in the 'North' column. Please check the data and ensure the region is correctly specified.,done,
+auto,compare,2,False,2,1,9.1,3728.8999999999996,"The North region made less than the South region in sales.csv. However, the exact difference in total revenue cannot be determined as 'North' is not a valid value for the 'value' parameter. Please check the values in the 'value' column.",done,
+auto,two-step,1,False,2,2,10.1,15116.5,The tool calls failed because the file name 'sales.csv' is not in the list of allowed file names. Please check the file name and ensure it is correct.,done,
+auto,two-step,2,False,2,2,12.1,15116.5,"The results indicate that the product with the highest units sold is ""product A"" and its total revenue is $250,000.",done,

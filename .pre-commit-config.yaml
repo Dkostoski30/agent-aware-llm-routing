@@ -31,6 +31,17 @@ repos:
         entry: uv run --locked mypy
         language: system
         types_or: [python, pyi]
+        # The root venv has no torch; training/ is checked by the hook below.
+        exclude: ^training/
+      # training/ is its own uv project with torch and transformers (P1.7), so its mypy runs in that environment, with
+      # its pyproject's settings. Like the root hook, uv run installs the environment if it is missing. pre-commit runs
+      # inside the root venv; without VIRTUAL_ENV unset, uv warns that it ignores it.
+      - id: mypy-training
+        name: mypy (strict, training)
+        entry: env -u VIRTUAL_ENV uv run --locked --project training mypy --config-file training/pyproject.toml
+        language: system
+        types_or: [python, pyi]
+        files: ^training/
       - id: golangci-lint
         name: golangci-lint
         entry: bash -c 'cd gateway && golangci-lint run ./...'

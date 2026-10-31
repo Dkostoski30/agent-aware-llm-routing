@@ -40,15 +40,19 @@ class AgentConfig:
 
 
 def load_config(path: Path) -> AgentConfig:
-    """Reads model.name and the agent section of a profile; a missing key raises KeyError."""
+    """Reads the model's name and the agent section of a profile; a missing key raises KeyError.
+
+    With model.lora set, the name is the adapter's: vLLM serves the adapter under its own name next
+    to the base model, and only a request that names it gets it (P1.7)."""
     profile = yaml.safe_load(path.read_text())
+    model = profile["model"]
     agent = profile["agent"]
     if agent["tool_choice"] not in get_args(ToolChoice):
         raise ValueError(
             f"agent.tool_choice is {agent['tool_choice']!r}, expected one of {get_args(ToolChoice)}"
         )
     return AgentConfig(
-        model_name=profile["model"]["name"],
+        model_name=model["lora"]["name"] if "lora" in model else model["name"],
         tool_choice=cast(ToolChoice, agent["tool_choice"]),
         max_steps=agent["max_steps"],
         max_invalid_calls=agent["max_invalid_calls"],
