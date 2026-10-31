@@ -21,6 +21,7 @@ import hashlib
 import io
 import json
 import math
+import operator
 import re
 import statistics
 import subprocess
@@ -56,6 +57,15 @@ POLL_SECONDS = 1.0
 NUMBER = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 
 AGGREGATES: dict[str, Callable[[list[float]], float]] = {"sum": math.fsum, "mean": statistics.fmean}
+# The calculator's operations (agent_runtime.tools), for arithmetic questions (P1.7).
+OPERATIONS: dict[str, Callable[[float, float], float]] = {
+    "add": operator.add,
+    "subtract": operator.sub,
+    "multiply": operator.mul,
+    "divide": operator.truediv,
+}
+# The expected kind of a question answered with a fixed sentence and no tool (P1.7).
+FIXED_REPLY = "fixed_reply"
 
 # The D10 mode that wins a tie: it cannot produce a malformed call.
 REQUIRED = "required"
@@ -145,6 +155,7 @@ def expected_value(rows: Sequence[Mapping[str, str]], spec: Mapping[str, Any]) -
     aggregate: agg of value over all rows, or over the rows of one group.
     difference: agg of value for group right minus group left.
     of_top_group: agg of value for the group that ranks first by rank's agg of rank's value.
+    arithmetic: start, then each [op, number] of steps applied left to right; rows are not read.
     """
     kind = spec["kind"]
     if kind == "aggregate":
@@ -168,6 +179,11 @@ def expected_value(rows: Sequence[Mapping[str, str]], spec: Mapping[str, Any]) -
                 f"a tie for the top group of {spec['by']}: the question has two answers"
             )
         return _aggregate(groups[ordered[0]], spec["agg"], spec["value"])
+    if kind == "arithmetic":
+        value = float(spec["start"])
+        for op, number in spec["steps"]:
+            value = OPERATIONS[op](value, float(number))
+        return value
     raise ValueError(f"unknown expected kind {kind!r}")
 
 
@@ -191,14 +207,24 @@ def _made(calls: Sequence[tuple[str, dict[str, Any]]], expected_call: Mapping[st
 
 
 def is_correct(
-    run: Mapping[str, Any], question: Question, expected: float, tolerance: float
+    run: Mapping[str, Any], question: Question, expected: float | None, tolerance: float
 ) -> bool:
     """run is a GET /runs/{id} body. Correct when the run is done, made every expected call, does
     not match wrong_if_matches, and a number in its answer is within tolerance (a share of
-    expected) of expected."""
+    expected) of expected.
+
+    A fixed_reply question has no expected value: correct when the run is done, no tool ran, and
+    the answer contains the question's reply.
+    """
     if run["status"] != "done":
         return False
     calls = _calls_ran(run)
+    if question.expected.get("kind") == FIXED_REPLY:
+        return not calls and question.expected["reply"] in run["answer"]
+    if expected is None:
+        raise ValueError(
+            f"{question.id}: a question answered with a number needs an expected value"
+        )
     if not all(_made(calls, expected_call) for expected_call in question.expected_calls):
         return False
     answer: str = run["answer"]
@@ -290,13 +316,17 @@ def with_mode(profile_text: str, mode: str) -> str:
 
 
 def run_question(
-    client: httpx.Client, file: Mapping[str, str], task: str, seed: int, run_timeout: float
+    client: httpx.Client,
+    files: Sequence[Mapping[str, str]],
+    task: str,
+    seed: int,
+    run_timeout: float,
 ) -> tuple[dict[str, Any], float]:
     """Starts a run and polls it until it ends; returns its GET /runs/{id} body and the seconds from
     the POST until the end was seen. A run still going after run_timeout comes back as status
     timeout."""
     started = time.monotonic()
-    response = client.post("/runs", json={"task": task, "seed": seed, "files": [file]})
+    response = client.post("/runs", json={"task": task, "seed": seed, "files": list(files)})
     response.raise_for_status()
     run_id = response.json()["run_id"]
     while True:
@@ -328,7 +358,9 @@ def run_mode(
     rows: list[dict[str, Any]] = []
     for question in experiment.questions:
         for seed in experiment.seeds:
-            run, duration = run_question(client, experiment.file, question.text, seed, run_timeout)
+            run, duration = run_question(
+                client, [experiment.file], question.text, seed, run_timeout
+            )
             served = served_mode(run)
             if served not in (None, mode):
                 raise RuntimeError(
@@ -360,13 +392,33 @@ def run_mode(
     return rows
 
 
-def result_path(experiment: Experiment, agent_image: str) -> Path:
-    """results/<experiment>-<hash>-<agent image tag>.csv next to the experiment file. The tag is a
-    hash of the agent's build context (infra/deploy-agent.sh), so a result is tied to the agent
-    code that produced it as well as to the experiment file (D11)."""
+def result_path(experiment: Experiment, agent_image: str, adapter: str | None = None) -> Path:
+    """results/<experiment>-<hash>-<agent image tag>[-<adapter>].csv next to the experiment file.
+    The tag is a hash of the agent's build context (infra/deploy-agent.sh), so a result is tied to
+    the agent code that produced it as well as to the experiment file (D11). adapter is the first 12
+    hex digits of the served LoRA adapter's sha256 (P1.7), so a run on the adapter does not
+    overwrite the baseline."""
     tag = agent_image.rsplit(":", 1)[1]
-    name = f"{experiment.path.stem}-{experiment.hash}-{tag}.csv"
+    suffix = "" if adapter is None else f"-{adapter}"
+    name = f"{experiment.path.stem}-{experiment.hash}-{tag}{suffix}.csv"
     return experiment.path.parent / "results" / name
+
+
+def adapter_id(model: Mapping[str, Any]) -> str | None:
+    """The first 12 hex digits of the served LoRA adapter's sha256 (model.lora, P1.7), the id
+    result_path takes; None for a profile that serves no adapter."""
+    lora = model.get("lora")
+    return None if lora is None else str(lora["sha256"])[:12]
+
+
+def served_differs(running: Mapping[str, Any], profile: Mapping[str, Any]) -> str | None:
+    """How the running agent's model section differs from the profile's, or None: the model and
+    the adapter must both match, or the rows would go to another model's file."""
+    if running["name"] != profile["name"]:
+        return f"the agent runs {running['name']}, the profile has {profile['name']}"
+    if running.get("lora") != profile.get("lora"):
+        return f"the agent has model.lora {running.get('lora')}, the profile {profile.get('lora')}"
+    return None
 
 
 def report(experiment: Experiment, rows: Sequence[Mapping[str, Any]], results: Path) -> None:
@@ -417,11 +469,9 @@ def main() -> None:
     running = yaml.safe_load(
         kubectl("get", "configmap", "agent-config", "-o", r"jsonpath={.data.profile\.yaml}")
     )
-    if running["model"]["name"] != profile["model"]["name"]:
-        sys.exit(
-            f"go-no-go: the agent runs {running['model']['name']}, profile {experiment.profile} is "
-            f"{profile['model']['name']}: run make up PROFILE={experiment.profile} first"
-        )
+    differs = served_differs(running["model"], profile["model"])
+    if differs is not None:
+        sys.exit(f"go-no-go: {differs}: run make up PROFILE={experiment.profile} first")
     # The image the switches keep: they change the profile, not the code.
     agent_image = kubectl(
         "get",
@@ -446,7 +496,7 @@ def main() -> None:
     finally:
         print(f"go-no-go: putting back {profile_path}", flush=True)
         apply_profile(profile_text)
-    report(experiment, rows, result_path(experiment, agent_image))
+    report(experiment, rows, result_path(experiment, agent_image, adapter_id(profile["model"])))
 
 
 if __name__ == "__main__":

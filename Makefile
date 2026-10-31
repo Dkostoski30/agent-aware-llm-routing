@@ -1,9 +1,11 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke replay experiment go-no-go
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke replay experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
 
-# Python tests always exist (schemas/tests); Go tests run once the gateway module exists.
+# Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
+# training environment is installed (uv sync --locked --project training, P1.7).
 test:
 	uv run --locked pytest
 	if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
+	if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
 
 lint:
 	uv run --locked pre-commit run --all-files
@@ -84,9 +86,18 @@ vllm-deploy:
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
 	fi; \
+	lora_path=$$(yq '.model.lora.path // ""' config/$(PROFILE).yaml | sed "s|^~|$$HOME|"); \
+	if [ -n "$$lora_path" ]; then \
+		want=$$(yq -e .model.lora.sha256 config/$(PROFILE).yaml); \
+		got=$$(sha256sum "$$lora_path/adapter_model.safetensors" | cut -d' ' -f1); \
+		if [ "$$got" != "$$want" ]; then \
+			echo "vllm-deploy: $$lora_path/adapter_model.safetensors has sha256 $$got, model.lora.sha256 is $$want"; \
+			exit 1; \
+		fi; \
+	fi; \
 	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - \
-			--set hfCacheHostPath=$$HOME/.cache/huggingface; \
+			--set hfCacheHostPath=$$HOME/.cache/huggingface --set-string loraHostPath=$$lora_path; \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
 	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
@@ -145,8 +156,40 @@ grafana:
 
 # 5 CSV questions x 2 seeds on the demo model in each D10 mode, scored, one CSV row per run in experiments/results/
 # (P1.6b). Needs make up PROFILE=demo; restarts the agent once per mode and puts config/demo.yaml back at the end.
+# EXPERIMENT picks another experiment file: experiments/real-go-no-go.yaml asks the same on the real profile (P1.7).
 go-no-go:
-	uv run --locked python experiments/go_no_go.py experiments/demo-go-no-go.yaml
+	uv run --locked python experiments/go_no_go.py $(or $(EXPERIMENT),experiments/demo-go-no-go.yaml)
+
+# LoRA training steps of the base model at each length in experiments/finetune-train.yaml: template check, peak VRAM,
+# s/step; saves the spike's adapter (P1.7 step 1). Needs the cluster down (make down); the training environment is
+# its own uv project, so the first run installs torch into training/.venv.
+finetune-spike:
+	uv run --locked --project training python training/spike.py experiments/finetune-train.yaml
+
+# vLLM serves the spike's adapter on the real profile's GPTQ-Int8 model: VRAM with and without it, one tool call in
+# each D10 mode (P1.7 step 1). Needs make finetune-spike and the cluster down.
+lora-check:
+	bash infra/checks/lora_check.sh
+
+# Training examples and held-out questions from the agent's own tools, then their token lengths with the served chat
+# template (P1.7 step 2). Writes under output_dir of experiments/finetune-data.yaml, outside git; the same file gives
+# the same bytes. PYTHONPATH: the generator runs the agent's own loop and tools, and agent/ is not an installed
+# package (agent/pyproject.toml); pytest finds it through pythonpath, a script through this.
+finetune-data:
+	PYTHONPATH=agent uv run --locked python experiments/finetune_data.py experiments/finetune-data.yaml
+	uv run --locked --project training python training/render.py experiments/finetune-data.yaml
+
+# The held-out set through the agent in each D10 mode, scored like the go/no-go, one CSV row per run in
+# experiments/results/ (P1.7 step 2). Needs make finetune-data and make up (real); 196 runs, ~40 min. BASELINE=<csv>
+# prints that earlier result next to this one, paired by question, with McNemar's p-value (P1.7 step 3).
+heldout:
+	PYTHONPATH=agent uv run --locked python experiments/heldout.py experiments/finetune-data.yaml \
+		$(if $(BASELINE),--baseline $(BASELINE))
+
+# The LoRA adapter from make finetune-data's examples and experiments/finetune-train.yaml (P1.7 step 3): ~2 h. Run it
+# again after a crash or Ctrl+C and it resumes from the newest checkpoint. Needs the cluster down (make down).
+finetune:
+	uv run --locked --project training python training/train.py experiments/finetune-train.yaml
 
 # One calculator task through every layer on the current cluster, any profile: pods Ready, agent answer, Gateway
 # access log, Endpoint Picker picks, Redis history, Prometheus samples; stops at the first FAIL (P1.5).

@@ -16,6 +16,18 @@ model:
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
   tool_call_parser: hermes
+  # The P1.7 LoRA adapter, trained on generated tool-call trajectories (make finetune, experiments/finetune-train.yaml).
+  # vLLM serves it next to the base model, and the agent names it in every request. Without this section the pods
+  # serve the plain model (docs/task-cards/19-P1.7-fine-tune-tool-calls.md).
+  lora:
+    # The name requests use; it ends with the start of the weights' sha256, so a log line names the adapter it ran on.
+    name: thesis-b03ea3894e7c
+    # Where make finetune published it; make vllm-deploy mounts it read-only into the vLLM pods.
+    path: ~/.cache/thesis/finetune/adapters/b03ea3894e7c
+    # sha256 of adapter_model.safetensors; make vllm-deploy refuses an adapter whose weights differ.
+    sha256: b03ea3894e7c9823443057bc69ad25748c642db6c9c652bc4eeedc3f6280b9ef
+    # The adapter's rank (experiments/finetune-train.yaml, lora.rank); vLLM sizes its LoRA buffers for it.
+    max_rank: 16
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).
 replicas: 2
 # Kubernetes pod settings for the vLLM chart (P0.7).
@@ -83,6 +95,11 @@ agent:
   # it sees them (P1.6b: "17.833333333333332"). 2 keeps money exact and means readable; the rounding error of 0.005
   # stays inside the go/no-go's 1% tolerance for any value from 0.5 up.
   result_decimals: 2
+  # P1.6b scores a final answer as correct when a number in it is within this share of the expected value. 1% passes
+  # a tool result rounded to 3-4 significant digits (1,274.06 written as 1,274) and fails another group's value, which
+  # the go/no-go fixture keeps more than 1% from every answer (experiments/demo-go-no-go.yaml). The same as demo's:
+  # P1.7 scores the held-out set and the real-profile go/no-go with it (experiments/finetune-data.yaml).
+  answer_tolerance: 0.01
   # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
   sampling:
     temperature: 0.7
