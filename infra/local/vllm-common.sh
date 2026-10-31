@@ -13,6 +13,10 @@ VLLM_CONTAINER_PORT=8000
 
 HF_CACHE=$HOME/.cache/huggingface
 
+# Flags added after the profile's, for a caller that serves something on top of the profile's model; empty for every
+# other caller. infra/checks/lora_check.sh sets the LoRA flags here (P1.7).
+VLLM_EXTRA_ARGS=()
+
 # vllm_serve_args <profile>: fills the array VLLM_ARGS with the vLLM server flags for the profile.
 vllm_serve_args() {
   local name revision gpu_util kv_bytes max_len parser
@@ -56,5 +60,5 @@ vllm_docker_run() {
     --env HF_HOME=/hf \
     --volume "$HF_CACHE:/hf" \
     --publish "$port:$VLLM_CONTAINER_PORT" \
-    "$VLLM_IMAGE" "${VLLM_ARGS[@]}"
+    "$VLLM_IMAGE" "${VLLM_ARGS[@]}" "${VLLM_EXTRA_ARGS[@]}"
 }

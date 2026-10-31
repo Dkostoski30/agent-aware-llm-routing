@@ -12,6 +12,10 @@ gpuAccess: plugin
 # Where the HF cache filled by infra/download-model.sh lives on the node; set by make vllm-deploy to $HOME/.cache/huggingface.
 hfCacheHostPath: ""
 
+# Where the profile's LoRA adapter (model.lora.path, P1.7) is on the node; set by make vllm-deploy, used only with
+# model.lora.
+loraHostPath: ""
+
 # Filled from config/<profile>.yaml by make vllm-deploy.
 replicas: 0
 model: {}

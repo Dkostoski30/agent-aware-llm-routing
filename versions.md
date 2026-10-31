@@ -71,6 +71,22 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 | uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25) |
 | redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
 
+## Training packages
+
+Pinned in `training/pyproject.toml` and `training/uv.lock` (P1.7). `training/` is its own uv project, not a member of
+the root workspace, so the root venv, `make test` and the agent image never install torch. Each pin is the newest
+release at least two weeks old on 2026-10-28; packages they pull in are pinned by `training/uv.lock` only.
+
+| Package | Version | Why |
+|---|---|---|
+| torch | 2.14.1 | 2026-09-30 (2.15.0 was released on 2026-10-28). The Linux wheel bundles CUDA 13.0, which the Windows driver's CUDA 13.5 runs |
+| transformers | 5.19.0 | 2026-10-06 (5.20.0 was 13 days old): the model, the tokenizer and its chat template |
+| peft | 0.21.2 | 2026-10-01: LoRA |
+| accelerate | 1.15.0 | 2026-09-09: needed by transformers' Trainer (P1.7 step 3) |
+| huggingface-hub | 2.2.0 | 2026-10-08 (2.3.0 was 5 days old); `training/spike.py` downloads the tokenizer files with it. Same version as the hf CLI |
+| PyYAML | 6.0.3 | reads `experiments/finetune-train.yaml`; the agent's pin |
+| mypy, pytest, types-PyYAML (dev) | 2.4.0, 9.1.1, 6.0.12.20260906 | the root's pins; the `mypy-training` pre-commit hook runs mypy in this environment, `make test` runs `training/tests` with pytest (P1.7 step 2) |
+
 ## UI packages
 
 Pinned exactly in `ui/package.json` (P1.4a); packages they pull in are pinned by `ui/package-lock.json` only.
@@ -126,6 +142,7 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 |---|---|---|---|
 | Qwen/Qwen3-0.6B-GPTQ-Int8 | `d3f20e7e71825fe57ad32705b396e9e156279107` | 0.71 GiB | Experiments, infrastructure demo |
 | Qwen/Qwen3-1.7B-GPTQ-Int8 | `382fed3fa21d1a7e837b42a500564a0c4be4f060` | 2.07 GB | Practical demo (D8, after the 4B did not fit) |
+| Qwen/Qwen3-0.6B | `c1899de289a04d12100db370d81485cdf75e47ca` | 1.50 GB (bf16 safetensors) | Base of the P1.7 LoRA adapter, which is served on the GPTQ-Int8 0.6B; training only |
 | Qwen/Qwen3-4B-AWQ | `74d4bd2bd4bff9cafc9345221320bffb08b406a3` | 2.5 GiB in VRAM | Not used: does not fit (P0.3) |
 | Qwen/Qwen3-1.7B | `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e` | 4.06 GB | Not used: FP16 weights alone exceed what is free on the GPU |
 

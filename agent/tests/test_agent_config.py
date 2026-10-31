@@ -17,7 +17,29 @@ def test_profile_loads_with_its_d10_mode(profile: str, tool_choice: str) -> None
     path = CONFIG_DIR / f"{profile}.yaml"
     config = load_config(path)
     assert config.tool_choice == tool_choice
-    assert config.model_name == yaml.safe_load(path.read_text())["model"]["name"]
+    model = yaml.safe_load(path.read_text())["model"]
+    assert config.model_name == (model["lora"]["name"] if "lora" in model else model["name"])
+
+
+def profile_with_model(tmp_path: Path, model: dict[str, object]) -> Path:
+    profile = yaml.safe_load((CONFIG_DIR / "real.yaml").read_text())
+    profile["model"] = model
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    return path
+
+
+def test_with_an_adapter_the_agent_names_the_adapter(tmp_path: Path) -> None:
+    """vLLM serves a LoRA adapter under its own name next to the base model; a request that names
+    the base model gets no adapter (P1.7)."""
+    lora = {"name": "thesis-b03ea3894e7c", "path": "/adapters", "sha256": "b0" * 32, "max_rank": 16}
+    path = profile_with_model(tmp_path, {"name": "Qwen/Qwen3-0.6B-GPTQ-Int8", "lora": lora})
+    assert load_config(path).model_name == "thesis-b03ea3894e7c"
+
+
+def test_without_an_adapter_the_agent_names_the_model(tmp_path: Path) -> None:
+    path = profile_with_model(tmp_path, {"name": "Qwen/Qwen3-0.6B-GPTQ-Int8"})
+    assert load_config(path).model_name == "Qwen/Qwen3-0.6B-GPTQ-Int8"
 
 
 def test_every_profile_sends_the_same_system_prompt() -> None:

@@ -1,0 +1,72 @@
+# P1.7: LoRA fine-tuning of the 0.6B on generated tool-call trajectories (docs/task-cards/19-P1.7-fine-tune-tool-calls.md).
+# Step 1 (the feasibility spike, make finetune-spike) reads base, served_profile, lora, output_dir and spike; step 3
+# (make finetune) reads all but spike.
+# The weights LoRA trains on: the full-precision model that Qwen3-0.6B-GPTQ-Int8 was quantized from. The adapter is
+# served on the GPTQ-Int8 model, so D8 stays (decided with the user 2026-10-28).
+base:
+  name: Qwen/Qwen3-0.6B
+  # Hugging Face commit, so every run trains on the same weights (versions.md, Models).
+  revision: c1899de289a04d12100db370d81485cdf75e47ca
+# The profile whose model serves the adapter. Training renders prompts with its chat template, the one vLLM uses; the
+# spike checks that the base model's template and tokenizer are the same.
+served_profile: real
+lora:
+  # The largest shape step 3 would use, so the spike measures the worst case. Rank 16 is a common default for
+  # learning an output format; a smaller rank only lowers memory.
+  rank: 16
+  # alpha = 2 x rank, the usual scaling (the update is multiplied by alpha / rank = 2).
+  alpha: 32
+  dropout: 0.05
+  # Every attention and MLP projection of Qwen3's decoder layers: tool-call formats and argument choices are not
+  # confined to attention, and on a 0.6B model the extra adapter weights are a few MB.
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+# Generated data, checkpoints and adapters: outside git, rebuilt by the make targets (P1.7).
+output_dir: ~/.cache/thesis/finetune
+spike:
+  # Sample lengths in tokens the spike measures VRAM and speed at. 4096 is model.max_model_len of the served profile,
+  # so no prompt the runtime sends is longer; 2048 shows how memory grows with length. Step 2 measures the real
+  # longest example and step 3 sets the max length from it.
+  lengths: [2048, 4096]
+  # Tokens at the end of each sample that the loss counts, as the reply of a training example does (the prompt is
+  # masked). A tool call or a final answer is a few dozen tokens; 64 covers the longest with margin. The logits are
+  # computed for these only: for all positions they did not fit (P1.7 step 1, experiments/log.md).
+  reply_tokens: 64
+  # Optimizer steps per length. The first includes CUDA warmup and allocator growth, so s/step is the mean of the rest.
+  steps: 5
+  # Any small value: the spike measures memory and time, not learning.
+  learning_rate: 0.0001
+# The generated data the run trains on: experiments/finetune-data.yaml and the hash make finetune-data printed for it.
+# Training refuses other data, so the adapter learns from the data whose held-out split the baseline was scored on
+# (experiments/log.md, P1.7 step 2).
+data:
+  experiment: experiments/finetune-data.yaml
+  hash: 6e3ac3eda752
+# The training run (P1.7 step 3). It trains one example at a time: the examples differ in length, and one needs no
+# padding; step 1 measured that size.
+train:
+  # Passes over the 3196 examples, ~45 min each at step 1's speed. One pass is often too few for a format the base
+  # model gets wrong in every run (two-step, arithmetic and off-topic were 0/14 in the baseline); more passes make the
+  # model likelier to repeat the training questions than to learn the format.
+  epochs: 2
+  # A common LoRA rate, about 10x full fine-tuning's: the adapter starts at zero and has few weights to move.
+  learning_rate: 2.0e-4
+  # Share of the optimizer steps over which the rate climbs from 0; then it falls linearly to 0 at the end. The first
+  # steps' gradients are large (the base model's formats are wrong), and this keeps them from throwing the adapter far.
+  warmup: 0.05
+  # Examples per optimizer step: 16 spans several kinds and modes, so no step pulls towards one format. 3196 / 16 = 200
+  # optimizer steps per epoch.
+  gradient_accumulation: 16
+  # model.max_model_len of the served profile: no prompt the runtime sends is longer. A longer example is refused, not
+  # cut, since a cut prompt is one vLLM never sends (the longest is 1297 tokens, experiments/log.md).
+  max_length: 4096
+  # Optimizer steps between checkpoints: ~10-15 min at ~1 s per example, the most a crash or Ctrl+C costs.
+  save_steps: 50
+  # Checkpoints kept: the newest, to resume from, and the one before it.
+  checkpoints_kept: 2
+  # Optimizer steps between loss lines: 40 points over the 400 steps, for the loss curve.
+  logging_steps: 10
+  # Seeds the LoRA weights' start, the dropout and the order of the examples.
+  seed: 1
+  # Free GPU memory needed before loading: torch's peak at 4096 tokens in step 1 (2118 MiB) and some margin. A running
+  # vLLM container or pod leaves far less (experiments/log.md, P1.7 step 1).
+  min_free_mib: 2200
