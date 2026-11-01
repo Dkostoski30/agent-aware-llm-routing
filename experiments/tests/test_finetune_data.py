@@ -321,3 +321,21 @@ def test_tool_call_arguments_are_json_in_the_schema_s_order() -> None:
 def test_an_unknown_mode_is_rejected() -> None:
     with pytest.raises(ValueError, match="not a D10 mode"):
         generate({**SMALL, "modes": ["required", "none"]}, CONFIG, TOLERANCE)
+
+
+@pytest.mark.parametrize("split", ["train", "heldout"])
+def test_an_arithmetic_question_is_one_calculator_call_without_a_file(split: str) -> None:
+    """The calculator takes the whole expression and is offered only on runs without files
+    (P2.1a-3), so an arithmetic question plans one call and comes with no file; the call's result
+    is the answer."""
+    for planned in small_plan(split):
+        if planned.kind != "arithmetic":
+            continue
+        assert planned.file is None, planned
+        [(name, arguments)] = planned.calls
+        assert (name, list(arguments)) == ("calculator", ["expression"])
+        assert re.fullmatch(r"[0-9+\-*/]+", arguments["expression"]), planned
+        assert tool_results(planned) == [
+            {"result": pytest.approx(expected_value([], planned.expected))}
+        ]
+        assert planned.expected_calls == [{"tool": "calculator"}]
