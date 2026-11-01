@@ -230,6 +230,8 @@ def test_text_documents_are_saved_with_the_run_and_reach_the_document_tools() ->
         "compare",
         "read_document",
         "extract_clauses",
+        # Every text file also brings get_policy (card 21, P2.1a-2), until P4.8's scenario step.
+        "get_policy",
     ]
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["answer"]) == ("done", "One clause: fees.")
