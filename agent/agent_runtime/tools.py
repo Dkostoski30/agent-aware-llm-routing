@@ -7,14 +7,15 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from agent_runtime import csv_tools
+from agent_runtime import csv_tools, documents
 from agent_runtime.config import ToolChoice
 from agent_runtime.csv_tools import COMPARE, CSV_SUMMARY, GROUP_BY, Table, ToolError
+from agent_runtime.documents import Document
 
 CALCULATOR = "calculator"
 FINAL_ANSWER = "final_answer"
 
-# The tools whose schemas are the same in every run; the CSV tools' schemas are built per run.
+# The tools whose schemas are the same in every run; the file tools' schemas are built per run.
 PARAMETERS: dict[str, dict[str, Any]] = {
     CALCULATOR: {
         "type": "object",
@@ -38,6 +39,7 @@ DESCRIPTIONS = {
     CALCULATOR: "Applies one arithmetic operation to two numbers: a op b.",
     FINAL_ANSWER: "Ends the task with the answer for the user.",
     **csv_tools.DESCRIPTIONS,
+    **documents.DESCRIPTIONS,
 }
 
 
@@ -45,16 +47,20 @@ class InvalidCallError(Exception):
     """A tool call the runtime refuses to run; the message goes back to the model."""
 
 
-def offered_tools(tool_choice: ToolChoice, tables: Sequence[Table]) -> dict[str, dict[str, Any]]:
+def offered_tools(
+    tool_choice: ToolChoice, tables: Sequence[Table], texts: Sequence[Document] = ()
+) -> dict[str, dict[str, Any]]:
     """The tools a run offers, name -> JSON schema of the arguments, in the order the model sees
-    them. Every run gets the calculator, and a run with files the CSV tools, until P4.8 adds the
-    scenario step (D13).
+    them. Every run gets the calculator, a run with CSV files the CSV tools and a run with text
+    documents the document tools, until P4.8 adds the scenario step (D13).
     """
     tools = {CALCULATOR: PARAMETERS[CALCULATOR]}
-    # Without files the file enum would be empty: the CSV tools could never be called, and in
+    # Without files of a type its file enum would be empty: its tools could never be called, and in
     # required mode vLLM would have to build a grammar from an enum with no values (D10).
     if tables:
         tools.update(csv_tools.parameters(tables))
+    if texts:
+        tools.update(documents.parameters(texts))
     # final_answer ends the run in required mode; in auto mode a plain text answer does (D10).
     if tool_choice == "required":
         tools[FINAL_ANSWER] = PARAMETERS[FINAL_ANSWER]
@@ -97,10 +103,10 @@ def run_tool(
     max_result_rows: int,
     result_decimals: int,
 ) -> dict[str, Any]:
-    """Runs a call that passed check_call, to any tool but final_answer. The file enum guarantees
-    the file exists; a call the file's data cannot answer comes back as a tool error. The CSV
-    tools' numbers are rounded to result_decimals; the calculator's are not, since its result
-    feeds the next operation."""
+    """Runs a call that passed check_call, to the calculator or a CSV tool (the document tools run
+    in documents.run_document_tool). The file enum guarantees the file exists; a call the file's
+    data cannot answer comes back as a tool error. The CSV tools' numbers are rounded to
+    result_decimals; the calculator's are not, since its result feeds the next operation."""
     if name == CALCULATOR:
         return calculator(**arguments)
     table = tables[arguments["file"]]

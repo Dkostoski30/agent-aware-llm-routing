@@ -27,6 +27,12 @@ EXPECTED_STEPS = 3
 SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 MAX_FILE_BYTES = len(SALES_CSV)
 SALES_FILE = {"id": "sales", "name": "sales.csv", "content": SALES_CSV}
+TERMS_FILE = {
+    "id": "terms",
+    "name": "terms.txt",
+    "type": "text",
+    "content": "## Fees\nTen euros.\n",
+}
 
 
 def make_config() -> AgentConfig:
@@ -44,6 +50,9 @@ def make_config() -> AgentConfig:
         max_files=2,
         max_result_rows=20,
         result_decimals=2,
+        max_clause_chars=1600,
+        max_diff_changes=20,
+        diff_context_words=3,
         events_poll_seconds=0.01,
     )
 
@@ -162,8 +171,18 @@ def test_invalid_request_is_rejected_before_a_run_starts(body: dict[str, Any] | 
         ([SALES_FILE, SALES_FILE], ["duplicate file id"]),
         ([{**SALES_FILE, "content": "a,a\n1,2\n"}], ["duplicate column"]),
         ([{**SALES_FILE, "id": "Sales.csv"}], ["not a run-request.v1"]),
+        ([{**TERMS_FILE, "content": "Fees: ten euros.\n"}], ["terms:", "no '## ' heading"]),
+        ([{**TERMS_FILE, "type": "pdf"}], ["not a run-request.v1"]),
     ],
-    ids=["too-many", "too-big", "duplicate-id", "bad-csv", "id-not-a-slug"],
+    ids=[
+        "too-many",
+        "too-big",
+        "duplicate-id",
+        "bad-csv",
+        "id-not-a-slug",
+        "text-without-heading",
+        "unknown-type",
+    ],
 )
 def test_file_the_run_cannot_use_is_rejected_before_it_starts(
     files: list[dict[str, str]], detail_parts: list[str]
@@ -191,6 +210,31 @@ def test_files_are_saved_with_the_run_and_reach_the_tools() -> None:
     assert (run["status"], run["answer"]) == ("done", "South")
     result = run["steps"][0]["tool_calls"][0]["result"]
     assert result["rows"][0] == {"group": "South", "sum": 380.0}
+
+
+def test_text_documents_are_saved_with_the_run_and_reach_the_document_tools() -> None:
+    call = {"name": "read_document", "arguments": json.dumps({"file": "terms"})}
+    read = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{"id": "call-1", "function": call}],
+    }
+    service = Service([read, text("One clause: fees.")])
+    run_id = service.start({"task": TASK, "files": [SALES_FILE, TERMS_FILE]})
+    assert service.store.files == {run_id: [SALES_FILE, TERMS_FILE]}
+    tools = [tool["function"]["name"] for tool in json.loads(service.requests[0].content)["tools"]]
+    assert tools == [
+        "calculator",
+        "csv_summary",
+        "group_by",
+        "compare",
+        "read_document",
+        "extract_clauses",
+    ]
+    run = service.client.get(f"/runs/{run_id}").json()
+    assert (run["status"], run["answer"]) == ("done", "One clause: fees.")
+    result = run["steps"][0]["tool_calls"][0]["result"]
+    assert result["clauses"] == [{"clause": "fees", "title": "Fees", "word_count": 2}]
 
 
 def test_a_run_without_files_saves_an_empty_file_list() -> None:

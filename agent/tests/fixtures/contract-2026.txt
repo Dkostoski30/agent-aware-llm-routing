@@ -1,0 +1,16 @@
+Service agreement between Acme Ltd and Birch Analytics, 2026
+
+## Parties
+This agreement is between Acme Ltd, the client, and Birch Analytics, the provider.
+
+## Services
+The provider delivers a monthly sales report and answers data questions within two working days.
+
+## Fees
+The client pays 1,350 EUR per month, invoiced on the first working day of the month.
+
+## Termination
+Either party may end this agreement with 60 days' written notice.
+
+## Confidentiality
+Both parties keep the other's data confidential during the agreement and for two years after it.

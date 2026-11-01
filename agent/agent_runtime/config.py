@@ -35,6 +35,10 @@ class AgentConfig:
     max_result_rows: int
     # Decimals the CSV tools round their numbers to (P1.6c).
     result_decimals: int
+    # Bounds on what the contracts tools put into the context (P2.1a-1).
+    max_clause_chars: int
+    max_diff_changes: int
+    diff_context_words: int
     # How often GET /runs/{id}/events reads the run from Redis for new steps (P1.4b-1).
     events_poll_seconds: float
 
@@ -65,5 +69,8 @@ def load_config(path: Path) -> AgentConfig:
         max_files=agent["max_files"],
         max_result_rows=agent["max_result_rows"],
         result_decimals=agent["result_decimals"],
+        max_clause_chars=agent["max_clause_chars"],
+        max_diff_changes=agent["max_diff_changes"],
+        diff_context_words=agent["diff_context_words"],
         events_poll_seconds=agent["events_poll_seconds"],
     )

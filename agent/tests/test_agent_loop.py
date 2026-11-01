@@ -14,6 +14,7 @@ import httpx
 import pytest
 from agent_runtime.config import AgentConfig, Sampling, ToolChoice
 from agent_runtime.csv_tools import Table, group_by, parse_file
+from agent_runtime.documents import Document, parse_document, read_document
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import RunResult, run_task
 from jsonschema import Draft202012Validator
@@ -32,6 +33,14 @@ RESULT_DECIMALS = 2
 SALES = parse_file(
     "sales", "sales.csv", (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 )
+CONTRACTS = [
+    parse_document(
+        f"contract-{year}",
+        f"contract-{year}.txt",
+        (Path(__file__).parent / "fixtures" / f"contract-{year}.txt").read_text(),
+    )
+    for year in (2025, 2026)
+]
 
 
 def make_config(mode: ToolChoice) -> AgentConfig:
@@ -49,6 +58,9 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_files=2,
         max_result_rows=MAX_RESULT_ROWS,
         result_decimals=RESULT_DECIMALS,
+        max_clause_chars=1600,
+        max_diff_changes=20,
+        diff_context_words=3,
         events_poll_seconds=0.01,
     )
 
@@ -115,13 +127,19 @@ class ScriptedLLM:
 
 
 async def run(
-    mode: ToolChoice, llm: ScriptedLLM, seed: int | None = 7, tables: Sequence[Table] = ()
+    mode: ToolChoice,
+    llm: ScriptedLLM,
+    seed: int | None = 7,
+    tables: Sequence[Table] = (),
+    documents: Sequence[Document] = (),
 ) -> tuple[RunResult, ScriptedLLM]:
     config = make_config(mode)
     transport = httpx.MockTransport(llm.handle)
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as http:
         llm_client = LLMClient(http, config)
-        result = await run_task(TASK, RUN_ID, seed, config, llm_client, tables=tables)
+        result = await run_task(
+            TASK, RUN_ID, seed, config, llm_client, tables=tables, documents=documents
+        )
     return result, llm
 
 
@@ -439,3 +457,49 @@ async def test_auto_column_outside_the_enum_is_retried_with_the_allowed_values()
     error = json.loads(llm.bodies()[1]["messages"][-1]["content"])["error"]
     for allowed in ("'country'", "'region'", "'product'", "'units'", "'revenue'"):
         assert allowed in error
+
+
+def read(file_id: str, call_id: str) -> dict[str, Any]:
+    return tool_call("read_document", {"file": file_id}, call_id)
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_two_document_reads_in_one_reply_are_one_step(mode: ToolChoice) -> None:
+    """The contracts task's "reads documents in parallel" (P2.1a-1): both calls in one reply run
+    in order, their results go back together, and the step is saved once."""
+    seen: list[int] = []
+
+    async def on_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
+        seen.append(step)
+
+    reply = calls(read("contract-2025", "call-a"), read("contract-2026", "call-b"))
+    llm = ScriptedLLM([reply, final(mode, "five clauses each")])
+    config = make_config(mode)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
+    ) as http:
+        result = await run_task(
+            TASK, RUN_ID, 7, config, LLMClient(http, config), on_step, documents=CONTRACTS
+        )
+    assert (result.status, result.steps, result.invalid_calls) == ("done", 2, 0)
+    assert seen == [1]
+    assert llm.bodies()[1]["messages"][-2:] == [
+        {
+            "role": "tool",
+            "tool_call_id": f"call-{letter}",
+            "content": json.dumps(read_document(document, MAX_RESULT_ROWS)),
+        }
+        for letter, document in zip("ab", CONTRACTS, strict=True)
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_diff_of_a_document_with_itself_is_a_tool_error_not_an_invalid_call(
+    mode: ToolChoice,
+) -> None:
+    arguments = {"left": "contract-2025", "right": "contract-2025", "clause": "termination"}
+    script = [calls(tool_call("diff_clauses", arguments)), final(mode, "none")]
+    result, llm = await run(mode, ScriptedLLM(script), documents=CONTRACTS)
+    assert (result.status, result.invalid_calls) == ("done", 0)
+    error = json.loads(llm.bodies()[1]["messages"][-1]["content"])["error"]
+    assert "both 'contract-2025'" in error
