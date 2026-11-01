@@ -20,6 +20,7 @@ from agent_runtime.documents import (
     read_document,
     read_run_files,
 )
+from agent_runtime.support import GET_POLICY
 from agent_runtime.tools import (
     CALCULATOR,
     FINAL_ANSWER,
@@ -253,11 +254,15 @@ def test_diff_errors(left: int, right: int | None, error_parts: list[str]) -> No
 @pytest.mark.parametrize(
     ("mode", "names"),
     [
-        ("auto", [CALCULATOR, READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES]),
-        ("required", [CALCULATOR, READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, FINAL_ANSWER]),
+        ("auto", [CALCULATOR, READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, GET_POLICY]),
+        (
+            "required",
+            [CALCULATOR, READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, GET_POLICY, FINAL_ANSWER],
+        ),
     ],
 )
 def test_two_documents_offer_the_three_tools(mode: ToolChoice, names: list[str]) -> None:
+    """get_policy comes with every text file too (card 21, P2.1a-2), until P4.8's scenario step."""
     assert list(offered_tools(mode, [], [contract(2025), contract(2026)])) == names
 
 
@@ -266,6 +271,7 @@ def test_one_document_offers_no_diff() -> None:
         CALCULATOR,
         READ_DOCUMENT,
         EXTRACT_CLAUSES,
+        GET_POLICY,
     ]
 
 
