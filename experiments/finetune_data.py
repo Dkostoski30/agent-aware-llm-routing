@@ -94,6 +94,8 @@ OPERATION_WORDS = {
     "add": ("plus",),
     "subtract": ("minus",),
 }
+# The calculator's sign per operation: a question's arithmetic as one expression (P2.1a-3).
+SIGNS = {"multiply": "*", "divide": "/", "add": "+", "subtract": "-"}
 # Off-topic phrasings per pool list (finetune-data.yaml, pools.<split>.off_topic); {} is the filler.
 OFF_TOPIC = {
     "greeting": ("{}", "{}!", "{}, how are you?", "{}, what can you do?"),
@@ -429,9 +431,14 @@ def _expression(rng: random.Random, start: float, steps: list[list[Any]]) -> str
     return text
 
 
+def _calculator_expression(start: float, steps: list[list[Any]]) -> str:
+    """The question's arithmetic as the one expression the calculator takes (P2.1a-3). _chain puts
+    the multiplications and divisions first, so the usual precedence gives the chain's value."""
+    return shown(start) + "".join(f"{SIGNS[op]}{shown(number)}" for op, number in steps)
+
+
 def _calculated(arguments: dict[str, Any]) -> float:
-    """The calculator's result for a planned call, as the agent's run_tool computes it: an int
-    for whole operands, so the next call's a is written as the model reads it in the result."""
+    """The calculator's result for a planned call, as the agent's run_tool computes it."""
     result = run_tool(CALCULATOR, arguments, {}, 0, 0)["result"]
     if not isinstance(result, int | float):
         raise ValueError(f"planned calculator call {arguments}: {result}")
@@ -442,7 +449,7 @@ def _arithmetic(
     spec: dict[str, Any], split: str, count: int, tolerance: float, decimals: int
 ) -> list[_Candidate]:
     """count different arithmetic questions; held-out ones are never a training question's text.
-    A question whose answer is too close to an operand or a step's result is drawn again."""
+    A question whose answer is too close to one of its numbers is drawn again."""
     rng = _rng(spec, split, "arithmetic")
     train_count = spec["questions"]["train"]
     taken = (
@@ -455,12 +462,12 @@ def _arithmetic(
         start, steps = _chain(rng, spec)
         expression = _expression(rng, start, steps)
         text = rng.choice(ARITHMETIC).format(expr=expression)
-        calls: list[tuple[str, dict[str, Any]]] = []
-        value: float = start
-        for op, number in steps:
-            calls.append((CALCULATOR, {"op": op, "a": value, "b": number}))
-            value = _calculated(calls[-1][1])
-        seen = [*(number for _, number in steps), *(a["a"] for _, a in calls)]
+        calls: list[tuple[str, dict[str, Any]]] = [
+            (CALCULATOR, {"expression": _calculator_expression(start, steps)})
+        ]
+        value = _calculated(calls[0][1])
+        # One call: the model sees the question's numbers and the answer, no intermediate result.
+        seen = [start, *(number for _, number in steps)]
         expected = {"kind": "arithmetic", "start": start, "steps": steps}
         if text in taken or not _separated(value, seen, tolerance, decimals):
             continue
@@ -472,10 +479,7 @@ def _arithmetic(
                 calls=calls,
                 answer=f"{expression} is {shown(value)}.",
                 expected=expected,
-                expected_calls=[
-                    {"tool": CALCULATOR, "arguments": {"op": op}}
-                    for op in dict.fromkeys(op for op, _ in steps)
-                ],
+                expected_calls=[{"tool": CALCULATOR}],
             )
         )
     return found
@@ -541,7 +545,10 @@ def plan(
             )
             chosen = [
                 (
-                    rng.choice(files) if rng.random() < spec["with_file_share"] else None,
+                    # The calculator is offered only on runs without files (P2.1a-3).
+                    rng.choice(files)
+                    if kind == "off-topic" and rng.random() < spec["with_file_share"]
+                    else None,
                     c,
                     c.texts[0],
                 )

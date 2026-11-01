@@ -13,6 +13,36 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-01 · P2.1a-3 · go by the user's decision at 8/10 (card's bar: 9/10)
+Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make go-no-go` · UI questions through
+`make agent-forward` + `make ui PROFILE=demo`
+Result:
+- `make test`: 599 passed, training 22 passed. `make lint` passed.
+- A first go/no-go ran on the P2.1a-2 image (`c096322c2fdf`) with this card's prompt in the ConfigMap, since the agent
+  was not redeployed: required 8/10, auto 6/10. Not this card's result; its CSV
+  (`demo-go-no-go-1f9b63bc24ca-c096322c2fdf.csv`) is not committed.
+- Go/no-go on agent `thesis/agent:323935f068c4` (`experiments/results/demo-go-no-go-1f9b63bc24ca-323935f068c4.csv`):
+  required 8/10 correct, 0 invalid calls; auto 8/10 correct, 0 invalid calls. P1.6c had required 10/10, auto 8/10.
+- All four misses are two-step, both seeds, both modes; summary, group-total, group-mean and compare are 16/16.
+  Required names Widget with a wrong revenue ($2,224.00, expected $15,116.50). Auto answers $15,116.50 but is scored
+  wrong, so it lacks the scorer's group_by(product, units, sum) call: the right number by another route. The runs'
+  calls were not opened.
+- UI on the same image: "what is 8 to the power of 3?" -> calculator("8*8*8"), 512, 2 steps. "what is the square root
+  of 128?" -> sqrt(128) (pattern refused), 128**0.5 (evaluator refused), then 128**0.5 again at every step, answered
+  by the repeat guard each time, until agent.max_steps: failed.
+Notes:
+- The user called it a go at 8/10 in required (the kept mode, D10), below card 22's 9/10. Recorded as such.
+- The calculator plays no part in two-step (CSV tools only). Since P1.6c the prompt gained the support and contracts
+  clauses and the new calculator clause, and the repeat guard came in (P2.1a-2); which of them cost two-step is not
+  measured. P4.7 measures the scenarios after P4.8.
+- Follow-up, not changed: a repeat of a call whose result was an error gets "its result is above; use that result",
+  and repeats do not count toward agent.max_invalid_calls, so such a run ends only at agent.max_steps. Counting
+  repeats as invalid, or another message when the earlier result was an error, would end it sooner.
+- Card 22's two checks on `323935f068c4` (POST /runs, seed 7): "what is 2x2x2?" (`run-45b690d5a295`) ->
+  calculator("2x2x2"), "The result of 2x2x2 is 8."; "what is 7 times 8 plus 3?" (`run-32732b43488e`) ->
+  calculator("7*8+3"), "59". One calculator call each. Earlier, on the old image, the UI showed multiply(2, 2) -> 4.
+- `make smoke` on `323935f068c4`: passed (exit 0).
+
 ### 2026-11-01 · P2.1a-2 · green (fourth demo run, after two red and one stuck)
 Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make agent-forward` · a POST /runs with
 `agent/tests/fixtures/orders.csv` (type csv) and `policies.txt` (type text), seed 7, "Order 1042 arrived damaged,
