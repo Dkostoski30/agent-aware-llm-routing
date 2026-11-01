@@ -33,11 +33,12 @@ RESULT_DECIMALS = 2
 SALES = parse_file(
     "sales", "sales.csv", (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 )
+FIXTURES = Path(__file__).parent / "fixtures"
 CONTRACTS = [
     parse_document(
         f"contract-{year}",
         f"contract-{year}.txt",
-        (Path(__file__).parent / "fixtures" / f"contract-{year}.txt").read_text(),
+        (FIXTURES / f"contract-{year}.txt").read_text(),
     )
     for year in (2025, 2026)
 ]
@@ -503,3 +504,64 @@ async def test_diff_of_a_document_with_itself_is_a_tool_error_not_an_invalid_cal
     assert (result.status, result.invalid_calls) == ("done", 0)
     error = json.loads(llm.bodies()[1]["messages"][-1]["content"])["error"]
     assert "both 'contract-2025'" in error
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_support_tools_run_on_the_runs_orders_and_policies(mode: ToolChoice) -> None:
+    orders = parse_file("orders", "orders.csv", (FIXTURES / "orders.csv").read_text())
+    policies = parse_document("policies", "policies.txt", (FIXTURES / "policies.txt").read_text())
+    arguments = {
+        "orders": "orders",
+        "order_id": "1042",
+        "policies": "policies",
+        "topic": "damaged items",
+    }
+    unknown = {"file": "orders", "order_id": "9999"}
+    reply = calls(
+        tool_call("draft_reply", arguments, "call-a"), tool_call("get_order", unknown, "call-b")
+    )
+    script = [reply, final(mode, "done")]
+    result, llm = await run(mode, ScriptedLLM(script), tables=[orders], documents=[policies])
+    assert (result.status, result.invalid_calls) == ("done", 0)
+    drafted, missing = (json.loads(m["content"]) for m in llm.bodies()[1]["messages"][-2:])
+    assert drafted["summary"].startswith("Dear Marko Ilievski, about your order 1042")
+    assert missing == {"error": "order '9999' is not in orders"}
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_call_repeated_with_the_same_arguments_is_not_run_again(
+    mode: ToolChoice, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The tools are deterministic, so a repeat can only return what the history already holds;
+    the demo model repeated draft_reply until max_steps instead of answering (P2.1a-2 demo run,
+    2026-11-01). The repeat gets a tool error that points to the final answer; it is not an
+    invalid call (D10), since it fits the schema."""
+    caplog.set_level(logging.INFO, logger="agent_runtime")
+    script = [
+        calls(calc("multiply", 7, 8)),
+        calls(calc("multiply", 7, 8, "call-2")),
+        calls(calc("multiply", 8, 7, "call-3")),
+        final(mode, "56"),
+    ]
+    result, llm = await run(mode, ScriptedLLM(script))
+    assert (result.status, result.answer, result.invalid_calls) == ("done", "56", 0)
+    repeated = json.loads(llm.bodies()[2]["messages"][-1]["content"])
+    assert repeated == {
+        "error": (
+            "calculator was already called with these arguments in this run and its result is "
+            "above; use that result, or give the final answer"
+        )
+    }
+    assert json.loads(llm.bodies()[3]["messages"][-1]["content"]) == {"result": 56}
+    lines = [r.__dict__ for r in caplog.records if r.getMessage() == "repeated call"]
+    assert [(line["step"], line["tool"]) for line in lines] == [(2, "calculator")]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_repeat_within_one_reply_is_caught_too(mode: ToolChoice) -> None:
+    reply = calls(calc("add", 1, 2, "call-a"), calc("add", 1, 2, "call-b"))
+    result, llm = await run(mode, ScriptedLLM([reply, final(mode, "3")]))
+    assert (result.status, result.invalid_calls) == ("done", 0)
+    first, second = (json.loads(m["content"]) for m in llm.bodies()[1]["messages"][-2:])
+    assert first == {"result": 3}
+    assert "already called" in second["error"]

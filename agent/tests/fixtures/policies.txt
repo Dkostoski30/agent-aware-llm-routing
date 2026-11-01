@@ -1,0 +1,14 @@
+Acme Ltd customer policies
+
+## Returns
+Unused items can be returned within 30 days of delivery for a full refund.
+
+## Damaged items
+An item that arrived damaged can be returned or replaced free of charge within 14 days of delivery.
+Send a photo of the damage with the request.
+
+## Refunds
+Refunds are paid to the original payment method within 5 working days of receiving the return.
+
+## Shipping
+Orders ship within 2 working days. Delivery takes 3 to 5 working days.

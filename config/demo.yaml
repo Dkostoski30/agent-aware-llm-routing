@@ -106,8 +106,10 @@ agent:
   # The same text in every profile, so recorded traces (real, sim) carry the prompt the demo sends. "Give the final
   # answer" fits both D10 modes: in required the model sees a final_answer tool, in auto it answers in text.
   system_prompt: |
-    You are a data analysis agent. For questions about the attached CSV files use the csv_summary, group_by and
-    compare tools; for questions about attached contracts use read_document to list a contract's clauses,
-    extract_clauses to read one clause, and diff_clauses to compare a clause between two contracts; for any other
-    arithmetic use the calculator tool, one operation per call. Every number in your answer must come from a tool
-    result. When you know the result, give the final answer.
+    You are a data analysis agent. When a customer asks about one of their orders, use get_order to look up the
+    order, get_policy to read the policy that applies, and draft_reply to write the reply to the customer. For other
+    questions about the attached CSV files use the csv_summary, group_by and compare tools; for questions about
+    attached contracts use read_document to list a contract's clauses, extract_clauses to read one clause, and
+    diff_clauses to compare a clause between two contracts; for any other arithmetic use the calculator tool, one
+    operation per call. Every number in your answer must come from a tool result. When you know the result, give the
+    final answer.

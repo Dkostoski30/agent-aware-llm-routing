@@ -7,8 +7,8 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from agent_runtime import csv_tools, documents
-from agent_runtime.config import ToolChoice
+from agent_runtime import csv_tools, documents, support
+from agent_runtime.config import AgentConfig, ToolChoice
 from agent_runtime.csv_tools import COMPARE, CSV_SUMMARY, GROUP_BY, Table, ToolError
 from agent_runtime.documents import Document
 
@@ -40,6 +40,7 @@ DESCRIPTIONS = {
     FINAL_ANSWER: "Ends the task with the answer for the user.",
     **csv_tools.DESCRIPTIONS,
     **documents.DESCRIPTIONS,
+    **support.DESCRIPTIONS,
 }
 
 
@@ -51,16 +52,22 @@ def offered_tools(
     tool_choice: ToolChoice, tables: Sequence[Table], texts: Sequence[Document] = ()
 ) -> dict[str, dict[str, Any]]:
     """The tools a run offers, name -> JSON schema of the arguments, in the order the model sees
-    them. Every run gets the calculator, a run with CSV files the CSV tools and a run with text
-    documents the document tools, until P4.8 adds the scenario step (D13).
+    them. Every run gets the calculator, a run with CSV files the CSV tools, a run with text
+    documents the document tools, and the support tools their files' share of them (an orders CSV,
+    a policies document), until P4.8 adds the scenario step (D13). An orders CSV (one with an
+    order_id column) gets no CSV tools: the demo model answered a support question with group_by
+    on it whatever the prompt said (P2.1a-2 demo runs, 2026-11-01).
     """
     tools = {CALCULATOR: PARAMETERS[CALCULATOR]}
+    orders = {table.id for table in support.order_tables(tables)}
+    analysed = [table for table in tables if table.id not in orders]
     # Without files of a type its file enum would be empty: its tools could never be called, and in
     # required mode vLLM would have to build a grammar from an enum with no values (D10).
-    if tables:
-        tools.update(csv_tools.parameters(tables))
+    if analysed:
+        tools.update(csv_tools.parameters(analysed))
     if texts:
         tools.update(documents.parameters(texts))
+    tools.update(support.parameters(tables, texts))
     # final_answer ends the run in required mode; in auto mode a plain text answer does (D10).
     if tool_choice == "required":
         tools[FINAL_ANSWER] = PARAMETERS[FINAL_ANSWER]
@@ -96,6 +103,21 @@ def check_call(
     return checked
 
 
+def run_call(
+    name: str,
+    arguments: dict[str, Any],
+    tables: Mapping[str, Table],
+    texts: Mapping[str, Document],
+    config: AgentConfig,
+) -> dict[str, Any]:
+    """Runs a call that passed check_call, to any tool but final_answer, with the run's files."""
+    if name in documents.TOOL_NAMES:
+        return documents.run_document_tool(name, arguments, texts, config)
+    if name in support.TOOL_NAMES:
+        return support.run_support_tool(name, arguments, tables, texts, config)
+    return run_tool(name, arguments, tables, config.max_result_rows, config.result_decimals)
+
+
 def run_tool(
     name: str,
     arguments: dict[str, Any],
@@ -103,8 +125,8 @@ def run_tool(
     max_result_rows: int,
     result_decimals: int,
 ) -> dict[str, Any]:
-    """Runs a call that passed check_call, to the calculator or a CSV tool (the document tools run
-    in documents.run_document_tool). The file enum guarantees the file exists; a call the file's
+    """Runs a call that passed check_call, to the calculator or a CSV tool (run_call sends the
+    other tools to their modules). The file enum guarantees the file exists; a call the file's
     data cannot answer comes back as a tool error. The CSV tools' numbers are rounded to
     result_decimals; the calculator's are not, since its result feeds the next operation."""
     if name == CALCULATOR:
