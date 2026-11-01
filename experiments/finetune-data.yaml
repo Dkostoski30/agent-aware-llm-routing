@@ -45,8 +45,9 @@ arithmetic:
   operations: [2, 4]
   # Every number in a question, inclusive; small enough to type, large enough that results rarely repeat an operand.
   operand: [2, 20]
-# Share of arithmetic and off-topic questions that come with a CSV attached: the runtime offers the calculator next to
-# the CSV tools (P1.6f is not done), so the model sees both tool sets for these kinds.
+# Share of off-topic questions that come with a CSV attached, so the model sees the off-topic reply next to the CSV
+# tools too. Arithmetic questions never come with one: the runtime offers the calculator only on runs without files
+# (P2.1a-3).
 with_file_share: 0.5
 # The final answer of an off-topic question, word for word, with no tool call (P1.6e's sentence, decided with the user
 # 2026-10-28). The system prompt does not contain it: the model learns it from the training data.

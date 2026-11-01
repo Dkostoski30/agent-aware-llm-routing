@@ -6,7 +6,7 @@
   "tool_calls": [
     {
       "name": "calculator",
-      "arguments": { "op": "multiply", "a": 7, "b": 8 },
+      "arguments": { "expression": "7*8" },
       "result": { "result": 56 }
     }
   ],
