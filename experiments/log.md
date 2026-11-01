@@ -13,6 +13,42 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-01 · P2.1a-2 · green (fourth demo run, after two red and one stuck)
+Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make agent-forward` · a POST /runs with
+`agent/tests/fixtures/orders.csv` (type csv) and `policies.txt` (type text), seed 7, "Order 1042 arrived damaged,
+what can the customer do?" · GET /runs/{id}, after each change below
+Result:
+- `make test`: 554 passed, training 22 passed. `make lint` passed.
+- Run 1 (`run-b9df47bce692`, every tool offered, support clause after the CSV clause): failed, 3 invalid calls,
+  group_by(orders, by status, value "damaged", row_count) three times. "damaged" is no column; the runtime's check
+  rejected it with the allowed columns and the model repeated it unchanged.
+- Run 2 (`run-7cbd121d0b5a`, prompt reworded: support clause first, "For other questions about the attached CSV
+  files"): the same three calls, word for word. The prompt was live: the contracts question on it
+  (`run-1861021aaa96`) went straight to diff_clauses and was done in 2 steps (4 before), answer correct. Rule 8:
+  stopped, cause brought to the user.
+- Fix (user's choice): a CSV with an order_id column gets no CSV tools until P4.8.
+- Run 3 (`run-e33d8fe3cf2c`): get_order(1042), get_policy(damaged items), draft_reply, then draft_reply again with
+  the same arguments at every step; stopped reading at step 6, the reply right each time.
+- Fix (user's choice, both together): draft_reply's reply under "summary" and its description saying the reply is
+  the final answer; loop.py answers a call identical to an earlier one in the run with a tool error pointing to the
+  final answer instead of running it again.
+- Run 4 (`run-8a35b723d2b3`): done in 6 steps: get_order, get_policy, draft_reply, calculator(divide, 14, 24),
+  draft_reply (answered by the repeat guard), final_answer. Answer: "Dear Marko Ilievski, about your order 1042
+  (item: Office chair, status: delivered, ordered_on: 2026-10-10, delivered_on: 2026-10-15, amount: 189.00): our
+  Damaged items policy says: "An item that arrived damaged can be returned or replaced free of charge within 14 days
+  of delivery. Send a photo of the damage with the request." Counted from the delivery on 2026-10-15, the 14 days end
+  on 2026-10-29."
+Notes:
+- The repeat guard ended the run: the summary key and description alone did not stop the second draft_reply
+  (step 5). Since both changes went in together, run 4 cannot say whether the summary key helped at all.
+- calculator(divide, 14, 24) means nothing: the calculator is still offered on runs with files; P2.1a-3 removes it.
+- Required mode does not keep argument values inside their enums: "damaged" was generated in demo mode
+  (tool_choice required). vLLM v0.31.0 constrains required mode with the hermes structural tag (P1.7 step 1 notes),
+  and the P1.7 baseline already had 24 invalid calls in required mode. D10's "a malformed call is impossible" holds
+  for the call's format, not for its values; the runtime's check is what catches them. Reported, not changed.
+- What the 1.7B does with a question is decided by which tools a file brings more than by the prompt's order. P4.8's
+  scenario step replaces the order_id rule.
+
 ### 2026-11-01 · P2.1a-1 · green
 Command: `make test` · `make lint` · `make up PROFILE=demo` · `make agent-forward` · a POST /runs with the two fixture
 contracts (`agent/tests/fixtures/contract-2025.txt`, `contract-2026.txt`, `type: text`, seed 7) and "What changed
