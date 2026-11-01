@@ -11,15 +11,14 @@ import httpx
 
 from agent_runtime.config import AgentConfig
 from agent_runtime.csv_tools import Table
-from agent_runtime.documents import TOOL_NAMES as DOCUMENT_TOOLS
-from agent_runtime.documents import Document, run_document_tool
+from agent_runtime.documents import Document
 from agent_runtime.llm import LLMClient, LLMResponseError
 from agent_runtime.tools import (
     FINAL_ANSWER,
     InvalidCallError,
     check_call,
     offered_tools,
-    run_tool,
+    run_call,
     tool_definitions,
 )
 
@@ -29,6 +28,15 @@ logger = logging.getLogger(__name__)
 # in the text when it cannot parse it, so a text answer that contains the tag is a broken call, not
 # an answer (D10).
 TOOL_CALL_MARKER = "<tool_call>"
+
+# The tools are deterministic, so a call with the same tool and arguments as an earlier one in the
+# run can only return what the history already holds; it is answered with this instead of run again.
+# The demo model repeated draft_reply until agent.max_steps instead of answering (P2.1a-2 demo run,
+# 2026-11-01).
+REPEATED_CALL = (
+    "{name} was already called with these arguments in this run and its result is above; use that "
+    "result, or give the final answer"
+)
 
 # Awaited with (step, invalid_calls, messages) after every step that leaves the run going, so the
 # service can save the history before the next call (D7).
@@ -109,6 +117,8 @@ async def run_task(
     definitions = tool_definitions(tools)
     tables_by_id = {table.id: table for table in tables}
     documents_by_id = {document.id: document for document in documents}
+    # (tool, arguments as sorted JSON) of every call that ran, for REPEATED_CALL.
+    ran: set[tuple[str, str]] = set()
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
     run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     while run.step < config.max_steps:
@@ -176,12 +186,15 @@ async def run_task(
                 continue
             if name == FINAL_ANSWER:
                 return run.finish(answer=arguments["answer"])
-            if name in DOCUMENT_TOOLS:
-                result = run_document_tool(name, arguments, documents_by_id, config)
-            else:
-                result = run_tool(
-                    name, arguments, tables_by_id, config.max_result_rows, config.result_decimals
-                )
+            key = (name, json.dumps(arguments, sort_keys=True))
+            if key in ran:
+                # Fits the schema, so not an invalid call (D10); logged to count how often it helps.
+                run.log(logging.WARNING, "repeated call", tool=name)
+                repeated = {"error": REPEATED_CALL.format(name=name)}
+                run.messages.append(_tool_message(call["id"], repeated))
+                continue
+            ran.add(key)
+            result = run_call(name, arguments, tables_by_id, documents_by_id, config)
             if "error" in result:
                 # A valid call the data cannot answer: not an invalid call (D10), but P1.6b counts
                 # these to tell failures on the data from failures on the schema.

@@ -121,14 +121,18 @@ def read_run_files(
     return tables, documents
 
 
+def clause_enum(documents: Sequence[Document]) -> list[str]:
+    """The clauses across the documents, in first-seen order; a clause several documents share is
+    listed once."""
+    return list(dict.fromkeys(s.clause for document in documents for s in document.sections))
+
+
 def parameters(documents: Sequence[Document]) -> dict[str, dict[str, Any]]:
     """The JSON schemas of the document tools for one run (D10). file, left and right are enums of
     the run's document IDs, clause an enum of the clauses across them; whether the named document
     has the clause is checked when the tool runs. diff_clauses needs two documents."""
     file = {"type": "string", "enum": [document.id for document in documents]}
-    # dict.fromkeys keeps the first-seen order and drops clauses that several documents share.
-    clauses = list(dict.fromkeys(s.clause for document in documents for s in document.sections))
-    clause = {"type": "string", "enum": clauses}
+    clause = {"type": "string", "enum": clause_enum(documents)}
 
     def schema(properties: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -170,8 +174,8 @@ def extract_clauses(document: Document, clause: str, max_chars: int) -> dict[str
     }
 
 
-def _cut(words: list[str], max_chars: int) -> str:
-    text = " ".join(words)
+def cut_text(text: str, max_chars: int) -> str:
+    """text, or its first max_chars characters ending with "..." so the model knows it goes on."""
     return text if len(text) <= max_chars else text[:max_chars].rstrip() + _CUT
 
 
@@ -207,8 +211,8 @@ def diff_clauses(
     matcher = difflib.SequenceMatcher(None, before, after, autojunk=False)
     changes = [
         _change(
-            _cut(before[group[0][1] : group[-1][2]], max_chars),
-            _cut(after[group[0][3] : group[-1][4]], max_chars),
+            cut_text(" ".join(before[group[0][1] : group[-1][2]]), max_chars),
+            cut_text(" ".join(after[group[0][3] : group[-1][4]]), max_chars),
         )
         for group in matcher.get_grouped_opcodes(context_words)
     ]
