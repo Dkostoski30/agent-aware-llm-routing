@@ -15,7 +15,7 @@
       "type": "integer"
     },
     "files": {
-      "description": "CSV files attached to the task, kept with the run; the tools take them by id and they never enter the context (D13). Their number and size are limited by agent.max_files and agent.max_file_bytes in config/.",
+      "description": "Files attached to the task (CSV tables, text documents), kept with the run; the tools take them by id and they never enter the context (D13). Their number and size are limited by agent.max_files and agent.max_file_bytes in config/.",
       "type": "array",
       "items": {
         "type": "object",
@@ -31,8 +31,14 @@
             "type": "string",
             "minLength": 1
           },
+          "type": {
+            "description": "How the tools read the file (P2.1a-1): csv is a table with a header row, text a document whose lines \"## <title>\" start its sections. Absent means csv, so a request without types keeps its meaning.",
+            "type": "string",
+            "enum": ["csv", "text"],
+            "default": "csv"
+          },
           "content": {
-            "description": "The file's text: UTF-8 CSV with a header row.",
+            "description": "The file's text, UTF-8: a CSV with a header row, or a text document.",
             "type": "string"
           }
         },

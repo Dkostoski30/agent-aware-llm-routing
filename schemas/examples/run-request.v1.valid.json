@@ -6,6 +6,12 @@
       "id": "sales",
       "name": "sales.csv",
       "content": "region,revenue\nNorth,350.5\nSouth,380\nEast,30\n"
+    },
+    {
+      "id": "contract-2026",
+      "name": "contract-2026.txt",
+      "type": "text",
+      "content": "## Fees\nThe client pays 1,350 EUR per month.\n\n## Termination\nEither party may end this agreement with 60 days' written notice.\n"
     }
   ]
 }

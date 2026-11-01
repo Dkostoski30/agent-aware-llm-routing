@@ -119,15 +119,14 @@ def parse_file(file_id: str, name: str, content: str) -> Table:
     return Table(id=file_id, name=name, columns=header, types=types, rows=rows)
 
 
-def read_files(files: Sequence[dict[str, str]], max_files: int, max_file_bytes: int) -> list[Table]:
-    """The run request's files as tables, in order; raises FileError when the run must not start."""
+def check_files(files: Sequence[dict[str, str]], max_files: int, max_file_bytes: int) -> None:
+    """The limits every file of a run request meets, whatever its type; raises FileError."""
     if len(files) > max_files:
         raise FileError(f"{len(files)} files, more than agent.max_files ({max_files})")
     ids = [file["id"] for file in files]
     duplicates = sorted({file_id for file_id in ids if ids.count(file_id) > 1})
     if duplicates:
         raise FileError(f"duplicate file id {', '.join(map(repr, duplicates))}")
-    tables = []
     for file in files:
         try:
             size = len(file["content"].encode("utf-8"))
@@ -137,8 +136,13 @@ def read_files(files: Sequence[dict[str, str]], max_files: int, max_file_bytes: 
             raise FileError(
                 f"{file['id']}: {size} bytes, more than agent.max_file_bytes ({max_file_bytes})"
             )
-        tables.append(parse_file(file["id"], file["name"], file["content"]))
-    return tables
+
+
+def read_files(files: Sequence[dict[str, str]], max_files: int, max_file_bytes: int) -> list[Table]:
+    """The files as tables, in order, when all of them are CSV (the fine-tuning data generator's
+    runs, P1.7); raises FileError when the run must not start."""
+    check_files(files, max_files, max_file_bytes)
+    return [parse_file(file["id"], file["name"], file["content"]) for file in files]
 
 
 def parameters(tables: Sequence[Table]) -> dict[str, dict[str, Any]]:

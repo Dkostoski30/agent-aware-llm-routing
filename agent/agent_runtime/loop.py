@@ -11,6 +11,8 @@ import httpx
 
 from agent_runtime.config import AgentConfig
 from agent_runtime.csv_tools import Table
+from agent_runtime.documents import TOOL_NAMES as DOCUMENT_TOOLS
+from agent_runtime.documents import Document, run_document_tool
 from agent_runtime.llm import LLMClient, LLMResponseError
 from agent_runtime.tools import (
     FINAL_ANSWER,
@@ -98,12 +100,15 @@ async def run_task(
     llm: LLMClient,
     on_step: StepCallback | None = None,
     tables: Sequence[Table] = (),
+    documents: Sequence[Document] = (),
 ) -> RunResult:
-    """tables are the run request's files, already read (csv_tools.read_files)."""
+    """tables and documents are the run request's files, already read
+    (documents.read_run_files)."""
     run = _Run(run_id, task, config)
-    tools = offered_tools(config.tool_choice, tables)
+    tools = offered_tools(config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
     tables_by_id = {table.id: table for table in tables}
+    documents_by_id = {document.id: document for document in documents}
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
     run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     while run.step < config.max_steps:
@@ -171,9 +176,12 @@ async def run_task(
                 continue
             if name == FINAL_ANSWER:
                 return run.finish(answer=arguments["answer"])
-            result = run_tool(
-                name, arguments, tables_by_id, config.max_result_rows, config.result_decimals
-            )
+            if name in DOCUMENT_TOOLS:
+                result = run_document_tool(name, arguments, documents_by_id, config)
+            else:
+                result = run_tool(
+                    name, arguments, tables_by_id, config.max_result_rows, config.result_decimals
+                )
             if "error" in result:
                 # A valid call the data cannot answer: not an invalid call (D10), but P1.6b counts
                 # these to tell failures on the data from failures on the schema.
