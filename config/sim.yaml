@@ -73,6 +73,17 @@ agent:
   # it sees them (P1.6b: "17.833333333333332"). 2 keeps money exact and means readable; the rounding error of 0.005
   # stays inside the go/no-go's 1% tolerance for any value from 0.5 up.
   result_decimals: 2
+  # Bounds one clause body in the context (D13: documents never enter it, only tool results do). ~4 characters per
+  # token puts 1600 at ~400 tokens, the budget max_result_rows gives a CSV result; extract_clauses cuts a longer
+  # clause and says so, and diff_clauses cuts each side of a changed passage the same way (P2.1a-1).
+  max_clause_chars: 1600
+  # Bounds a diff_clauses summary: a change with its context is ~20 tokens, so 20 changes are ~400 tokens, the same
+  # budget as max_result_rows. The summary still counts every change.
+  max_diff_changes: 20
+  # Unchanged words diff_clauses shows on each side of a change, so its summary reads "with 30 days' written" became
+  # "with 60 days' written" and the model can say what changed, not only "30" became "60" (decided 2026-11-01).
+  # Changes closer than twice this are one passage.
+  diff_context_words: 3
   # Qwen3's recommended sampling for non-thinking mode (model card); thinking is off (CLAUDE.md).
   sampling:
     temperature: 0.7
@@ -82,5 +93,7 @@ agent:
   # answer" fits both D10 modes: in required the model sees a final_answer tool, in auto it answers in text.
   system_prompt: |
     You are a data analysis agent. For questions about the attached CSV files use the csv_summary, group_by and
-    compare tools; for any other arithmetic use the calculator tool, one operation per call. Every number in your
-    answer must come from a tool result. When you know the result, give the final answer.
+    compare tools; for questions about attached contracts use read_document to list a contract's clauses,
+    extract_clauses to read one clause, and diff_clauses to compare a clause between two contracts; for any other
+    arithmetic use the calculator tool, one operation per call. Every number in your answer must come from a tool
+    result. When you know the result, give the final answer.

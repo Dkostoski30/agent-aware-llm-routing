@@ -13,6 +13,28 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-01 · P2.1a-1 · green
+Command: `make test` · `make lint` · `make up PROFILE=demo` · `make agent-forward` · a POST /runs with the two fixture
+contracts (`agent/tests/fixtures/contract-2025.txt`, `contract-2026.txt`, `type: text`, seed 7) and "What changed
+in the termination clause between the two contracts?" · GET /runs/{id}
+Result:
+- `make test`: 523 passed, training 22 passed (run as two halves: with the demo cluster up, the full target was
+  killed with exit 137, out of memory). `make lint` passed.
+- First run (`run-7204dbeaf8df`), done in 4 steps: read_document(contract-2025), read_document(contract-2026),
+  diff_clauses(contract-2025, contract-2026, termination), final_answer. Answer: "The termination clause has 1 change
+  between contract-2025 and contract-2026." The right tools, but the model copied diff_clauses' summary, which only
+  counted the changes; the 30 -> 60 days was in the result's changes list and not in the answer.
+- Fix (with the user): diff_clauses returns no changes list; its summary holds every shown change.
+- Second run (`run-1d65bce23438`, agent `thesis/agent:57ce6de40346`), done in the same 4 steps. Answer: "The
+  termination clause changed from contract-2025 to contract-2026: "this agreement with 30 days' written notice."
+  became "this agreement with 60 days' written notice."."
+Notes: the 1.7B read the two contracts in two steps both times, not with two calls in one reply; the runtime runs
+several calls of one reply as one step (unit test), and the parallel LLM calls P3.6 needs come from the replayer's
+fan-out (P2.3). The answer copies the tool's sentence word for word, as with compare in P1.6c: a tool's summary is
+what the demo model answers with, so it has to carry the facts. Whether the model gets the clause right across
+questions is P4.7's measure. The P1.7 adapter on the real profile is stale from here (tools and prompt changed);
+P2.1b retrains it.
+
 ### 2026-10-31 · P1.7 step 3 · green
 Command: `make test` · `make lint` · `make down` · `make finetune` · `make up PROFILE=real` ·
 `make heldout BASELINE=experiments/results/finetune-heldout-d384c6bd2721-99df636ae969.csv` ·

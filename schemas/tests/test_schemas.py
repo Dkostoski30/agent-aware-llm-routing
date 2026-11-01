@@ -159,6 +159,8 @@ def test_run_request_rules(field: str, value: object, accepted: bool) -> None:
         ("id", "q3-sales-2025", True),
         ("id", "a" * 64, True),
         ("content", "", True),
+        ("type", "csv", True),
+        ("type", "text", True),
         ("id", REMOVE, False),
         ("name", REMOVE, False),
         ("content", REMOVE, False),
@@ -173,6 +175,9 @@ def test_run_request_rules(field: str, value: object, accepted: bool) -> None:
         ("name", "", False),
         ("content", 7, False),
         ("size", 10, False),
+        ("type", "pdf", False),
+        ("type", "CSV", False),
+        ("type", None, False),
     ],
 )
 def test_run_request_file_rules(field: str, value: object, accepted: bool) -> None:
