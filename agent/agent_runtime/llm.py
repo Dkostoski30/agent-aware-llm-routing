@@ -17,6 +17,29 @@ class ChatReply:
     message: dict[str, Any]
     # "stop", "tool_calls", or "length" when the reply hit model.max_model_len.
     finish_reason: str
+    # usage.prompt_tokens, usage.completion_tokens and usage.prompt_tokens_details.cached_tokens;
+    # None when the answer has no such field. The defaults are for a reply no server sent, such as
+    # experiments/finetune_data.py's scripted ones, which have neither usage nor a pod.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cached_tokens: int | None = None
+    # system_fingerprint, the name of the pod that answered (infra/charts/vllm); None without one.
+    pod: str | None = None
+
+
+def _optional[T](parent: dict[str, Any], name: str, kind: type[T]) -> T | None:
+    """parent[name], or None when the answer leaves it out or sends null.
+
+    The type must match exactly: a bool is an int to isinstance, but never a token count.
+    """
+    value = parent.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, kind) or type(value) is not kind:
+        raise LLMResponseError(
+            f"not a chat completion: {name} is a {type(value).__name__}, not a {kind.__name__}"
+        )
+    return value
 
 
 class LLMClient:
@@ -33,12 +56,12 @@ class LLMClient:
         headers: dict[str, str],
         seed: int | None,
     ) -> ChatReply:
-        """Returns choices[0] of the answer.
+        """Returns choices[0] of the answer with its token counts and pod.
 
         A non-2xx answer or a timeout raises httpx.HTTPError, a body that is not a chat completion
-        LLMResponseError. httpx applies agent.llm_timeout_seconds to each phase of the call
-        separately; a non-streaming answer arrives at once at the end, so it effectively bounds the
-        whole call.
+        (a usage field of the wrong type included) LLMResponseError. httpx applies
+        agent.llm_timeout_seconds to each phase of the call separately; a non-streaming answer
+        arrives at once at the end, so it effectively bounds the whole call.
         """
         sampling = self._config.sampling
         body: dict[str, Any] = {
@@ -63,10 +86,20 @@ class LLMClient:
         )
         response.raise_for_status()
         try:
-            choice = response.json()["choices"][0]
-            reply = ChatReply(message=choice["message"], finish_reason=choice["finish_reason"])
+            answer = response.json()
+            choice = answer["choices"][0]
+            message, finish_reason = choice["message"], choice["finish_reason"]
         except (KeyError, IndexError, ValueError) as error:
             raise LLMResponseError(
                 f"not a chat completion: {type(error).__name__}: {error}"
             ) from error
-        return reply
+        usage = _optional(answer, "usage", dict) or {}
+        details = _optional(usage, "prompt_tokens_details", dict) or {}
+        return ChatReply(
+            message=message,
+            finish_reason=finish_reason,
+            prompt_tokens=_optional(usage, "prompt_tokens", int),
+            completion_tokens=_optional(usage, "completion_tokens", int),
+            cached_tokens=_optional(details, "cached_tokens", int),
+            pod=_optional(answer, "system_fingerprint", str),
+        )

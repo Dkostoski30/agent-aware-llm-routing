@@ -284,6 +284,14 @@ def test_history_is_saved_after_every_step() -> None:
     assert final_messages[-1] == {"role": "assistant", "content": "59"}
 
 
+def test_calls_are_saved_with_every_step() -> None:
+    """Each save holds the calls of the steps it saves, none before the first call (P2.2a)."""
+    service = Service([calc("7*8"), calc("56+3"), text("59")])
+    service.start({"task": TASK})
+    saved = [[call.step for call in calls] for calls in service.store.calls]
+    assert saved == [[], [1], [1, 2], [1, 2, 3]]
+
+
 def test_failed_run_is_saved_with_its_error() -> None:
     service = Service([], failure=httpx.Response(500, json={"error": "scripted failure"}))
     run_id = service.start({"task": TASK})
