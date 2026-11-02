@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke replay experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record replay experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -209,6 +209,13 @@ finetune:
 # access log, Endpoint Picker picks, Redis history, Prometheus samples; stops at the first FAIL (P1.5).
 smoke:
 	@bash infra/checks/smoke.sh
+
+# An experiment's questions through the agent, one run at a time, as one trace.v1 line per LLM call in
+# experiments/results/traces/ (P2.2b). Needs make up with the experiment's profile; experiments/record-demo.yaml takes
+# about 13 min. PYTHONPATH: loadgen/ is not an installed package (loadgen/pyproject.toml).
+record:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make record EXPERIMENT=experiments/record-demo.yaml"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.record $(EXPERIMENT)
 
 replay:
 	@echo "not implemented yet: P2.3"; exit 1

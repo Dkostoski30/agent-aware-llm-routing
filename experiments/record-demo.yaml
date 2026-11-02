@@ -1,0 +1,52 @@
+# P2.2b: the runs make record turns into trace.v1 lines for the replayer (docs/task-cards/25-P2.2b-record-traces.md). Run
+# with make record EXPERIMENT=experiments/record-demo.yaml after make up PROFILE=real; the trace's name carries this
+# file's hash (D11). 17 questions x 2 seeds: 34 runs, about 9 min at the held-out medians of adapter 5554fcf81b09.
+# The cluster's profile; make record refuses an agent running anything else. real: experiments run on the 0.6B (D8), and
+# its auto mode keeps the traffic shaped like a real agent's (D10).
+profile: real
+# Two seeds per question, as the go/no-go has, so one sample cannot stand for a question.
+seeds: [1, 2]
+# One entry per task type, the trace's task_type (P2.4 derives expected-steps per type). The runtime has no scenario step
+# until P4.8 (D13), so this file is what says which type a run is. Each type's files go with each of its questions; a
+# file's path is relative to this file. A text file needs type: text, or the runtime reads it as a CSV.
+# The steps in the comments are what those kinds of question took in the held-out set on auto mode (P2.1b); P2.3 needs
+# 20 runs of more than one step.
+task_types:
+  csv:
+    files:
+      - {id: sales, name: sales.csv, path: data/sales.csv}
+    # The go/no-go's five questions (experiments/real-go-no-go.yaml), 10/10 on this adapter. 2 steps; the last one 3.
+    questions:
+      - What is the average revenue per row in sales.csv?
+      - What is the total revenue of the North region in sales.csv?
+      - What is the average number of units per row for the product Gadget in sales.csv?
+      - How much more total revenue did the North region make than the South region in sales.csv?
+      - Which product sold the most units in total in sales.csv, and what is that product's total revenue?
+  contracts:
+    files:
+      - {id: contract-2025, name: contract-2025.txt, type: text, path: ../agent/tests/fixtures/contract-2025.txt}
+      - {id: contract-2026, name: contract-2026.txt, type: text, path: ../agent/tests/fixtures/contract-2026.txt}
+    # Clause diffs take 3 steps, clause texts 2. Phrased like the fine-tuning data's clause-diff and clause-text kinds.
+    questions:
+      - What changed in the termination clause between contract-2025.txt and contract-2026.txt?
+      - Compare the fees clause of contract-2025.txt and contract-2026.txt.
+      - What does the confidentiality clause of contract-2026.txt say?
+      - Read me the services clause in contract-2025.txt.
+  support:
+    files:
+      - {id: orders, name: orders.csv, path: ../agent/tests/fixtures/orders.csv}
+      - {id: policies, name: policies.txt, type: text, path: ../agent/tests/fixtures/policies.txt}
+    # Replies take 3 steps, an order's status and a policy 2. Phrased like the fine-tuning data's reply, order-status and
+    # policy kinds.
+    questions:
+      - A customer asks about our returns policy for order 1041. Write the reply.
+      - Draft a reply for order 1042 that applies our damaged items policy.
+      - What is the status of order 1043?
+      - What does the refunds policy say?
+  arithmetic:
+    # No files: the runtime offers the calculator only on runs without any (P2.1a-3). 2 steps.
+    questions:
+      - What is 7 times 8?
+      - What is 12 plus 30 minus 5?
+      - Calculate 144 divided by 12 plus 7.
+      - Work out 6 times 7 minus 4.
