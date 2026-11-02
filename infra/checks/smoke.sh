@@ -100,10 +100,19 @@ prometheus_ip=$(kubectl get service --namespace "$PROMETHEUS_NAMESPACE" "$PROMET
 seen_pods=$(curl -sS --fail --max-time "$PROMETHEUS_TIMEOUT_SECONDS" --get --data-urlencode "query=$VLLM_METRIC" \
   "http://$prometheus_ip:$PROMETHEUS_PORT/api/v1/query" | jq -ec '[.data.result[].metric.pod] | unique') ||
   fail prometheus "an answer to the query $VLLM_METRIC expected, it failed"
-vllm_pods=$(kubectl get pods -l "$VLLM_SELECTOR" -o json |
+# Only Running pods that are not being deleted must have a sample. A pod the kubelet rejected at GPU admission after a
+# reboot or make down + up stays Failed (STATUS Unknown in kubectl get pods), is never scraped, and its ReplicaSet does
+# not delete it (P2.11). The pods check above already needs every desired pod of the Deployment Ready; pods in another
+# phase are only named.
+vllm_pods=$(kubectl get pods -l "$VLLM_SELECTOR" --field-selector=status.phase=Running -o json |
   jq -c '[.items[] | select(.metadata.deletionTimestamp == null) | .metadata.name] | sort') ||
-  fail prometheus "the vllm pods listed, kubectl failed"
+  fail prometheus "the Running vllm pods listed, kubectl failed"
+skipped=$(kubectl get pods -l "$VLLM_SELECTOR" --field-selector=status.phase!=Running -o json |
+  jq -c '[.items[].metadata.name] | sort') ||
+  fail prometheus "the vllm pods that are not Running listed, kubectl failed"
 missing=$(jq -n -c --argjson want "$vllm_pods" --argjson seen "$seen_pods" '$want - $seen')
 [[ $missing == '[]' ]] ||
-  fail prometheus "a $VLLM_METRIC sample for every vllm pod $vllm_pods expected, none for $missing"
-echo "ok prometheus: $VLLM_METRIC has a sample for $vllm_pods"
+  fail prometheus "a $VLLM_METRIC sample for every Running vllm pod $vllm_pods expected, none for $missing"
+note=
+[[ $skipped == '[]' ]] || note="; not Running, skipped: $skipped"
+echo "ok prometheus: $VLLM_METRIC has a sample for $vllm_pods$note"
