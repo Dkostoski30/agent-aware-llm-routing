@@ -5,13 +5,14 @@ description = "LLM call routing and vLLM autoscaling on Kubernetes (FCSE bachelo
 # The Python that Ubuntu 24.04 ships; uv uses it instead of downloading another one.
 requires-python = "==3.12.*"
 # The components, so one uv sync installs what every test needs.
-dependencies = ["agent"]
+dependencies = ["agent", "loadgen"]
 
 [tool.uv.workspace]
-members = ["agent"]
+members = ["agent", "loadgen"]
 
 [tool.uv.sources]
 agent = { workspace = true }
+loadgen = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -34,8 +35,8 @@ package = false
 # training/ has its own environment with torch (P1.7); make test runs its tests there.
 addopts = ["--import-mode=importlib", "--strict-markers", "--ignore=training"]
 # importlib mode does not put a test's directory on sys.path; scripts tested in place and the directories that hold
-# a component's package (agent/ is not installed, it has no build backend) are listed here.
-pythonpath = ["infra/checks", "agent", "experiments"]
+# a component's package (agent/ and loadgen/ are not installed, they have no build backend) are listed here.
+pythonpath = ["infra/checks", "agent", "experiments", "loadgen"]
 
 [tool.ruff]
 target-version = "py312"
@@ -49,5 +50,5 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Finds agent_runtime and the experiment scripts when pre-commit passes only a test file that imports them.
-mypy_path = "agent:experiments"
+# Finds agent_runtime, the experiment scripts and loadgen when pre-commit passes only a test file that imports them.
+mypy_path = "agent:experiments:loadgen"
