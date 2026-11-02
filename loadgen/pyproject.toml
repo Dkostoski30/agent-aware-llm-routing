@@ -1,0 +1,15 @@
+[project]
+name = "loadgen"
+version = "0.1.0"
+description = "Load generator: records agent runs as trace.v1 lines (P2.2b)"
+requires-python = "==3.12.*"
+dependencies = [
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "pyyaml==6.0.3",
+]
+
+[tool.uv]
+# Not installed as a package, like agent/: pytest and mypy find it through pythonpath / mypy_path, make through
+# PYTHONPATH.
+package = false

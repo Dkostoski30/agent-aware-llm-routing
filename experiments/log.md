@@ -13,6 +13,84 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-02 · P2.2b · green
+Command: `make up PROFILE=real` · `make record EXPERIMENT=experiments/record-demo.yaml` · `wc -l`, a trace.v1 check with
+jsonschema, jq and `GET /runs/{id}` over the trace · `make test` · `make lint`
+Result:
+- Trace: `experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl`, agent image
+  `thesis/agent:d86ed436c5b2`, adapter `5554fcf81b09`, auto mode, 13.5 min from the first call to the last reply.
+- `make record`: 34 runs, 0 failed, all 34 with more than one step, 78 lines, 78 steps in `GET /runs/{id}`:
+  | task_type | runs | lines | runs of 2 steps | runs of 3 steps | prompt tokens | completion tokens |
+  |---|---|---|---|---|---|---|
+  | csv | 10 | 22 | 8 | 2 | 777-1067 | 18-50 |
+  | contracts | 8 | 20 | 4 | 4 | 772-1286 | 31-50 |
+  | support | 8 | 20 | 4 | 4 | 818-1277 | 14-142 |
+  | arithmetic | 8 | 16 | 8 | 0 | 358-409 | 10-26 |
+- Checks outside the recorder: `wc -l` 78; 78 of 78 lines valid trace.v1; 78 lines carry every P2.2a field; no step 1
+  with a gap; the sum of steps over the 34 runs' `GET /runs/{id}` is 78; pods `vllm-5c9565db76-rn28q` and `-z8jbl`, the
+  two Running pods.
+- `make test`: 743 passed, training 22 passed. `make lint` passed, the trace included. These are Claude's runs on the
+  final tree, after the review's fixes (tests, write_trace's mode, a comment); the user's own make test and make lint
+  passed on the tree before those fixes (734 + 22 on Claude's run of that tree). The fixes touch neither the experiment
+  file nor the agent's build context: its hash and tag, recomputed, still give the trace's name.
+Notes:
+- Tool time is almost nothing: gaps have a median of 2 ms and a maximum of 21 ms, 0.134 s against 748 s of calls (0.018%).
+  The tools are deterministic Python (D10) and gap_before_ms also holds the step's Redis save. So D9's gaps change little
+  on these traces: a run sends its next call as soon as the last one ends, the heaviest load a run of this length can
+  make. P2.3's replay.gap_tolerance_ms will mostly measure jitter. Whether P2.4's AgentProcessBench traces have longer
+  gaps is still to be seen.
+- The default picker kept all 34 runs on one pod (44 of 44 later steps), with calls split 40 / 38 between the pods. One
+  run at a time is the easy case, so P3.3 has to show its gain under concurrent load (P2.5, P3.7), not on this.
+- Correction to P2.2a's bound (card 24, "step 2's cached_tokens > step 1's prompt_tokens - 16"): on the same pod a later
+  step's cached count can be up to 19 tokens below the previous prompt. 4 of the 44 later steps fall 16-19 below. Every
+  count is a multiple of 16, as the KV block predicts, and Qwen3's chat template ends a generation prompt with
+  `<think>\n\n</think>\n\n`, 4 tokens on vLLM's /tokenize, which the next step's history does not hold. So the shared
+  prefix ends 4 tokens before the prompt does, and 15 more can sit in a partly filled block: 4 + 15 = 19. The 22 rows that
+  reused only the previous step fall 4-19 below, exactly that range, and cached == floor((previous - 4) / 16) * 16 holds
+  on all 22. P3.3's affinity check should be cached >= previous prompt - 19. P2.3's synthetic prompts extend each step
+  strictly, so their shared prefix is 4 tokens longer per step than the agent's: 0 or 16 cached tokens at the block's
+  resolution.
+- The other 22 later steps cached more than the whole previous prompt (26-357 tokens more), since the same question had
+  just run on that pod with the other seed. So a trace's cached_tokens also depend on the recording's order.
+- The seeds add almost no variety: 16 of the 17 questions have identical token counts on both seeds. P2.3 is unaffected,
+  since its prompts are seeded per run, but P2.4's expected-steps per type rest on about 17 different runs, not 34.
+- Time: 13.5 min against the 9 min estimated from the held-out medians, which is in record-demo.yaml's comment. That file
+  stays as recorded, since editing it would change the hash in the trace's name; the Makefile comment says 13 min.
+- A cache hit saves little time here, since generation takes most of it. A least-squares fit over the 76 lines without
+  each pod's first call: duration = 340 ms + 1.19 ms x uncached prompt tokens + 226.5 ms x completion tokens, R2 0.976.
+  So generation is about 661 s of the 748 s, and had nothing been cached the fit adds about 69 s (9.2%). This is one run
+  at a time with no contention, and a fit, not a measurement of prefill: P2.8 measures cached against uncached directly.
+  It means the routing experiments may show hit-rate gains well above their latency gains; P3.3's done-when asserts hit
+  rate only, and P2.5's graph has both.
+- The first call on each pod is slow even long after the pod started: 34.1 s and 36.8 s, on pods up for about 89 min and
+  with 0 cached tokens, against a median of 9.3 s (maximum 13.7 s) for the other step 1 calls of the csv and contracts
+  runs. P2.2a saw the same on a fresh pod (25.7 s). It is not prefill: the two calls sit 28.3 s and 24.2 s above the fit
+  above. The cause is not established. The pod's only line from the first call is vLLM's warning about per-LoRA
+  tokenizers (input_processor.py, 13:39:57 on vllm-5c9565db76-z8jbl), which fits one-time work on the adapter but does
+  not prove it. So Ready does not mean fast: P2.8 should time this apart from the model load (D4), and experiments need
+  warm-up runs on every pod.
+- For P2.3: replay.shared_prefix_tokens (card 26) cannot be one number. Step 1's cached count after another question of
+  the same type: csv 752, contracts 736, support 800, arithmetic 336. Across types (only two samples, since other changes
+  of type moved to the other pod): contracts to support 256, csv to arithmetic 192. The prompt holds the tools a run's
+  files bring, so the prefix is shared by type. The shortest step 1 prompt is 358 tokens.
+- For P3.8: 10 lines send x-step 3 with x-expected-steps 2, since every call still carries agent.expected_steps_default.
+  Remaining work Σ(expected-steps − step) can go negative for such a run; P2.4's per-type values make it rarer, not
+  impossible.
+- pytest's importlib mode registers the directory loadgen/ as the module loadgen, which hid an inner package of that name
+  (ModuleNotFoundError), so the package is loadgen/load_generator (card 25).
+- From the fresh-eyes review: an exclude for check-json was removed before the commit. It rested on Claude misreading
+  identify's output: .jsonl has no json tag, so check-json never reads a trace. main and the order of the status and
+  Redis reads had no tests; both have them now, each seen catching a deliberate bug (41 of 41 in all). write_trace opens
+  with mode x, so a second make record cannot replace the trace after the check at the start. A test checks every
+  committed trace against trace.v1. The second review docs/REVIEW_PROMPT.md asks for after fixes was skipped by the
+  user's choice, since the fixes were small.
+- Reported, not changed: vLLM's default fingerprint vllm-0.31.0-<hash8> would still pass as a pod name; P2.7's simulator
+  has to set one. The experiment's hash covers its YAML only, not the attached files, and the trace's name does not cover
+  config/real.yaml (system prompt, sampling): after a profile change the refusal says to delete the trace, and recording
+  again reuses its name, as go_no_go's results do. A trace holds no run status: this one has no failed runs, but a later
+  recording's failed runs could not be told apart from the trace alone; P2.4 decides (the user, 2026-11-02). CLAUDE.md's
+  command list lacks make record.
+
 ### 2026-11-02 · P2.2a · green
 Command: `make test` · `make lint` · `make up PROFILE=real` · `make smoke` ·
 `kubectl exec deployment/redis -- redis-cli GET thesis:run:<run-id>:calls`, checked with jq

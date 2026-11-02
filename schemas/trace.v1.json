@@ -47,6 +47,11 @@
       "type": "integer",
       "minimum": 0
     },
+    "cached_tokens": {
+      "description": "Prompt tokens served from the prefix cache (usage.prompt_tokens_details.cached_tokens): 0 on a miss, absent when the server does not report it.",
+      "type": "integer",
+      "minimum": 0
+    },
     "ts_start": {
       "description": "Start of the call in milliseconds since the Unix epoch.",
       "type": "integer",
