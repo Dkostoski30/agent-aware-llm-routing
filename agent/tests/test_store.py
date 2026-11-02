@@ -1,4 +1,4 @@
-"""RedisStore's commands (D7, P1.6a): the run's files key and its TTL.
+"""RedisStore's commands (D7, P1.6a): the run's files key and its TTL, the calls key (P2.2a).
 
 The client is a hand-written fake that records the commands it gets, so these tests check what is
 sent to Redis, not Redis itself; the live P1.3b deployment runs them against a real Redis.
@@ -8,7 +8,7 @@ import json
 from typing import Any, cast
 
 import pytest
-from agent_runtime.store import RedisStore, RunRecord
+from agent_runtime.store import CallRecord, RedisStore, RunRecord
 from redis.asyncio import Redis
 
 pytestmark = pytest.mark.anyio
@@ -85,3 +85,35 @@ async def test_save_renews_the_files_ttl_in_the_same_transaction() -> None:
     assert ("set", f"{key}:messages", "[]", TTL_SECONDS) in commands
     assert ("expire", key, TTL_SECONDS) in commands
     assert ("expire", f"{key}:files", TTL_SECONDS) in commands
+
+
+async def test_save_writes_the_calls_with_the_runs_ttl_in_the_same_transaction() -> None:
+    """One JSON list per run, saved whole with every step like the messages (P2.2a); a field the
+    reply did not have is left out, not written as 0."""
+    call = CallRecord(
+        step=1,
+        ts_start=1_793_600_000_000,
+        duration_ms=812,
+        gap_before_ms=0,
+        expected_steps=3,
+        prompt_tokens=120,
+        completion_tokens=9,
+        cached_tokens=None,
+        pod="vllm-6f9c8d7b5-x2kqp",
+    )
+    redis = FakeRedis()
+    await RedisStore(cast(Redis, redis), TTL_SECONDS).save(record(), [], [call])
+    [(kind, transaction, commands)] = redis.sent
+    assert (kind, transaction) == ("pipeline", True)
+    [(_, _, value, ttl)] = [c for c in commands if c[:2] == ("set", f"thesis:run:{RUN_ID}:calls")]
+    saved = {
+        "step": 1,
+        "ts_start": 1_793_600_000_000,
+        "duration_ms": 812,
+        "gap_before_ms": 0,
+        "expected_steps": 3,
+        "prompt_tokens": 120,
+        "completion_tokens": 9,
+        "pod": "vllm-6f9c8d7b5-x2kqp",
+    }
+    assert (json.loads(value), ttl) == ([saved], TTL_SECONDS)

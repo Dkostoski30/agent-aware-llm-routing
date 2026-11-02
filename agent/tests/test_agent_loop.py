@@ -1,4 +1,5 @@
-"""The agent loop against a mocked LLM (P1.3a-1): both D10 modes, D1 headers, caps, history.
+"""The agent loop against a mocked LLM (P1.3a-1): both D10 modes, D1 headers, caps, history, and
+the record of every LLM call (P2.2a).
 
 The LLM is httpx.MockTransport answering each request with the next scripted assistant message, in
 the shape vLLM's /v1/chat/completions returns it.
@@ -16,7 +17,7 @@ from agent_runtime.config import AgentConfig, Sampling, ToolChoice
 from agent_runtime.csv_tools import Table, group_by, parse_file
 from agent_runtime.documents import Document, parse_document, read_document
 from agent_runtime.llm import LLMClient
-from agent_runtime.loop import RunResult, run_task
+from agent_runtime.loop import RunResult, StepCallback, run_task
 from agent_runtime.store import CallRecord
 from jsonschema import Draft202012Validator
 
@@ -582,3 +583,322 @@ async def test_a_repeat_within_one_reply_is_caught_too(mode: ToolChoice) -> None
     first, second = (json.loads(m["content"]) for m in llm.bodies()[1]["messages"][-2:])
     assert first == {"result": 3}
     assert "already called" in second["error"]
+
+
+# The record of every LLM call (P2.2a).
+
+WALL_START_MS = 1_793_600_000_000
+# A monotonic clock counts from an arbitrary point, unrelated to the wall clock.
+MONOTONIC_START_MS = 5_000.0
+CALL_MS = 250
+# What the agent does between two calls (tools, saving the step), per step it follows.
+BETWEEN_CALLS_MS = 40
+USAGE = {
+    "prompt_tokens": 120,
+    "completion_tokens": 9,
+    "total_tokens": 129,
+    "prompt_tokens_details": {"cached_tokens": 112},
+}
+POD = "vllm-6f9c8d7b5-x2kqp"
+# Every field of a call record; the reply's measurements are left out when it lacks them.
+RECORD_FIELDS = {
+    "step",
+    "ts_start",
+    "duration_ms",
+    "gap_before_ms",
+    "expected_steps",
+    "prompt_tokens",
+    "completion_tokens",
+    "cached_tokens",
+    "pod",
+}
+
+
+# NTP setting the wall clock back while a call is out; larger than a whole run here, so a duration
+# or gap timed on the wall clock would come out negative.
+WALL_SET_BACK_MS = 60_000
+
+
+class FakeClock:
+    """Moves only when a test calls advance() or set_wall_back(), so the test decides how long each
+    part of a run takes."""
+
+    def __init__(self) -> None:
+        self.elapsed_ms = 0
+        self.wall_correction_ms = 0
+
+    def wall_ms(self) -> int:
+        return WALL_START_MS + self.elapsed_ms + self.wall_correction_ms
+
+    def monotonic_ms(self) -> float:
+        return MONOTONIC_START_MS + self.elapsed_ms
+
+    def advance(self, ms: int) -> None:
+        self.elapsed_ms += ms
+
+    def set_wall_back(self, ms: int) -> None:
+        """Moves the wall clock alone, as NTP does; time itself does not go back."""
+        self.wall_correction_ms -= ms
+
+
+class TimedLLM(ScriptedLLM):
+    """A ScriptedLLM whose every answer takes CALL_MS on the clock."""
+
+    def __init__(self, replies: list[dict[str, Any]], clock: FakeClock) -> None:
+        super().__init__(replies)
+        self.clock = clock
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.clock.advance(CALL_MS)
+        return super().handle(request)
+
+
+class WallSetBackLLM(TimedLLM):
+    """A TimedLLM during whose every call the wall clock is set back WALL_SET_BACK_MS."""
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.clock.set_wall_back(WALL_SET_BACK_MS)
+        return super().handle(request)
+
+
+class TopLevelFieldsLLM(ScriptedLLM):
+    """A ScriptedLLM whose every answer also carries these top-level fields as given, a null value
+    included (ScriptedLLM leaves out a usage or fingerprint of None)."""
+
+    def __init__(self, replies: list[dict[str, Any]], fields: dict[str, Any]) -> None:
+        super().__init__(replies)
+        self.fields = fields
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        answer = super().handle(request)
+        return httpx.Response(answer.status_code, json={**answer.json(), **self.fields})
+
+
+class FailsAfterScript(ScriptedLLM):
+    """Answers the scripted replies, then every later call with a 500."""
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        if self.replies:
+            return super().handle(request)
+        self.requests.append(request)
+        return httpx.Response(500, json={"error": "scripted failure"})
+
+
+async def run_on_clock(
+    mode: ToolChoice, llm: ScriptedLLM, clock: FakeClock, on_step: StepCallback | None = None
+) -> RunResult:
+    config = make_config(mode)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
+    ) as http:
+        return await run_task(
+            TASK, RUN_ID, 7, config, LLMClient(http, config), on_step, clock=clock
+        )
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_call_record_times_the_call_and_the_gap_before_it(mode: ToolChoice) -> None:
+    """gap_before_ms runs from the end of the previous reply to this call's start (D9): 0 on step
+    1. on_step stands in for the time between calls here, a different length after each step."""
+    clock = FakeClock()
+
+    async def on_step(
+        step: int, invalid_calls: int, messages: list[dict[str, Any]], records: list[CallRecord]
+    ) -> None:
+        clock.advance(BETWEEN_CALLS_MS * step)
+
+    llm = TimedLLM([calls(calc("7*8")), calls(calc("56+3")), final(mode, "59")], clock)
+    result = await run_on_clock(mode, llm, clock, on_step)
+    timing = [(c.step, c.ts_start, c.duration_ms, c.gap_before_ms) for c in result.calls]
+    gap_1, gap_2 = BETWEEN_CALLS_MS, 2 * BETWEEN_CALLS_MS
+    assert timing == [
+        (1, WALL_START_MS, CALL_MS, 0),
+        (2, WALL_START_MS + CALL_MS + gap_1, CALL_MS, gap_1),
+        (3, WALL_START_MS + 2 * CALL_MS + gap_1 + gap_2, CALL_MS, gap_2),
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_wall_clock_set_back_moves_ts_start_but_not_durations_or_gaps(
+    mode: ToolChoice,
+) -> None:
+    """ts_start is wall time, so it shows the correction; durations and gaps are measured on the
+    monotonic clock, which a corrected wall clock does not move."""
+    clock = FakeClock()
+
+    async def on_step(
+        step: int, invalid_calls: int, messages: list[dict[str, Any]], records: list[CallRecord]
+    ) -> None:
+        clock.advance(BETWEEN_CALLS_MS)
+
+    llm = WallSetBackLLM([calls(calc("7*8")), final(mode, "56")], clock)
+    result = await run_on_clock(mode, llm, clock, on_step)
+    timing = [(c.ts_start, c.duration_ms, c.gap_before_ms) for c in result.calls]
+    assert timing == [
+        (WALL_START_MS, CALL_MS, 0),
+        (WALL_START_MS - WALL_SET_BACK_MS + CALL_MS + BETWEEN_CALLS_MS, CALL_MS, BETWEEN_CALLS_MS),
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_call_record_takes_tokens_and_pod_from_the_reply(mode: ToolChoice) -> None:
+    llm = ScriptedLLM([calls(calc("7*8")), final(mode, "56")], usage=USAGE, fingerprint=POD)
+    result = await run_on_clock(mode, llm, FakeClock())
+    measured = [
+        (c.prompt_tokens, c.completion_tokens, c.cached_tokens, c.pod) for c in result.calls
+    ]
+    assert measured == [(120, 9, 112, POD)] * 2
+    sent = [int(request.headers["x-expected-steps"]) for request in llm.requests]
+    assert [c.expected_steps for c in result.calls] == sent == [3, 3]
+
+
+@pytest.mark.parametrize(
+    ("usage", "fingerprint", "absent"),
+    [
+        (None, None, {"prompt_tokens", "completion_tokens", "cached_tokens", "pod"}),
+        ({"prompt_tokens": 120, "completion_tokens": 9}, POD, {"cached_tokens"}),
+        ({**USAGE, "prompt_tokens_details": None}, POD, {"cached_tokens"}),
+        ({**USAGE, "prompt_tokens_details": {}}, POD, {"cached_tokens"}),
+        (USAGE, None, {"pod"}),
+    ],
+    ids=["no-usage", "no-details", "null-details", "no-cached-tokens", "no-fingerprint"],
+)
+async def test_a_field_the_reply_leaves_out_is_left_out_of_the_record(
+    usage: dict[str, Any] | None, fingerprint: str | None, absent: set[str]
+) -> None:
+    """vLLM fills prompt_tokens_details only with --enable-prompt-tokens-details; a missing
+    measurement must not read as 0."""
+    llm = ScriptedLLM([text("59")], usage=usage, fingerprint=fingerprint)
+    [call] = (await run_on_clock("auto", llm, FakeClock())).calls
+    assert set(call.fields()) == RECORD_FIELDS - absent
+
+
+@pytest.mark.parametrize(
+    ("fields", "absent"),
+    [
+        (
+            {"usage": None, "system_fingerprint": POD},
+            {"prompt_tokens", "completion_tokens", "cached_tokens"},
+        ),
+        ({"usage": USAGE, "system_fingerprint": None}, {"pod"}),
+        (
+            {"usage": {**USAGE, "prompt_tokens": None}, "system_fingerprint": POD},
+            {"prompt_tokens"},
+        ),
+        (
+            {
+                "usage": {**USAGE, "prompt_tokens_details": {"cached_tokens": None}},
+                "system_fingerprint": POD,
+            },
+            {"cached_tokens"},
+        ),
+    ],
+    ids=["null-usage", "null-fingerprint", "null-count", "null-cached-tokens"],
+)
+async def test_a_null_field_is_left_out_of_the_record(
+    fields: dict[str, Any], absent: set[str]
+) -> None:
+    """null says the server has no value, the same as leaving the field out; it must not read as 0
+    or fail the run."""
+    llm = TopLevelFieldsLLM([text("59")], fields)
+    result = await run_on_clock("auto", llm, FakeClock())
+    assert result.status == "done"
+    [call] = result.calls
+    assert set(call.fields()) == RECORD_FIELDS - absent
+
+
+async def test_a_cache_miss_is_recorded_as_zero_cached_tokens() -> None:
+    usage = {**USAGE, "prompt_tokens_details": {"cached_tokens": 0}}
+    llm = ScriptedLLM([text("59")], usage=usage)
+    [call] = (await run_on_clock("auto", llm, FakeClock())).calls
+    assert call.fields()["cached_tokens"] == 0
+
+
+@pytest.mark.parametrize(
+    ("fields", "field"),
+    [
+        ({"usage": {**USAGE, "prompt_tokens": "120"}}, "prompt_tokens"),
+        ({"usage": {**USAGE, "completion_tokens": True}}, "completion_tokens"),
+        ({"usage": {**USAGE, "prompt_tokens_details": [112]}}, "prompt_tokens_details"),
+        ({"usage": {**USAGE, "prompt_tokens_details": {"cached_tokens": "112"}}}, "cached_tokens"),
+        ({"usage": [120, 9]}, "usage"),
+        ({"usage": USAGE, "system_fingerprint": 7}, "system_fingerprint"),
+    ],
+    ids=[
+        "text-count",
+        "bool-count",
+        "details-not-an-object",
+        "text-cached-tokens",
+        "usage-not-an-object",
+        "fingerprint-not-text",
+    ],
+)
+async def test_a_reply_field_of_another_type_fails_the_run(
+    fields: dict[str, Any], field: str
+) -> None:
+    """Such a body is not a chat completion, like one without choices; the run fails with no
+    record rather than save a wrong measurement."""
+    result, _ = await run("auto", TopLevelFieldsLLM([text("59")], fields))
+    assert (result.status, result.steps, result.calls) == ("failed", 1, [])
+    assert result.error is not None
+    assert "LLMResponseError" in result.error
+    assert field in result.error
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_every_reply_is_recorded_invalid_ones_too(mode: ToolChoice) -> None:
+    script = [calls(calc("2^3")), calls(calc("7*8")), final(mode, "56")]
+    result = await run_on_clock(mode, ScriptedLLM(script), FakeClock())
+    assert (result.status, result.steps, result.invalid_calls) == ("done", 3, 1)
+    assert [c.step for c in result.calls] == [1, 2, 3]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_cut_off_reply_is_recorded(mode: ToolChoice) -> None:
+    llm = ScriptedLLM([calls(calc("7*8"))], finish_reason="length", usage=USAGE)
+    result = await run_on_clock(mode, llm, FakeClock())
+    assert result.status == "failed"
+    assert [(c.step, c.prompt_tokens) for c in result.calls] == [(1, 120)]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_call_without_a_reply_gets_no_record(mode: ToolChoice) -> None:
+    """The run's step still counts the call and its error says why; a record needs a reply, so the
+    records match the steps GET /runs/{id} shows."""
+    result = await run_on_clock(mode, FailsAfterScript([calls(calc("7*8"))]), FakeClock())
+    assert (result.status, result.steps) == ("failed", 2)
+    assert result.error is not None
+    assert "500" in result.error
+    assert [c.step for c in result.calls] == [1]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_on_step_gets_the_records_of_the_steps_so_far(mode: ToolChoice) -> None:
+    """So a step is saved with exactly its own calls (store.RedisStore.save)."""
+    seen: list[list[CallRecord]] = []
+
+    async def on_step(
+        step: int, invalid_calls: int, messages: list[dict[str, Any]], records: list[CallRecord]
+    ) -> None:
+        seen.append(records)
+
+    script = [calls(calc("7*8")), calls(calc("56+3")), final(mode, "59")]
+    result = await run_on_clock(mode, ScriptedLLM(script), FakeClock(), on_step)
+    assert len(result.calls) == 3
+    assert seen == [result.calls[:1], result.calls[:2]]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_the_llm_call_line_logs_the_call_record(
+    mode: ToolChoice, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_runtime")
+    llm = ScriptedLLM([calls(calc("7*8")), final(mode, "56")], usage=USAGE)
+    result = await run_on_clock(mode, llm, FakeClock())
+    lines = [r.__dict__ for r in caplog.records if r.getMessage() == "llm call"]
+    assert len(lines) == len(result.calls) == 2
+    for line, call in zip(lines, result.calls, strict=True):
+        assert {name: line.get(name) for name in call.fields()} == call.fields()
+        assert line["run-id"] == RUN_ID
+        # The reply had no system_fingerprint, so the line has no pod either.
+        assert "pod" not in line

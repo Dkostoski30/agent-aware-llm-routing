@@ -1,11 +1,12 @@
-"""Runs one task as a chain of LLM calls with the D1 headers, in either D10 mode."""
+"""Runs one task as a chain of LLM calls with the D1 headers, in either D10 mode, and records each
+call (P2.2a)."""
 
 import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import httpx
 
@@ -13,6 +14,7 @@ from agent_runtime.config import AgentConfig
 from agent_runtime.csv_tools import Table
 from agent_runtime.documents import Document
 from agent_runtime.llm import LLMClient, LLMResponseError
+from agent_runtime.store import CallRecord
 from agent_runtime.tools import (
     FINAL_ANSWER,
     InvalidCallError,
@@ -38,9 +40,31 @@ REPEATED_CALL = (
     "result, or give the final answer"
 )
 
-# Awaited with (step, invalid_calls, messages) after every step that leaves the run going, so the
-# service can save the history before the next call (D7).
-StepCallback = Callable[[int, int, list[dict[str, Any]]], Awaitable[None]]
+# Awaited with (step, invalid_calls, messages, calls) after every step that leaves the run going, so
+# the service can save the history and the call records before the next call (D7).
+StepCallback = Callable[[int, int, list[dict[str, Any]], list[CallRecord]], Awaitable[None]]
+
+
+class Clock(Protocol):
+    def wall_ms(self) -> int:
+        """Milliseconds since the Unix epoch, for when a call was sent (ts_start)."""
+        ...
+
+    def monotonic_ms(self) -> float:
+        """Milliseconds from an arbitrary start that never go back, for durations and gaps, which a
+        wall clock set back by NTP could make negative."""
+        ...
+
+
+class SystemClock:
+    def wall_ms(self) -> int:
+        return time.time_ns() // 1_000_000
+
+    def monotonic_ms(self) -> float:
+        return time.perf_counter() * 1000
+
+
+SYSTEM_CLOCK = SystemClock()
 
 
 @dataclass(frozen=True)
@@ -52,6 +76,8 @@ class RunResult:
     steps: int
     invalid_calls: int
     messages: list[dict[str, Any]]
+    # One per LLM call that got a reply, invalid and cut-off replies included (P2.2a).
+    calls: list[CallRecord]
 
 
 def initial_messages(task: str, config: AgentConfig) -> list[dict[str, Any]]:
@@ -72,6 +98,7 @@ class _Run:
         # Number of LLM calls sent so far; 0 on the lines logged before the first call.
         self.step = 0
         self.invalid_calls = 0
+        self.calls: list[CallRecord] = []
 
     def log(self, level: int, message: str, **fields: Any) -> None:
         logger.log(level, message, extra={"run-id": self.run_id, "step": self.step, **fields})
@@ -93,6 +120,7 @@ class _Run:
             steps=self.step,
             invalid_calls=self.invalid_calls,
             messages=self.messages,
+            calls=self.calls,
         )
 
 
@@ -109,9 +137,10 @@ async def run_task(
     on_step: StepCallback | None = None,
     tables: Sequence[Table] = (),
     documents: Sequence[Document] = (),
+    clock: Clock = SYSTEM_CLOCK,
 ) -> RunResult:
     """tables and documents are the run request's files, already read
-    (documents.read_run_files)."""
+    (documents.read_run_files); clock times the calls (a test passes a fake one)."""
     run = _Run(run_id, task, config)
     tools = offered_tools(config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
@@ -120,20 +149,38 @@ async def run_task(
     # (tool, arguments as sorted JSON) of every call that ran, for REPEATED_CALL.
     ran: set[tuple[str, str]] = set()
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
+    expected_steps = config.expected_steps_default
+    # When the last reply arrived, on clock.monotonic_ms(); None until the first one.
+    last_reply_ms: float | None = None
     run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     while run.step < config.max_steps:
         run.step += 1
         headers = {
             "x-run-id": run_id,
             "x-step": str(run.step),
-            "x-expected-steps": str(config.expected_steps_default),
+            "x-expected-steps": str(expected_steps),
         }
-        started = time.perf_counter()
+        ts_start = clock.wall_ms()
+        started_ms = clock.monotonic_ms()
         try:
             reply = await llm.chat(run.messages, definitions, headers, seed)
         except (httpx.HTTPError, LLMResponseError) as error:
+            # No reply, so no call record; run.step still counts the call and the error says why.
             return run.finish(error=f"LLM call failed: {type(error).__name__}: {error}")
-        duration_ms = round((time.perf_counter() - started) * 1000)
+        replied_ms = clock.monotonic_ms()
+        call_record = CallRecord(
+            step=run.step,
+            ts_start=ts_start,
+            duration_ms=round(replied_ms - started_ms),
+            gap_before_ms=0 if last_reply_ms is None else round(started_ms - last_reply_ms),
+            expected_steps=expected_steps,
+            prompt_tokens=reply.prompt_tokens,
+            completion_tokens=reply.completion_tokens,
+            cached_tokens=reply.cached_tokens,
+            pod=reply.pod,
+        )
+        last_reply_ms = replied_ms
+        run.calls.append(call_record)
         message = reply.message
         tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
         # Only what the next call needs; the other fields vLLM returns stay out of the history.
@@ -145,8 +192,8 @@ async def run_task(
             logging.INFO,
             "llm call",
             tool_calls=[c["function"]["name"] for c in tool_calls],
-            duration_ms=duration_ms,
             finish_reason=reply.finish_reason,
+            **call_record.fields(),
         )
         # With no max_tokens cap a cut-off reply filled the context, so a retry can only overflow
         # again.
@@ -201,6 +248,6 @@ async def run_task(
                 run.log(logging.WARNING, "tool error", tool=name, error=result["error"])
             run.messages.append(_tool_message(call["id"], result))
         if on_step is not None:
-            # A copy: the loop keeps appending to run.messages while the callback's caller holds it.
-            await on_step(run.step, run.invalid_calls, list(run.messages))
+            # Copies: the loop keeps appending to both lists while the callback's caller holds them.
+            await on_step(run.step, run.invalid_calls, list(run.messages), list(run.calls))
     return run.finish(error=f"{config.max_steps} calls without an answer (agent.max_steps)")

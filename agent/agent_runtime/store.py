@@ -1,6 +1,8 @@
-"""Run history (D7): each run's metadata and full message list, saved after every step."""
+"""Run history (D7): each run's metadata, full message list and LLM call records, saved after every
+step."""
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, Protocol
 
@@ -26,8 +28,39 @@ class RunRecord:
     updated_ms: int
 
 
+@dataclass(frozen=True)
+class CallRecord:
+    """One LLM call that got a reply (P2.2a), named as in schemas/trace.v1.json where it has the
+    field."""
+
+    # The call's x-step.
+    step: int
+    # When the call was sent, in milliseconds since the Unix epoch.
+    ts_start: int
+    duration_ms: int
+    # From the end of the previous reply to this call's start: the tools and the step's save (D9);
+    # 0 on step 1.
+    gap_before_ms: int
+    # The x-expected-steps the call carried (D1).
+    expected_steps: int
+    # From the reply's usage; None when the reply has no such field. vLLM fills cached_tokens only
+    # with --enable-prompt-tokens-details (infra/charts/vllm).
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    cached_tokens: int | None
+    # The reply's system_fingerprint, which the vLLM chart sets to the pod's name; None without one.
+    pod: str | None
+
+    def fields(self) -> dict[str, int | str]:
+        """The record as it is saved and logged: a measurement the reply lacked is left out, so it
+        never reads as 0."""
+        return {name: value for name, value in asdict(self).items() if value is not None}
+
+
 class RunStore(Protocol):
-    async def save(self, record: RunRecord, messages: list[dict[str, Any]]) -> None: ...
+    async def save(
+        self, record: RunRecord, messages: list[dict[str, Any]], calls: Sequence[CallRecord]
+    ) -> None: ...
 
     async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
         """The run request's files, saved once before the run starts (D13)."""
@@ -43,10 +76,11 @@ _INT_FIELDS = ("step", "expected_steps", "invalid_calls", "created_ms", "updated
 
 class RedisStore:
     """thesis:run:<id> is a hash of the record, thesis:run:<id>:messages the messages as JSON,
-    thesis:run:<id>:files the run request's files as JSON.
+    thesis:run:<id>:calls the call records as a JSON list (CallRecord.fields), thesis:run:<id>:files
+    the run request's files as JSON.
 
-    The record and messages are written in one MULTI transaction with the same TTL, so a reader
-    (P4.4 failover on another pod) never sees a record and messages from different steps. The files
+    The record, messages and calls are written in one MULTI transaction with the same TTL, so a
+    reader (P4.4 failover on another pod) never sees them from different steps. The files
     are written once; every save renews their TTL with the run's, so they expire together. The
     client must decode responses (decode_responses=True), so the hash comes back as strings.
     """
@@ -55,7 +89,9 @@ class RedisStore:
         self._redis = redis
         self._ttl_seconds = ttl_seconds
 
-    async def save(self, record: RunRecord, messages: list[dict[str, Any]]) -> None:
+    async def save(
+        self, record: RunRecord, messages: list[dict[str, Any]], calls: Sequence[CallRecord]
+    ) -> None:
         key = f"thesis:run:{record.run_id}"
         # A hash holds strings only, so None fields (answer, error while running) are left out.
         # redis-py's own types: Mapping's key type is invariant, so mypy refuses dict[str, ...].
@@ -65,6 +101,8 @@ class RedisStore:
         async with self._redis.pipeline(transaction=True) as pipe:
             pipe.hset(key, mapping=fields)
             pipe.set(f"{key}:messages", json.dumps(messages), ex=self._ttl_seconds)
+            calls_json = json.dumps([call.fields() for call in calls])
+            pipe.set(f"{key}:calls", calls_json, ex=self._ttl_seconds)
             pipe.expire(key, self._ttl_seconds)
             pipe.expire(f"{key}:files", self._ttl_seconds)
             await pipe.execute()

@@ -13,6 +13,39 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-02 · P2.2a · green
+Command: `make test` · `make lint` · `make up PROFILE=real` · `make smoke` ·
+`kubectl exec deployment/redis -- redis-cli GET thesis:run:<run-id>:calls`, checked with jq
+Result:
+- `make test`: 664 passed, training 22 passed. `make lint` passed.
+- `make up PROFILE=real`: vLLM with the three new flags (helm revision 5), pods vllm-5c9565db76-6bq8s and -kb852 Ready
+  about 4 min after the upgrade; agent image `thesis/agent:cdaa1178225d`.
+- `make smoke`: exit 0. `run-26776955616d` ("What is 7 times 8?", seed 7) done in 33 s, 2 steps, both on
+  10.42.0.79:8000; prometheus skipped the two old Failed pods (P2.11).
+- `thesis:run:run-26776955616d:calls`:
+  ```
+  {"step":1,"ts_start":1793606515407,"duration_ms":25708,"gap_before_ms":0,"expected_steps":2,"prompt_tokens":358,"completion_tokens":21,"cached_tokens":0,"pod":"vllm-5c9565db76-6bq8s"}
+  {"step":2,"ts_start":1793606543527,"duration_ms":4181,"gap_before_ms":11,"expected_steps":2,"prompt_tokens":398,"completion_tokens":10,"cached_tokens":352,"pod":"vllm-5c9565db76-6bq8s"}
+  ```
+- jq check: steps 1..n, every field on every step, gap_before_ms 0 on step 1: true. Both steps on
+  vllm-5c9565db76-6bq8s, one of the two Running pods, at 10.42.0.79 (the Gateway's endpoint). Step 2 cached 352 of
+  398 prompt tokens, more than step 1's 358 - 16 (the prompt up to its last, partly filled block). Step 1 cached 0 on
+  the fresh pod: with --enable-prompt-tokens-details a miss reads 0.
+Notes:
+- Taken over 2026-11-02 by the ~/thesis session from the worktree ~/thesis-p2.2a (its diff applied as a patch).
+  experiments/finetune_data.py's scripted LLM broke on ChatReply's new fields; they default to None (card 24). A
+  fresh-eyes review led to the same-pod cache check, tests for a wall clock set back, null fields and wrong-typed
+  cached_tokens / usage / system_fingerprint, a generic _optional, and app.py on the loop's clock (card 24).
+- Step 1 took 25.7 s (the Gateway's log: 25636 ms), step 2 4.2 s: the first request on a pod that had just started.
+  Likely also why the P2.11 smoke runs took 45 s and 33 s right after pods started, against 8-10 s warm; cause not
+  measured. P2.8's cold start should time the first request apart from readiness.
+- The two clocks disagreed for real: step 2's ts_start is 28,120 ms after step 1's, but step 1's duration plus the gap
+  is 25,719 ms. The Gateway agrees with the monotonic side (step 1 took 25636 ms; by its log times step 2 started about
+  18 ms after step 1 ended), and its step 1 start (end time minus duration) is 2.47 s after the agent's ts_start: the
+  wall clock moved about 2.4 s more than the monotonic clock during step 1, either a WSL2 clock correction or a paused
+  VM (not told apart). Durations and gaps were unaffected, as the new test expects. P2.2b and P2.3 time replays from
+  duration_ms and gap_before_ms, never from differences of ts_start.
+
 ### 2026-11-02 · P2.11 · green
 Command: `make lint` · `make test` · `make vllm-deploy PROFILE=slip` (two edits of a copy of config/real.yaml) ·
 `make vllm-deploy PROFILE=real` · `make smoke` with a bare test pod labelled vllm that exits at once
