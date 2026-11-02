@@ -66,8 +66,11 @@ OPERATIONS: dict[str, Callable[[float, float], float]] = {
 }
 # The expected kind of a question answered with a fixed sentence and no tool (P1.7).
 FIXED_REPLY = "fixed_reply"
+# The expected kind of a question answered in text, a support or contracts one: the answer must
+# contain each of its texts (P2.1b).
+CONTAINS = "contains"
 
-# The D10 mode that wins a tie: it cannot produce a malformed call.
+# The two D10 modes, as agent.tool_choice names them.
 REQUIRED = "required"
 AUTO = "auto"
 # The tool that ends a run in required mode; auto mode does not offer it (agent_runtime.tools, D10).
@@ -206,21 +209,34 @@ def _made(calls: Sequence[tuple[str, dict[str, Any]]], expected_call: Mapping[st
     )
 
 
+def _folded(text: str) -> str:
+    """text in lower case with every run of whitespace one space: a model that writes a quoted
+    policy over two lines still says the same."""
+    return " ".join(text.casefold().split())
+
+
 def is_correct(
     run: Mapping[str, Any], question: Question, expected: float | None, tolerance: float
 ) -> bool:
-    """run is a GET /runs/{id} body. Correct when the run is done, made every expected call, does
-    not match wrong_if_matches, and a number in its answer is within tolerance (a share of
-    expected) of expected.
+    """run is a GET /runs/{id} body. A question answered with a number is correct when the run is
+    done, made every expected call, does not match wrong_if_matches, and a number in its answer is
+    within tolerance (a share of expected) of expected.
 
     A fixed_reply question has no expected value: correct when the run is done, no tool ran, and
-    the answer contains the question's reply.
+    the answer contains the question's reply. Nor has a contains question: correct when the run is
+    done, made every expected call, and the answer contains each of its texts, case and runs of
+    whitespace aside. Neither checks wrong_if_matches.
     """
     if run["status"] != "done":
         return False
     calls = _calls_ran(run)
     if question.expected.get("kind") == FIXED_REPLY:
         return not calls and question.expected["reply"] in run["answer"]
+    if question.expected.get("kind") == CONTAINS:
+        said = _folded(run["answer"])
+        return all(_made(calls, call) for call in question.expected_calls) and all(
+            _folded(text) in said for text in question.expected["texts"]
+        )
     if expected is None:
         raise ValueError(
             f"{question.id}: a question answered with a number needs an expected value"
@@ -242,13 +258,30 @@ def served_mode(run: Mapping[str, Any]) -> str | None:
     return REQUIRED if FINAL_ANSWER in calls else AUTO
 
 
-def decide(correct: Mapping[str, int], threshold: int) -> str | None:
-    """The mode the demo keeps: the one with the most correct runs among those reaching threshold,
-    required on a tie (D10). None is a no-go."""
+def decide(correct: Mapping[str, int], threshold: int, current: str) -> str | None:
+    """The mode the profile keeps: the one with the most correct runs among those reaching
+    threshold; on a tie current, the profile's agent.tool_choice, since a tie gives no reason to
+    change it (D10 starts the demo on required, real on auto). None is a no-go."""
     passing = [mode for mode, count in correct.items() if count >= threshold]
     if not passing:
         return None
-    return max(passing, key=lambda mode: (correct[mode], mode == REQUIRED))
+    return max(passing, key=lambda mode: (correct[mode], mode == current))
+
+
+def verdict(decision: str | None, current: str, threshold: str, profile: str) -> str:
+    """The run's last line. The script puts the profile back as it was, so the line says whether
+    config/<profile>.yaml keeps its agent.tool_choice or has to be changed by hand."""
+    if decision is None:
+        return f"no-go: no mode reaches {threshold}"
+    if decision == current:
+        return (
+            f"go: {decision} reaches {threshold}; config/{profile}.yaml keeps agent.tool_choice "
+            f"{decision}"
+        )
+    return (
+        f"go: {decision} reaches {threshold}; set agent.tool_choice {decision} in "
+        f"config/{profile}.yaml (it has {current})"
+    )
 
 
 def kubectl(*args: str, stdin: str | None = None) -> str:
@@ -421,8 +454,11 @@ def served_differs(running: Mapping[str, Any], profile: Mapping[str, Any]) -> st
     return None
 
 
-def report(experiment: Experiment, rows: Sequence[Mapping[str, Any]], results: Path) -> None:
-    """Writes the result CSV and prints the score per mode and the decision."""
+def report(
+    experiment: Experiment, rows: Sequence[Mapping[str, Any]], results: Path, current: str
+) -> None:
+    """Writes the result CSV and prints the score per mode and the decision; current is the
+    profile's agent.tool_choice."""
     results.parent.mkdir(exist_ok=True)
     with results.open("w", newline="") as out:
         writer = csv.DictWriter(out, fieldnames=COLUMNS)
@@ -437,17 +473,8 @@ def report(experiment: Experiment, rows: Sequence[Mapping[str, Any]], results: P
         invalid = sum(row["invalid_calls"] for row in mode_rows)
         print(f"{mode}: {correct_by_mode[mode]}/{len(mode_rows)} correct, {invalid} invalid calls")
     threshold = f"{experiment.go_threshold}/{len(experiment.questions) * len(experiment.seeds)}"
-    decision = decide(correct_by_mode, experiment.go_threshold)
-    if decision is None:
-        print(
-            f"no-go: no mode reaches {threshold}; narrow the tasks or ask about a FINKI GPU "
-            "server at Checkpoint 1 (PLAN.md P1.6)"
-        )
-    else:
-        print(
-            f"go: {decision} reaches {threshold}; "
-            f"config/{experiment.profile}.yaml keeps agent.tool_choice {decision}"
-        )
+    decision = decide(correct_by_mode, experiment.go_threshold, current)
+    print(verdict(decision, current, threshold, experiment.profile))
 
 
 def main() -> None:
@@ -496,7 +523,12 @@ def main() -> None:
     finally:
         print(f"go-no-go: putting back {profile_path}", flush=True)
         apply_profile(profile_text)
-    report(experiment, rows, result_path(experiment, agent_image, adapter_id(profile["model"])))
+    report(
+        experiment,
+        rows,
+        result_path(experiment, agent_image, adapter_id(profile["model"])),
+        profile["agent"]["tool_choice"],
+    )
 
 
 if __name__ == "__main__":
