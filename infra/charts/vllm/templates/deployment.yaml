@@ -29,7 +29,8 @@ spec:
           image: {{ .Values.image }}
           imagePullPolicy: IfNotPresent
           # Same flags as infra/local/vllm-common.sh, so a pod behaves like the containers measured in P0.3-P0.5, and
-          # with model.lora set the adapter's (P1.7), which only the pods serve.
+          # with model.lora set the adapter's (P1.7), which only the pods serve. The P2.2a flags are pod-only too: they
+          # change only what a reply reports, not how it is computed.
           args:
             - --model={{ required "model.name from the profile" .Values.model.name }}
             - --revision={{ required "model.revision from the profile" .Values.model.revision }}
@@ -41,6 +42,12 @@ spec:
             - --enable-auto-tool-choice
             - --enable-prefix-caching
             - --enforce-eager
+            # usage.prompt_tokens_details.cached_tokens in every reply: the prefix-cache hit of each call (P2.2a).
+            - --enable-prompt-tokens-details
+            # Every reply's system_fingerprint is this pod's name, so the agent records which pod served each call
+            # (P2.2a); the gateway knows only the pod's IP, which changes when the pod is recreated.
+            - --fingerprint-mode=custom
+            - --fingerprint-value=$(POD_NAME)
             {{- with .Values.model.lora }}
             # The adapter is served next to the base model under its name; a request that names it gets it.
             - --enable-lora
@@ -48,6 +55,11 @@ spec:
             - --max-lora-rank={{ required "model.lora.max_rank from the profile" .max_rank }}
             {{- end }}
           env:
+            # Kubernetes puts it into --fingerprint-value above, where args name it as $(POD_NAME).
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: HF_HOME
               value: /hf
             # The model is already in the host cache (infra/download-model.sh, run by make up); a pod never downloads.

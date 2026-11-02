@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import secrets
-import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
@@ -24,15 +23,11 @@ from agent_runtime.config import AgentConfig, load_config
 from agent_runtime.csv_tools import FileError, Table
 from agent_runtime.documents import Document, read_run_files
 from agent_runtime.llm import LLMClient
-from agent_runtime.loop import initial_messages, run_task
-from agent_runtime.store import RedisStore, RunRecord, RunStore
+from agent_runtime.loop import SYSTEM_CLOCK, initial_messages, run_task
+from agent_runtime.store import CallRecord, RedisStore, RunRecord, RunStore
 
 # The port the agent Service targets (infra/manifests/agent.yaml, P1.3b).
 PORT = 8080
-
-
-def _now_ms() -> int:
-    return time.time_ns() // 1_000_000
 
 
 def _arguments(raw: str) -> Any:
@@ -133,9 +128,13 @@ def create_app(
     async def execute(
         record: RunRecord, seed: int | None, tables: list[Table], documents: list[Document]
     ) -> None:
-        async def save_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
-            updated = replace(record, step=step, invalid_calls=invalid_calls, updated_ms=_now_ms())
-            await store.save(updated, messages)
+        async def save_step(
+            step: int, invalid_calls: int, messages: list[dict[str, Any]], calls: list[CallRecord]
+        ) -> None:
+            updated = replace(
+                record, step=step, invalid_calls=invalid_calls, updated_ms=SYSTEM_CLOCK.wall_ms()
+            )
+            await store.save(updated, messages, calls)
 
         result = await run_task(
             record.task, record.run_id, seed, config, llm, save_step, tables, documents
@@ -147,9 +146,9 @@ def create_app(
             invalid_calls=result.invalid_calls,
             answer=result.answer,
             error=result.error,
-            updated_ms=_now_ms(),
+            updated_ms=SYSTEM_CLOCK.wall_ms(),
         )
-        await store.save(final, result.messages)
+        await store.save(final, result.messages, result.calls)
 
     @app.post("/runs", status_code=202)
     async def start_run(request: Request, background: BackgroundTasks) -> dict[str, str]:
@@ -165,7 +164,7 @@ def create_app(
             tables, documents = read_run_files(files, config.max_files, config.max_file_bytes)
         except FileError as error:
             raise HTTPException(422, f"files: {error}") from error
-        now = _now_ms()
+        now = SYSTEM_CLOCK.wall_ms()
         record = RunRecord(
             run_id=f"run-{secrets.token_hex(6)}",
             status="running",
@@ -179,9 +178,9 @@ def create_app(
             updated_ms=now,
         )
         # Saved before 202, so a GET right after it finds the run instead of a 404. The files first,
-        # so a saved run always has its files (P4.4 failover reads both).
+        # so a saved run always has its files (P4.4 failover reads both). No calls yet.
         await store.save_files(record.run_id, files)
-        await store.save(record, initial_messages(record.task, config))
+        await store.save(record, initial_messages(record.task, config), [])
         background.add_task(execute, record, body.get("seed"), tables, documents)
         return {"run_id": record.run_id}
 
