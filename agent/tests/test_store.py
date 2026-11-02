@@ -78,7 +78,7 @@ async def test_save_files_sets_the_files_key_with_the_runs_ttl() -> None:
 
 async def test_save_renews_the_files_ttl_in_the_same_transaction() -> None:
     redis = FakeRedis()
-    await RedisStore(cast(Redis, redis), TTL_SECONDS).save(record(), [])
+    await RedisStore(cast(Redis, redis), TTL_SECONDS).save(record(), [], [])
     [(kind, transaction, commands)] = redis.sent
     assert (kind, transaction) == ("pipeline", True)
     key = f"thesis:run:{RUN_ID}"
