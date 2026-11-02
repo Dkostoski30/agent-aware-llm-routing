@@ -76,24 +76,38 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # Docker's image store, so k3s pulls the image itself once (~9 GB). Copying it from Docker (docker save | ctr import)
 # crashed k3s: the 32 GB burst of writes starved k3s's SQLite datastore until a commit failed (experiments/log.md).
 # Needs the model in ~/.cache/huggingface (infra/download-model.sh), the PodMonitor CRD (infra/install-monitoring.sh),
-# both run by make up, and the vLLM containers stopped.
+# both run by make up, and the vLLM containers stopped. A model.lora is checked before anything is pulled or deployed:
+# its name and path must end with the first 12 digits of its sha256, since an edit of the name alone once served the
+# old weights under the new name (P2.1b, P2.11), and the weights at its path must have that sha256.
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
-	image=$$(yq -e .image infra/charts/vllm/values.yaml); \
-	if ! sudo k3s crictl inspecti "$$image" >/dev/null 2>&1; then \
-		echo "vllm-deploy: k3s pulls $$image (~9 GB), once per machine; no output until it is done" \
-			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
-		sudo k3s crictl pull "$$image"; \
-	fi; \
 	lora_path=$$(yq '.model.lora.path // ""' config/$(PROFILE).yaml | sed "s|^~|$$HOME|"); \
 	if [ -n "$$lora_path" ]; then \
 		want=$$(yq -e .model.lora.sha256 config/$(PROFILE).yaml); \
+		short=$$(printf %.12s "$$want"); \
+		name=$$(yq -e .model.lora.name config/$(PROFILE).yaml); \
+		case "$$name" in \
+			*"$$short") ;; \
+			*) echo "vllm-deploy: model.lora.name $$name does not end with $$short, the start of model.lora.sha256"; \
+				exit 1;; \
+		esac; \
+		case "$${lora_path%/}" in \
+			*"$$short") ;; \
+			*) echo "vllm-deploy: model.lora.path $$lora_path does not end with $$short, the start of model.lora.sha256"; \
+				exit 1;; \
+		esac; \
 		got=$$(sha256sum "$$lora_path/adapter_model.safetensors" | cut -d' ' -f1); \
 		if [ "$$got" != "$$want" ]; then \
 			echo "vllm-deploy: $$lora_path/adapter_model.safetensors has sha256 $$got, model.lora.sha256 is $$want"; \
 			exit 1; \
 		fi; \
+	fi; \
+	image=$$(yq -e .image infra/charts/vllm/values.yaml); \
+	if ! sudo k3s crictl inspecti "$$image" >/dev/null 2>&1; then \
+		echo "vllm-deploy: k3s pulls $$image (~9 GB), once per machine; no output until it is done" \
+			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
+		sudo k3s crictl pull "$$image"; \
 	fi; \
 	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - \
@@ -180,8 +194,8 @@ finetune-data:
 	uv run --locked --project training python training/render.py experiments/finetune-data.yaml
 
 # The held-out set through the agent in each D10 mode, scored like the go/no-go, one CSV row per run in
-# experiments/results/ (P1.7 step 2). Needs make finetune-data and make up (real); 196 runs, ~40 min. BASELINE=<csv>
-# prints that earlier result next to this one, paired by question, with McNemar's p-value (P1.7 step 3).
+# experiments/results/ (P1.7 step 2). Needs make finetune-data and make up (real); 336 runs, ~90 min (P2.1b).
+# BASELINE=<csv> prints that earlier result next to this one, paired by question, with McNemar's p-value (P1.7 step 3).
 heldout:
 	PYTHONPATH=agent uv run --locked python experiments/heldout.py experiments/finetune-data.yaml \
 		$(if $(BASELINE),--baseline $(BASELINE))

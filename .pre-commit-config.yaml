@@ -4,8 +4,12 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Result files are committed as the scripts wrote them: a CSV field can end in a space, as a model's error text
+      # did in P2.1b's baseline, and lint would change the result (P2.11).
       - id: trailing-whitespace
+        exclude: ^experiments/results/
       - id: end-of-file-fixer
+        exclude: ^experiments/results/
       - id: check-yaml
         # Helm templates are YAML only after helm renders them ({{- if ... }} lines); make vllm-deploy renders
         # and applies them, so a broken template fails there.

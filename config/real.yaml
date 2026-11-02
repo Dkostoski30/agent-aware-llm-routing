@@ -21,8 +21,10 @@ model:
   # serve the plain model (docs/task-cards/19-P1.7-fine-tune-tool-calls.md).
   lora:
     # The name requests use; it ends with the start of the weights' sha256, so a log line names the adapter it ran on.
+    # make vllm-deploy refuses a name that does not (P2.11).
     name: thesis-5554fcf81b09
-    # Where make finetune published it; make vllm-deploy mounts it read-only into the vLLM pods.
+    # Where make finetune published it, a folder named by the same 12 digits (make vllm-deploy refuses another, P2.11);
+    # make vllm-deploy mounts it read-only into the vLLM pods.
     path: ~/.cache/thesis/finetune/adapters/5554fcf81b09
     # sha256 of adapter_model.safetensors; make vllm-deploy refuses an adapter whose weights differ.
     sha256: 5554fcf81b093dd231e3be77edd7a96cefa82c307f503b83720cd7e2f54629b1

@@ -13,6 +13,43 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-02 · P2.11 · green
+Command: `make lint` · `make test` · `make vllm-deploy PROFILE=slip` (two edits of a copy of config/real.yaml) ·
+`make vllm-deploy PROFILE=real` · `make smoke` with a bare test pod labelled vllm that exits at once
+Result:
+- Name-only edit (`model.lora.name` thesis-b03ea3894e7c, path and sha256 at `5554fcf81b09`): "vllm-deploy:
+  model.lora.name thesis-b03ea3894e7c does not end with 5554fcf81b09, the start of model.lora.sha256", make Error 1,
+  no helm output.
+- Path edit (name back, path `~/.cache/thesis/finetune/adapters/b03ea3894e7c`): "vllm-deploy: model.lora.path
+  /home/kosto/.cache/thesis/finetune/adapters/b03ea3894e7c does not end with 5554fcf81b09, the start of
+  model.lora.sha256", make Error 1, no helm output.
+- `make vllm-deploy PROFILE=real`: no refusal, helm revision 4, rolled out at once; vllm-fb5697bb5-4mj28 and -6nlrk
+  Running, 29 min old, 0 restarts.
+- First `make smoke`, exit 0 (the test pod's phase was read right after `kubectl run` and printed Pending):
+  ```
+  ok pods: vllm 2/2 inference-gateway 1/1 vllm-pool-epp 1/1 redis 1/1 agent 1/1
+  ok agent: run run-4636541bb246 (What is 7 times 8?, seed 7) done in 45 s, answer: 7 times 8 is 56.
+  ok gateway: 2 lines with run-id run-4636541bb246, steps [1,2], endpoints ["10.42.0.74:8000"]
+  ok picker: 2 picks by vllm-pool-epp in the run's window, for 2 steps
+  ok redis: thesis:run:run-4636541bb246 status done, step 2
+  ok prometheus: vllm:num_requests_running has a sample for ["vllm-fb5697bb5-4mj28","vllm-fb5697bb5-6nlrk"]; not Running, skipped: ["smoke-failed-pod","vllm-fb5697bb5-dpnp6","vllm-fb5697bb5-rj8m2"]
+  ```
+- The two skipped vLLM pods: phase Failed, reason UnexpectedAdmissionError, 8 h old (STATUS Unknown in kubectl get
+  pods). Pods in that state made `make smoke` fail its prometheus check until they were deleted by hand (2026-10-28
+  after a reboot, 2026-11-01 after make down + up, P2.1b).
+- Rerun with the card's wait line: `kubectl wait pod/smoke-failed-pod --for=jsonpath='{.status.phase}'=Failed
+  --timeout=60s` -> "condition met"; `make smoke` exit 0, `run-da8104172257` done in 10 s, 2 steps on
+  10.42.0.74:8000, the same pods, gateway, picker, redis and prometheus ok lines (skipped: smoke-failed-pod, -dpnp6,
+  -rj8m2).
+- `make lint` passed. `make test`: 630 passed, training 22 passed.
+Notes:
+- The card's phase line was `kubectl get pod ... -o jsonpath='{.status.phase}'`; pasted together with the next lines
+  it read the phase too early, so it now waits for Failed (rerun above).
+- The model.lora checks moved before the image pull, so a refused config pulls and deploys nothing.
+- The first smoke run took 45 s, the rerun 10 s (P2.1b: 8 s); cause not measured.
+- pre-commit's trailing-whitespace and end-of-file-fixer skip experiments/results/ from now on; the space lint
+  removed from P2.1b's baseline CSV stays removed.
+
 ### 2026-11-02 · P2.1b · green
 Command: `make test` · `make lint` · `make finetune-data` · `make heldout` (baseline) · `make finetune` ·
 `make heldout BASELINE=experiments/results/finetune-heldout-091b52c4a457-323935f068c4-b03ea3894e7c.csv` ·
