@@ -13,6 +13,61 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-02 · P2.1b · green
+Command: `make test` · `make lint` · `make finetune-data` · `make heldout` (baseline) · `make finetune` ·
+`make heldout BASELINE=experiments/results/finetune-heldout-091b52c4a457-323935f068c4-b03ea3894e7c.csv` ·
+`make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml` · `make smoke`
+Result:
+- Data (hash `091b52c4a457`): 12 kinds, 100 training and 14 held-out questions each; 5,200 training examples
+  (4.94 M tokens, longest 1533, longest reply 157), 168 held-out questions, 336 runs per pass.
+- Baseline: the held-out pass on the P1.7 adapter `b03ea3894e7c`, which config/real.yaml served (card 23): required
+  118/168, auto 124/168 (`finetune-heldout-091b52c4a457-323935f068c4-b03ea3894e7c.csv`, 92 min of run time).
+- `make finetune`: adapter `5554fcf81b09` (sha256 `5554fcf8…f54629b1`), run `b3db3c532641`, 650 steps, 9826 s of
+  training (163.8 min in all, 15.12 s/step), loss 0.8163 -> 2.316e-05 (mean 0.01589), peak 1884 MiB.
+- Held-out on `5554fcf81b09` (`finetune-heldout-091b52c4a457-323935f068c4-5554fcf81b09.csv`, 86 min of run time):
+  required 118 -> 167/168, 49 fixed, 0 broken, McNemar p = 3.55e-15; auto 124 -> 167/168, 43 fixed, 0 broken,
+  p = 2.27e-13. Without off-topic: required 118 -> 153/154 (p = 5.82e-11), auto 124 -> 153/154 (p = 3.73e-09).
+  Every kind 14/14 in both modes except clause-text, 13/14. Baseline -> now (required, auto): policy 2, 8 -> 14, 14;
+  clause-diff 6, 4 -> 14, 14; clause-text 4, 9 -> 13, 13; reply 11, 8 -> 14, 14; order-status 12, 12 -> 14, 14;
+  compare 13, 13 -> 14, 14; off-topic 0, 0 -> 14, 14; summary, group-total, group-mean, two-step, arithmetic 14/14
+  before and after.
+- Real go/no-go on agent `thesis/agent:323935f068c4` with `5554fcf81b09`
+  (`real-go-no-go-2b9641086502-323935f068c4-5554fcf81b09.csv`): required 10/10, auto 10/10, 0 invalid calls;
+  "go: auto reaches 9/10; config/real.yaml keeps agent.tool_choice auto".
+- `make smoke`: `run-015af7c3e5e4` ("What is 7 times 8?", seed 7) done in 8 s, 2 steps, both on 10.42.0.43:8000;
+  pods, agent, gateway, picker, redis and prometheus ok.
+- `make lint` passed. `make test`: 628 passed; training 22 collected, every one a dot (the summary line is not in
+  the pasted output).
+Notes:
+- The one held-out miss is `heldout-clause-text-0128` in both modes ("Quote the governing law clause of
+  lease-2025.txt."): get_policy(lease-2025, "governing law") instead of extract_clauses, so the quoted clause ("This
+  contract is governed by the law of Norway.") is right but the expected call is missing (`run-d828cde1c2f0`
+  required, `run-5a78ad53f2b9` auto). Many baseline clause-text misses were the same: get_policy is offered on every
+  run with a text file (P2.1a-2), so it reads a contract's sections too. Not changed.
+- Review finding: order-status is scored by the status word alone, so a contradictory answer passes. One did, in the
+  baseline: `heldout-order-status-0090` (required), shipped order 5512 answered "has been shipped; … the order was
+  delivered on the same day", scored correct. The baseline is really 117/168 in required (order-status 11/14) and
+  the adapter fixed 50; the error favours the baseline, so the result stands. No adapter answer has it. Matching is
+  also not on whole words ("5 working days" is in "15 working days"); no row was hit. Both are tightened at the P4.8
+  retrain (user's choice), since changing the scorer now rewrites heldout.jsonl and needs both passes again.
+- Review fixes, no data change (train.jsonl and heldout.jsonl regenerate byte for byte): replies() refuses a
+  calls_per_reply that does not add up to the calls; is_correct()'s docstring says contains questions skip
+  wrong_if_matches; a test comment says the name prefixes, not the years, keep document IDs apart.
+- The "before" for the go/no-go, committed by the user's choice:
+  `real-go-no-go-2b9641086502-323935f068c4-b03ea3894e7c.csv` (2026-11-01), the old adapter on the P2.1 agent:
+  required 8/10 (2 invalid calls), auto 10/10. It ran because
+  config/real.yaml first got only the new model.lora.name, with path and sha256 still at `b03ea3894e7c`, so vLLM
+  served the old weights under the new name; a second deploy before the full edit gave the same 8/10 and 10/10.
+  Follow-up: make vllm-deploy refuses a name or path that does not end with the sha256's first 12 digits (infra card
+  after P2.1b).
+- go_no_go.py's last line follows the profile now (decided 2026-11-02, card 23): a tie keeps the profile's
+  agent.tool_choice, so real keeps auto at 10/10 in both modes; the no-go line no longer names the FINKI server.
+- Kept mode on real: auto, agent.tool_choice unchanged. model.lora stays in config/real.yaml until P2.8, which
+  measures with and without it. The adapter is stale again after P4.8 and is retrained then (card 23, option a).
+- The `make up PROFILE=real` of 2026-11-01 19:20 stopped after vllm-deploy (no gateway, agent or Redis; the cause was
+  not kept). WSL restarts then left 6 vLLM pods Failed at GPU admission, deleted by hand before `make smoke`.
+  Follow-up: smoke checks only Running pods (infra card).
+
 ### 2026-11-01 · P2.1a-3 · go by the user's decision at 8/10 (card's bar: 9/10)
 Command: `make test` · `make lint` · `make agent-deploy PROFILE=demo` · `make go-no-go` · UI questions through
 `make agent-forward` + `make ui PROFILE=demo`
