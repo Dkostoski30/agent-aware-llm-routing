@@ -51,14 +51,14 @@ def test_load_heldout_reads_every_generated_question(tmp_path: Path) -> None:
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     questions = load_heldout(path)
     assert [q.question.id for q in questions] == [line["id"] for line in lines]
-    assert [q.file for q in questions] == [line["file"] for line in lines]
+    assert [q.files for q in questions] == [line["files"] for line in lines]
     assert [q.seed for q in questions] == [line["seed"] for line in lines]
 
 
 def test_expected_of_computes_every_kind_but_the_fixed_reply(tmp_path: Path) -> None:
     for heldout in load_heldout(heldout_file(tmp_path)):
         expected = expected_of(heldout)
-        if heldout.kind == "off-topic":
+        if heldout.question.expected["kind"] in ("fixed_reply", "contains"):
             assert expected is None
         else:
             assert expected is not None
@@ -116,7 +116,7 @@ def test_run_mode_saves_each_row_before_the_next_run() -> None:
                 expected={"kind": "fixed_reply", "reply": reply},
             ),
             "off-topic",
-            None,
+            [],
             i,
         )
         for i in (1, 2)
@@ -144,7 +144,7 @@ def test_run_mode_saves_each_row_before_the_next_run() -> None:
 def off_topic(count: int) -> list[Heldout]:
     expected = {"kind": "fixed_reply", "reply": "x"}
     return [
-        Heldout(Question(f"q{i}", "Hi", expected_calls=[], expected=expected), "off-topic", None, i)
+        Heldout(Question(f"q{i}", "Hi", expected_calls=[], expected=expected), "off-topic", [], i)
         for i in range(1, count + 1)
     ]
 
@@ -283,7 +283,7 @@ def heldout(question_id: str, kind: str = "arithmetic") -> Heldout:
     question = Question(
         id=question_id, text="What is 2x2?", expected_calls=[], expected={}, wrong_if_matches=None
     )
-    return Heldout(question, kind, None, 1)
+    return Heldout(question, kind, [], 1)
 
 
 def test_check_baseline_accepts_one_row_per_mode_and_question_with_the_same_expected() -> None:
@@ -350,3 +350,55 @@ def test_mcnemar_p_is_the_exact_two_sided_p_value(
     only_baseline: int, only_adapter: int, p: float
 ) -> None:
     assert mcnemar_p(only_baseline, only_adapter) == pytest.approx(p)
+
+
+# P2.1b: questions with several files and text answers.
+ORDERS = {"id": "orders", "name": "orders.csv", "type": "csv"}
+ORDERS["content"] = "order_id,status\n1041,shipped\n"
+POLICIES = {"id": "policies", "name": "policies.txt", "type": "text"}
+POLICIES["content"] = "## Returns\nIn 30 days."
+STATUS = Question(
+    id="q1",
+    text="What is the status of order 1041?",
+    expected_calls=[{"tool": "get_order", "arguments": {"order_id": "1041"}}],
+    expected={"kind": "contains", "texts": ["shipped", "1041"]},
+)
+
+
+def status_agent(posted: list[dict[str, Any]]) -> httpx.Client:
+    """An agent that keeps every POST /runs body and answers each run with get_order's row."""
+
+    def agent(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            posted.append(json.loads(request.content))
+            return httpx.Response(201, json={"run_id": "run-1"})
+        call = {"name": "get_order", "arguments": {"file": "orders", "order_id": "1041"}}
+        steps = [{"step": 1, "tool_calls": [{**call, "result": {"order": {"status": "shipped"}}}]}]
+        answer = "Order 1041 is shipped."
+        body = {"run_id": "run-1", "status": "done", "answer": answer, "steps": steps}
+        return httpx.Response(200, json={**body, "invalid_calls": 0, "error": None})
+
+    return httpx.Client(base_url="http://agent", transport=httpx.MockTransport(agent))
+
+
+def test_run_mode_attaches_every_file_of_a_question() -> None:
+    posted: list[dict[str, Any]] = []
+    question = Heldout(STATUS, "order-status", [ORDERS, POLICIES], 5)
+    rows = run_mode(status_agent(posted), [question], "auto", {"q1": None}, TOLERANCE, 60, print)
+    assert [body["files"] for body in posted] == [[ORDERS, POLICIES]]
+    assert posted[0]["seed"] == 5
+    assert rows[0]["correct"] is True
+
+
+def test_a_text_question_s_expected_column_holds_its_texts() -> None:
+    """A text answer has no expected value; the CSV shows what it had to contain, and a baseline
+    is checked against that."""
+    saved: list[dict[str, Any]] = []
+    question = Heldout(STATUS, "order-status", [ORDERS, POLICIES], 5)
+    run_mode(status_agent([]), [question], "auto", {"q1": None}, TOLERANCE, 60, saved.append)
+    assert saved[0]["expected"] == "shipped | 1041"
+    baseline = [row("auto", "order-status", "q1", False, "shipped | 1041")]
+    check_baseline(baseline, [question], {"q1": None}, ["auto"])
+    other = [row("auto", "order-status", "q1", False, "")]
+    with pytest.raises(ValueError, match="q1"):
+        check_baseline(other, [question], {"q1": None}, ["auto"])
