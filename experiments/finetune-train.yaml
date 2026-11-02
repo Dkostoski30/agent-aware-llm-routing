@@ -37,33 +37,34 @@ spike:
   learning_rate: 0.0001
 # The generated data the run trains on: experiments/finetune-data.yaml and the hash make finetune-data printed for it.
 # Training refuses other data, so the adapter learns from the data whose held-out split the baseline was scored on
-# (experiments/log.md, P1.7 step 2).
+# (experiments/log.md, P1.7 step 2; P2.1b's data with the support and contracts kinds, 2026-11-01).
 data:
   experiment: experiments/finetune-data.yaml
-  hash: 6e3ac3eda752
+  hash: 091b52c4a457
 # The training run (P1.7 step 3). It trains one example at a time: the examples differ in length, and one needs no
 # padding; step 1 measured that size.
 train:
-  # Passes over the 3196 examples, ~45 min each at step 1's speed. One pass is often too few for a format the base
-  # model gets wrong in every run (two-step, arithmetic and off-topic were 0/14 in the baseline); more passes make the
-  # model likelier to repeat the training questions than to learn the format.
+  # Passes over the 5200 examples (P2.1b; 3196 in P1.7), ~1 h 45 min each: P1.7's 2.86 M tokens took 2 h 01 min for
+  # two passes, and these are 4.94 M. One pass is often too few for a format the base model gets wrong in every run
+  # (two-step, arithmetic and off-topic were 0/14 in P1.7's baseline); more passes make the model likelier to repeat the
+  # training questions than to learn the format.
   epochs: 2
   # A common LoRA rate, about 10x full fine-tuning's: the adapter starts at zero and has few weights to move.
   learning_rate: 2.0e-4
   # Share of the optimizer steps over which the rate climbs from 0; then it falls linearly to 0 at the end. The first
   # steps' gradients are large (the base model's formats are wrong), and this keeps them from throwing the adapter far.
   warmup: 0.05
-  # Examples per optimizer step: 16 spans several kinds and modes, so no step pulls towards one format. 3196 / 16 = 200
+  # Examples per optimizer step: 16 spans several kinds and modes, so no step pulls towards one format. 5200 / 16 = 325
   # optimizer steps per epoch.
   gradient_accumulation: 16
   # model.max_model_len of the served profile: no prompt the runtime sends is longer. A longer example is refused, not
-  # cut, since a cut prompt is one vLLM never sends (the longest is 1297 tokens, experiments/log.md).
+  # cut, since a cut prompt is one vLLM never sends (the longest is 1533 tokens in P2.1b's data, experiments/log.md).
   max_length: 4096
   # Optimizer steps between checkpoints: ~10-15 min at ~1 s per example, the most a crash or Ctrl+C costs.
   save_steps: 50
   # Checkpoints kept: the newest, to resume from, and the one before it.
   checkpoints_kept: 2
-  # Optimizer steps between loss lines: 40 points over the 400 steps, for the loss curve.
+  # Optimizer steps between loss lines: 65 points over the 650 steps, for the loss curve.
   logging_steps: 10
   # Seeds the LoRA weights' start, the dropout and the order of the examples.
   seed: 1

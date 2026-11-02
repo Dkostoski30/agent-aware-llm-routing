@@ -45,13 +45,56 @@ arithmetic:
   operations: [2, 4]
   # Every number in a question, inclusive; small enough to type, large enough that results rarely repeat an operand.
   operand: [2, 20]
-# Share of off-topic questions that come with a CSV attached, so the model sees the off-topic reply next to the CSV
-# tools too. Arithmetic questions never come with one: the runtime offers the calculator only on runs without files
-# (P2.1a-3).
+# Support sets per split (P2.1b): an orders CSV and a policies document attached together, as the support scenario
+# attaches them (P2.1a-2). Each set holds dozens of reply questions and a few of each other support kind, so 30 and 15
+# give every support kind many sets, like csvs.
+support_sets:
+  train: 30
+  heldout: 15
+# Contract pairs per split (P2.1b): two versions of one contract, as the contracts scenario attaches them (P2.1a-1).
+# Each pair holds 1-2 changed clauses and 8-12 clause texts, so 30 and 15 still give clause-diff over 100 and 50
+# questions with the phrasings.
+contract_pairs:
+  train: 30
+  heldout: 15
+# The shape of every generated orders CSV, like agent/tests/fixtures/orders.csv: order_id, customer, item, status,
+# ordered_on, delivered_on, amount.
+orders:
+  # Orders per CSV, inclusive; the fixture has 4. At most 8, so a CSV stays a small attachment.
+  count: [4, 8]
+  # Order IDs, inclusive: four digits, like the fixture's.
+  order_id: [1000, 9999]
+  # The window an order is placed in, inclusive; ISO dates, as draft_reply reads them.
+  ordered_on: ["2026-01-01", "2026-11-30"]
+  # Days from ordering to delivery, inclusive; the fixture's are 4 and 5.
+  delivery_days: [2, 6]
+  # Share of orders still shipped, with no delivered_on, so some replies have no deadline (draft_reply counts only
+  # from a delivery).
+  shipped_share: 0.3
+  # The amount of an order, in cents, inclusive; written with 2 decimals.
+  amount_cents: [500, 40000]
+# The shape of every generated policies document, like agent/tests/fixtures/policies.txt: a title line, then one
+# "## <title>" section per policy of the split's pool.
+policies:
+  # Sections per document, inclusive; the fixture has 4. At least 3, so get_policy always has a choice.
+  count: [3, 5]
+  # The number of days in a policy's rule, inclusive: from a short shipping time to a long return window.
+  rule_days: [2, 60]
+# The shape of every generated contract pair, like agent/tests/fixtures/contract-2025.txt and contract-2026.txt: the
+# second version is the first one, a year later, with some clause values changed.
+contracts:
+  # Clauses per contract, inclusive; the fixture has 5. At least 4, so extract_clauses always has a choice.
+  count: [4, 6]
+  # Clauses whose value the second version changes, inclusive; the fixture changes 1.
+  changed: [1, 2]
+# Share of off-topic questions that come with files attached: a CSV, a support set or a contract pair, so the model
+# sees the off-topic reply next to every scenario's tools. Arithmetic questions never come with one: the runtime
+# offers the calculator only on runs without files (P2.1a-3).
 with_file_share: 0.5
 # The final answer of an off-topic question, word for word, with no tool call (P1.6e's sentence, decided with the user
-# 2026-10-28). The system prompt does not contain it: the model learns it from the training data.
-off_topic_reply: I can only do arithmetic and answer questions about attached CSV files.
+# 2026-10-28; orders and contracts added in P2.1b, 2026-11-01). The system prompt does not contain it: the model learns
+# it from the training data.
+off_topic_reply: I can only do arithmetic and answer questions about attached CSV files, orders and contracts.
 # Names per split. The two splits share none, and none is a name from experiments/data/sales.csv (its file ID, columns
 # or groups), so no held-out column, group or topic appears in training, and the go/no-go's file stays unseen.
 pools:
@@ -80,6 +123,51 @@ pools:
       place: [Paris, Tokyo, Nairobi, Lima, Toronto, Sydney, Istanbul, Seoul, Dakar, Oslo Fjord]
       topic: [the ocean, friendship, autumn leaves, the moon, coffee, mountains, bicycles, the stars, bread, snow]
       person: [Mozart, Marie Curie, Gandhi, Picasso, Newton, Darwin, Beethoven, Galileo]
+    # Support sets: an orders CSV <orders_files>.csv and a policies document <policies_files>.txt.
+    support:
+      orders_files: [orders, order-list, web-orders]
+      policies_files: [policies, store-rules, help-center]
+      customers: [Lena Novak, Tomas Berg, Sara Lind, Jonas Weber, Mia Rossi, Luka Horvat, Nina Kral, Oskar Dahl]
+      items: [Desk fan, Phone case, Coffee grinder, Yoga mat, Wall clock, Backpack, Table lamp, Water bottle]
+      # Section title -> its text; {days} is the rule's number. "{days} days" is a calendar-day rule that counts from
+      # the delivery, so draft_reply gives its deadline; "{days} working days" has none (agent_runtime/support.py).
+      policies:
+        Returns: Unused items can be returned within {days} days of delivery for a full refund.
+        Damaged items: >-
+          An item that arrived damaged can be replaced free of charge within {days} days of delivery. Send a photo of
+          the damage with the request.
+        Refunds: Refunds are paid to the original payment method within {days} working days of receiving the return.
+        Shipping: Orders ship within {days} working days of payment.
+        Exchanges: Items can be exchanged for another size or colour within {days} days of delivery.
+        Cancellations: An order can be cancelled for free up to {days} working days after it was placed.
+    # Contract pairs: <prefix>-<year>.txt and <prefix>-<year + 1>.txt, the year drawn from years, inclusive.
+    contracts:
+      files: [contract, agreement, service-agreement]
+      years: [2015, 2020]
+      # Clause title -> its text, {} the value, and the values a version draws from; the values of one clause share no
+      # value with another clause's, so each clause's value names that clause alone.
+      clauses:
+        Termination:
+          text: Either party may end this agreement with {} written notice.
+          values: ["30 days'", "60 days'", "90 days'", "three months'"]
+        Fees:
+          text: The client pays {} per month, invoiced on the first working day of the month.
+          values: ["1,200 EUR", "1,500 EUR", "2,000 EUR", "950 EUR"]
+        Services:
+          text: The provider delivers {} and answers data questions within two working days.
+          values: [a monthly sales report, a weekly sales report, a quarterly market review, a daily stock summary]
+        Confidentiality:
+          text: Both parties keep the other's data confidential during the agreement and for {} after it.
+          values: [two years, three years, five years, ten years]
+        Liability:
+          text: The provider's liability is limited to the fees of {}.
+          values: [the last 12 months, the last 6 months, the last 24 months, one contract year]
+        Payment terms:
+          text: Invoices are due within {} of receipt.
+          values: [two weeks, one month, 45 days, ten working days]
+        Renewal:
+          text: The agreement renews for {} unless either party objects in writing.
+          values: [one more year, half a year, a further 18 months, two more years]
   heldout:
     files: [store, warehouse, school, farm, airline, museum]
     text_columns:
@@ -98,3 +186,36 @@ pools:
       place: [Ohrid, Reykjavik, Cairo, Hanoi, Quito, Lagos, Helsinki, Havana]
       topic: [rain, music, the desert, trains, chess, volcanoes, gardens, the wind]
       person: [Tesla, Ada Lovelace, Shakespeare, Frida Kahlo, Einstein, Cleopatra]
+    support:
+      orders_files: [purchases, order-book, deliveries]
+      policies_files: [handbook, guidelines, customer-care]
+      customers: [Elif Kaya, Marta Silva, Igor Popov, Hana Sato, Pablo Ruiz, Ines Costa, Vera Holm]
+      items: [Rice cooker, Bike helmet, Desk mat, Tea kettle, Camera bag, Floor rug, Night light]
+      policies:
+        Repairs: Faulty items are repaired free of charge within {days} days of delivery.
+        Price matching: If the item is sold for less elsewhere within {days} days of delivery, we refund the difference.
+        Lost parcels: A parcel that has not arrived is replaced if reported within {days} working days of dispatch.
+        Late delivery: If an order takes more than {days} working days to arrive, the shipping fee is refunded.
+        Trade-ins: An old device can be traded in within {days} days of delivery of the new one.
+    contracts:
+      files: [supply-contract, lease, licence]
+      years: [2021, 2025]
+      clauses:
+        Warranty:
+          text: The supplier repairs defects reported within {} of delivery.
+          values: [six months, one year, 18 months, 90 days]
+        Insurance:
+          text: The supplier holds liability insurance of {} per claim.
+          values: ["500,000 EUR", 1 million EUR, "250,000 EUR", 2 million EUR]
+        Governing law:
+          text: This contract is governed by the law of {}.
+          values: [Austria, Ireland, Portugal, Norway]
+        Support hours:
+          text: Support is available {}.
+          values: [on working days from 9 to 17, every day from 8 to 20, around the clock, on weekdays until noon]
+        Data retention:
+          text: Customer data is deleted {} after the contract ends.
+          values: [30 days, three months, one week, 12 months]
+        Penalties:
+          text: A late delivery costs the supplier {} per day.
+          values: [100 EUR, 250 EUR, 50 EUR, 400 EUR]

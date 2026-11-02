@@ -21,11 +21,11 @@ model:
   # serve the plain model (docs/task-cards/19-P1.7-fine-tune-tool-calls.md).
   lora:
     # The name requests use; it ends with the start of the weights' sha256, so a log line names the adapter it ran on.
-    name: thesis-b03ea3894e7c
+    name: thesis-5554fcf81b09
     # Where make finetune published it; make vllm-deploy mounts it read-only into the vLLM pods.
-    path: ~/.cache/thesis/finetune/adapters/b03ea3894e7c
+    path: ~/.cache/thesis/finetune/adapters/5554fcf81b09
     # sha256 of adapter_model.safetensors; make vllm-deploy refuses an adapter whose weights differ.
-    sha256: b03ea3894e7c9823443057bc69ad25748c642db6c9c652bc4eeedc3f6280b9ef
+    sha256: 5554fcf81b093dd231e3be77edd7a96cefa82c307f503b83720cd7e2f54629b1
     # The adapter's rank (experiments/finetune-train.yaml, lora.rank); vLLM sizes its LoRA buffers for it.
     max_rank: 16
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).

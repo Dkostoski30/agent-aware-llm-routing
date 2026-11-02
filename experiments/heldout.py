@@ -1,7 +1,7 @@
 """Scores the P1.7 held-out set through the agent runtime in k3s (P1.7 step 2,
 docs/task-cards/19-P1.7-fine-tune-tool-calls.md).
 
-Sends every held-out question of make finetune-data once, with its seed and its file (if any), in
+Sends every held-out question of make finetune-data once, with its seed and its files (if any), in
 each D10 mode, and scores each run with the go/no-go's scorer (go_no_go.is_correct). The mode is
 switched the way go_no_go.py switches it, and the profile from config/ is put back at the end, also
 after a failure or Ctrl+C. Writes one row per run to
@@ -38,6 +38,7 @@ from go_no_go import (
     AGENT_DEPLOYMENT,
     AGENT_PODS,
     AGENT_PORT,
+    CONTAINS,
     FIXED_REPLY,
     REPO_ROOT,
     REQUEST_TIMEOUT_SECONDS,
@@ -85,8 +86,8 @@ OFF_TOPIC = "off-topic"
 class Heldout:
     question: Question
     kind: str
-    # The file as run-request.v1 carries it, or None for a question asked without one.
-    file: dict[str, str] | None
+    # The files as run-request.v1 carries them; none for a question asked without files.
+    files: list[dict[str, str]]
     seed: int
 
 
@@ -102,17 +103,19 @@ def load_heldout(path: Path) -> list[Heldout]:
             expected=item["expected"],
             wrong_if_matches=item["wrong_if_matches"],
         )
-        questions.append(Heldout(question, item["kind"], item["file"], item["seed"]))
+        questions.append(Heldout(question, item["kind"], item["files"], item["seed"]))
     return questions
 
 
 def expected_of(heldout: Heldout) -> float | None:
-    """The answer the scorer looks for, computed from the file's rows; None for a question
-    answered with a fixed sentence."""
+    """The number the scorer looks for, computed from the rows of the question's CSV file; None
+    for a question answered in text, a fixed sentence or one with given texts."""
     spec = heldout.question.expected
-    if spec["kind"] == FIXED_REPLY:
+    if spec["kind"] in (FIXED_REPLY, CONTAINS):
         return None
-    content = "" if heldout.file is None else heldout.file["content"]
+    # A file without a type is CSV (schemas/run-request.v1.json); a numeric question has one CSV.
+    csvs = [file["content"] for file in heldout.files if file.get("type", "csv") == "csv"]
+    content = csvs[0] if csvs else ""
     return expected_value(list(csv.DictReader(io.StringIO(content))), spec)
 
 
@@ -135,9 +138,12 @@ def result_path(
     return experiments / "results" / f"finetune-heldout-{data_hash}-{tag}{suffix}.csv"
 
 
-def csv_value(expected: float | None) -> str:
-    """An expected value as the result CSV holds it: csv writes a float with str() and None as an
-    empty field."""
+def csv_value(heldout: Heldout, expected: float | None) -> str:
+    """The expected column of a question's rows: the expected value as csv writes a float, with
+    str(); a contains question's texts, joined by " | "; empty for a fixed sentence."""
+    spec = heldout.question.expected
+    if spec.get("kind") == CONTAINS:
+        return " | ".join(spec["texts"])
     return "" if expected is None else str(expected)
 
 
@@ -157,7 +163,7 @@ def check_baseline(
             if row["question"] in got:
                 raise ValueError(f"the baseline has two {mode} rows for {row['question']}")
             got[row["question"]] = row["expected"]
-        want = {h.question.id: csv_value(expected[h.question.id]) for h in questions}
+        want = {h.question.id: csv_value(h, expected[h.question.id]) for h in questions}
         if got != want:
             differ = sorted(q for q in got.keys() | want.keys() if got.get(q) != want.get(q))
             raise ValueError(
@@ -259,8 +265,9 @@ def run_mode(
     rows: list[dict[str, Any]] = []
     for heldout in questions:
         question = heldout.question
-        files = [] if heldout.file is None else [heldout.file]
-        run, duration = run_question(client, files, question.text, heldout.seed, run_timeout)
+        run, duration = run_question(
+            client, heldout.files, question.text, heldout.seed, run_timeout
+        )
         served = served_mode(run)
         if served not in (None, mode):
             raise RuntimeError(
@@ -282,7 +289,7 @@ def run_mode(
             "steps": len(run["steps"]),
             "invalid_calls": run["invalid_calls"],
             "duration_s": round(duration, 1),
-            "expected": expected[question.id],
+            "expected": csv_value(heldout, expected[question.id]),
             "answer": run["answer"],
             "status": run["status"],
             "error": run["error"],
