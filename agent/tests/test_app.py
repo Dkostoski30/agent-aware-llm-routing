@@ -10,6 +10,7 @@ each poll sees. Every event a test gets is validated against schemas/run-events.
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,7 +18,7 @@ import httpx
 import pytest
 from agent_runtime.app import create_app, run_events
 from agent_runtime.config import AgentConfig, Sampling
-from agent_runtime.store import RunRecord, RunStatus, RunStore
+from agent_runtime.store import CallRecord, RunRecord, RunStatus, RunStore
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
@@ -75,10 +76,15 @@ class MemoryStore:
 
     def __init__(self) -> None:
         self.saves: list[tuple[RunRecord, list[dict[str, Any]]]] = []
+        # The calls each save held, in the order of saves (P2.2a).
+        self.calls: list[list[CallRecord]] = []
         self.files: dict[str, list[dict[str, str]]] = {}
 
-    async def save(self, record: RunRecord, messages: list[dict[str, Any]]) -> None:
+    async def save(
+        self, record: RunRecord, messages: list[dict[str, Any]], calls: Sequence[CallRecord]
+    ) -> None:
         self.saves.append((record, list(messages)))
+        self.calls.append(list(calls))
 
     async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
         self.files[run_id] = files

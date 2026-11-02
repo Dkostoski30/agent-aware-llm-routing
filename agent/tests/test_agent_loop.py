@@ -17,6 +17,7 @@ from agent_runtime.csv_tools import Table, group_by, parse_file
 from agent_runtime.documents import Document, parse_document, read_document
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import RunResult, run_task
+from agent_runtime.store import CallRecord
 from jsonschema import Draft202012Validator
 
 pytestmark = pytest.mark.anyio
@@ -98,7 +99,8 @@ class ScriptedLLM:
     """Answers each chat request with the next scripted message and records the requests.
 
     finish_reason is what vLLM sets unless one is given; failure replaces every answer with that
-    response, or raises that error.
+    response, or raises that error. usage and fingerprint (system_fingerprint), when given, are in
+    every answer; without them the answer has neither.
     """
 
     def __init__(
@@ -106,10 +108,14 @@ class ScriptedLLM:
         replies: list[dict[str, Any]],
         finish_reason: str | None = None,
         failure: httpx.Response | httpx.HTTPError | None = None,
+        usage: dict[str, Any] | None = None,
+        fingerprint: str | None = None,
     ) -> None:
         self.replies = list(replies)
         self.finish_reason = finish_reason
         self.failure = failure
+        self.usage = usage
+        self.fingerprint = fingerprint
         self.requests: list[httpx.Request] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -121,7 +127,12 @@ class ScriptedLLM:
         message = self.replies.pop(0)
         finish_reason = self.finish_reason or ("tool_calls" if message["tool_calls"] else "stop")
         choice = {"message": message, "finish_reason": finish_reason}
-        return httpx.Response(200, json={"choices": [choice]})
+        body: dict[str, Any] = {"choices": [choice]}
+        if self.usage is not None:
+            body["usage"] = self.usage
+        if self.fingerprint is not None:
+            body["system_fingerprint"] = self.fingerprint
+        return httpx.Response(200, json=body)
 
     def bodies(self) -> list[dict[str, Any]]:
         return [json.loads(request.content) for request in self.requests]
@@ -391,7 +402,9 @@ async def test_llm_call_is_logged_with_duration_and_finish_reason(
 async def test_on_step_sees_every_step_that_leaves_the_run_going(mode: ToolChoice) -> None:
     seen: list[tuple[int, int, list[dict[str, Any]]]] = []
 
-    async def on_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
+    async def on_step(
+        step: int, invalid_calls: int, messages: list[dict[str, Any]], records: list[CallRecord]
+    ) -> None:
         seen.append((step, invalid_calls, messages))
 
     llm = ScriptedLLM([calls(calc("2^3")), calls(calc("7*8")), final(mode, "56")])
@@ -472,7 +485,9 @@ async def test_two_document_reads_in_one_reply_are_one_step(mode: ToolChoice) ->
     in order, their results go back together, and the step is saved once."""
     seen: list[int] = []
 
-    async def on_step(step: int, invalid_calls: int, messages: list[dict[str, Any]]) -> None:
+    async def on_step(
+        step: int, invalid_calls: int, messages: list[dict[str, Any]], records: list[CallRecord]
+    ) -> None:
         seen.append(step)
 
     reply = calls(read("contract-2025", "call-a"), read("contract-2026", "call-b"))
