@@ -18,6 +18,7 @@ from go_no_go import (
     result_path,
     served_differs,
     served_mode,
+    verdict,
 )
 
 EXPERIMENT = Path(__file__).resolve().parents[1] / "demo-go-no-go.yaml"
@@ -260,7 +261,7 @@ def test_served_mode(body: dict[str, Any], mode: str | None) -> None:
         ({"required": 8, "auto": 9}, "auto"),
         ({"required": 10, "auto": 9}, "required"),
         ({"required": 9, "auto": 10}, "auto"),
-        # A tie goes to required: it cannot produce a malformed call (D10).
+        # A tie keeps the profile's mode; the demo profile has required (D10).
         ({"required": 9, "auto": 9}, "required"),
         ({"required": 10, "auto": 10}, "required"),
         ({"required": 8, "auto": 8}, None),
@@ -268,7 +269,42 @@ def test_served_mode(body: dict[str, Any], mode: str | None) -> None:
     ],
 )
 def test_decide(correct: dict[str, int], decision: str | None) -> None:
-    assert decide(correct, threshold=9) == decision
+    assert decide(correct, threshold=9, current="required") == decision
+
+
+@pytest.mark.parametrize(
+    ("correct", "decision"),
+    [
+        ({"required": 10, "auto": 10}, "auto"),
+        ({"required": 9, "auto": 9}, "auto"),
+        ({"required": 10, "auto": 9}, "required"),
+        ({"required": 8, "auto": 8}, None),
+    ],
+)
+def test_decide_keeps_the_profiles_mode_on_a_tie(
+    correct: dict[str, int], decision: str | None
+) -> None:
+    """The real profile has auto (D10), and P1.7 kept it at 10/10 in both modes, while the
+    go/no-go's last line said config/real.yaml keeps required. A better mode still wins."""
+    assert decide(correct, threshold=9, current="auto") == decision
+
+
+@pytest.mark.parametrize(
+    ("decision", "line"),
+    [
+        ("auto", "go: auto reaches 9/10; config/real.yaml keeps agent.tool_choice auto"),
+        (
+            "required",
+            "go: required reaches 9/10; set agent.tool_choice required in config/real.yaml "
+            "(it has auto)",
+        ),
+        (None, "no-go: no mode reaches 9/10"),
+    ],
+)
+def test_verdict_says_whether_the_profile_keeps_its_mode(decision: str | None, line: str) -> None:
+    """The script puts the profile back as it was, so the line says whether it has to change by
+    hand. A no-go names no remedy: the FINKI GPU server it named was ruled out on 2026-10-30."""
+    assert verdict(decision, current="auto", threshold="9/10", profile="real") == line
 
 
 def test_result_path_carries_the_experiment_hash_and_the_agent_image_tag() -> None:
@@ -366,6 +402,41 @@ OFF_TOPIC = Question(
 def test_is_correct_for_a_fixed_reply(body: dict[str, Any], correct: bool) -> None:
     """P1.7: an off-topic question is answered with the sentence and no tool."""
     assert is_correct(body, OFF_TOPIC, None, TOLERANCE) is correct
+
+
+REPLY_TEXT = "Dear Ana, about your order 1041: our Returns policy says ... end on 2026-11-05."
+DRAFT = ("draft_reply", {"order_id": "1041", "topic": "returns"}, {"summary": REPLY_TEXT})
+TEXT_ANSWER = Question(
+    id="reply",
+    text="Write the reply for order 1041 about returns.",
+    expected_calls=[{"tool": "draft_reply", "arguments": {"order_id": "1041", "topic": "returns"}}],
+    expected={"kind": "contains", "texts": ["1041", "Returns", "2026-11-05"]},
+)
+
+
+@pytest.mark.parametrize(
+    ("body", "correct"),
+    [
+        (run(REPLY_TEXT, [DRAFT]), True),
+        # Case and runs of spaces or newlines do not change what the answer says.
+        (run(REPLY_TEXT.upper().replace(" ", "\n  "), [DRAFT]), True),
+        # One of the texts is missing: the reply has no deadline.
+        (run("Dear Ana, about your order 1041: our Returns policy says ...", [DRAFT]), False),
+        # The right text without the call: the answer did not come from the tool.
+        (run(REPLY_TEXT, []), False),
+        # The call for another order.
+        (run(REPLY_TEXT, [("draft_reply", {"order_id": "1042", "topic": "returns"}, {})]), False),
+        # The call ran into a tool error.
+        (run(REPLY_TEXT, [("draft_reply", DRAFT[1], {"error": "no such order"})]), False),
+        (run(REPLY_TEXT, [DRAFT], status="failed"), False),
+    ],
+)
+def test_is_correct_for_an_answer_that_must_contain_texts(
+    body: dict[str, Any], correct: bool
+) -> None:
+    """P2.1b: a support or contracts answer is text: correct when the expected calls ran and the
+    answer contains every listed text. It has no expected value."""
+    assert is_correct(body, TEXT_ANSWER, None, TOLERANCE) is correct
 
 
 def test_a_numeric_question_needs_an_expected_value() -> None:
