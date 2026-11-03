@@ -40,6 +40,7 @@ from load_generator.convert import (
     request_tools,
     trace_lines_of,
 )
+from load_generator.expected_steps import expected_steps
 from load_generator.plan import (
     SharedPrefix,
     TraceCall,
@@ -47,19 +48,15 @@ from load_generator.plan import (
     build_plan,
     load_replay_config,
     load_trace,
+    served_model,
 )
 from load_generator.record import RecordError, check_line, trace_validator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).parent / "fixtures" / "apb-trajectories.jsonl"
 EXPERIMENT = REPO_ROOT / "experiments" / "convert-apb.yaml"
-RECORDED_TRACE = (
-    REPO_ROOT
-    / "experiments"
-    / "results"
-    / "traces"
-    / "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
-)
+TRACES = REPO_ROOT / "experiments" / "results" / "traces"
+RECORDED_TRACE = TRACES / "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
 TASK_TYPES = {
     "searchR1_hotpotqa": "hotpotqa",
     "tau2_airline": "tau2_airline",
@@ -1055,3 +1052,97 @@ def test_a_line_trace_v1_refuses_stops_the_conversion(
     with pytest.raises(RecordError, match=r"trace\.v1"):
         main()
     assert not setup.trace.exists()
+
+
+# The committed result.
+
+
+def test_a_converted_trace_is_committed() -> None:
+    """So that the two tests below, one case per trace, cannot pass by having no cases."""
+    assert sorted(TRACES.glob("convert-apb-*.jsonl"))
+
+
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_a_converted_trace_carries_its_own_medians_and_fits_the_context(trace: Path) -> None:
+    runs = load_trace(trace)
+    wanted = expected_steps((run.task_type, len(run.calls)) for run in runs)
+    limit = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["model"][
+        "max_model_len"
+    ]
+    for run in runs:
+        for call in run.calls:
+            assert call.expected_steps == wanted[run.task_type]
+            assert call.prompt_tokens + call.completion_tokens <= limit
+
+
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_no_prompt_of_a_converted_trace_shrinks(trace: Path) -> None:
+    """Every later step of a replay extends the one before it, and P3.3's check rests on that."""
+    for run in load_trace(trace):
+        prompts = [call.prompt_tokens for call in run.calls]
+        assert prompts == sorted(prompts), run.run_id
+
+
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_a_converted_traces_meta_counts_what_the_trace_holds(trace: Path) -> None:
+    meta = json.loads(trace.with_suffix(".meta.json").read_text())
+    runs = load_trace(trace)
+    found = {
+        task_type: {
+            "runs": sum(run.task_type == task_type for run in runs),
+            "calls": sum(len(run.calls) for run in runs if run.task_type == task_type),
+            "expected_steps": wanted,
+        }
+        for task_type, wanted in expected_steps(
+            (run.task_type, len(run.calls)) for run in runs
+        ).items()
+    }
+    assert {
+        task_type: {key: values[key] for key in ("runs", "calls", "expected_steps")}
+        for task_type, values in meta["task_types"].items()
+    } == found
+    for values in meta["task_types"].values():
+        assert values["runs_in"] == values["runs"] + values["too_large"] + values["long_reply"]
+    assert {call.gap_before_ms for run in runs for call in run.calls if call.step > 1} == {
+        meta["gap_ms"]
+    }
+
+
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_a_converted_traces_meta_names_the_tokenizer_and_the_dataset(trace: Path) -> None:
+    spec = load_spec(EXPERIMENT)
+    assert trace == output_path(spec)
+    meta = json.loads(trace.with_suffix(".meta.json").read_text())
+    model = yaml.safe_load((REPO_ROOT / "config" / f"{spec.profile}.yaml").read_text())["model"]
+    assert meta["model"] == {
+        "name": model["name"],
+        "revision": model["revision"],
+        "served_as": served_model(model),
+    }
+    assert meta["dataset_revision"] == spec.revision
+    assert meta["max_model_len"] == model["max_model_len"]
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_the_profiles_hold_the_shared_prefix_of_the_converted_trace(
+    trace: Path, profile: str
+) -> None:
+    """make convert prints these and they are pasted, as with expected_steps: a replay's prompts are
+    built from them, and nothing else would notice a wrong value."""
+    meta = json.loads(trace.with_suffix(".meta.json").read_text())
+    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["replay"]
+    by_type = section["shared_prefix_tokens"]["by_type"]
+    for task_type, values in meta["task_types"].items():
+        assert by_type[task_type] == values["shared_prefix_tokens"]
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+@pytest.mark.parametrize("trace", sorted(TRACES.glob("convert-apb-*.jsonl")), ids=lambda p: p.name)
+def test_a_converted_trace_plans_on_every_profile_and_pattern(trace: Path, profile: str) -> None:
+    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["replay"]
+    config = load_replay_config(section)
+    runs = load_trace(trace)
+    for pattern in config.patterns.values():
+        plan = build_plan(runs, pattern, config.shared_prefix, config.seed, TEMPLATE_TOKENS)
+        assert len(plan) == pattern.runs
