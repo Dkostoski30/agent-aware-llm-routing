@@ -123,6 +123,12 @@ replay:
     steady-long:
       runs: 20
       rate_per_second: 0.02
+    # P2.5's experiments/baseline.yaml: steady-long's measured rate with twice the runs, as 20 of 879 leave the seed a big
+    # say. At its seed 6 the first 20 are the runs and start times of P2.4's replay, so the load is known: 1.68 calls in
+    # flight on average, at most 5 (log). The later runs make that a first guess.
+    baseline:
+      runs: 40
+      rate_per_second: 0.02
 # Agent runtime (P1.3a).
 agent:
   # The model calls a tool or answers in plain text, like a real agent; the runtime checks every call and retries

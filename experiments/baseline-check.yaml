@@ -1,0 +1,23 @@
+# P2.5: the whole path of make experiment on a short load, about 15 min, before baseline.yaml's long one. Its results are
+# a check of the runner, not numbers for the thesis: delete them after looking.
+profile: real
+# The recorded trace, with fan-out, so the check also covers a step of several calls.
+trace: results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl
+pattern: steady-fan-out
+seed: 1
+# As in baseline.yaml, the real profile's KV cache.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # One of the pattern's 5 runs, enough to see a run dropped.
+  runs_discarded: 1
+  # As in baseline.yaml, so the check shows whether they are enough.
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+variants:
+  - name: round-robin
+    values: ../infra/helm/router-round-robin-values.yaml
+    epp_config: round-robin.yaml
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml

@@ -17,8 +17,6 @@ GAIE_SHA256=f410dfca474608c02903087b47f1ac081706dfb6dfe7f83d00a7cc7e00c4ad0d
 # agentgateway v1.6.0
 AGENTGATEWAY_CRDS_CHART=oci://cr.agentgateway.dev/charts/agentgateway-crds@sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
 AGENTGATEWAY_CHART=oci://cr.agentgateway.dev/charts/agentgateway@sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
-# llm-d-router v0.11.0
-ROUTER_CHART=oci://ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
 
 AGENTGATEWAY_NAMESPACE=agentgateway-system
 # The vLLM pods' namespace: an InferencePool selects pods in its own namespace only.
@@ -32,6 +30,8 @@ CRD_TIMEOUT=60s
 INSTALL_TIMEOUT=300s
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=infra/router-chart.sh
+source "$REPO_ROOT/infra/router-chart.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 

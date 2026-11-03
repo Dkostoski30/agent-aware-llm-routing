@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -240,5 +240,20 @@ replay-compare:
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.compare $(TRACE) $(PATTERN) $(A) $(B) \
 		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED))
 
+# An experiment file's variants, each from restarted pods on its routing, as one CSV, .meta.json and graph stamped with the
+# file's hash (P2.5). Needs make up with the file's profile; experiments/baseline.yaml takes about 1.5 h, so keep Windows
+# from sleeping, and the laptop idle: use during a variant shows in its speed. An earlier result of the same file is refused. The default picker is put back when it ends, or it says it could not.
 experiment:
-	@echo "not implemented yet: P2.5"; exit 1
+	@if [ -z "$(NAME)" ]; then echo "usage: make experiment NAME=baseline"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/$(NAME).yaml
+
+# An experiment's graph again, from its CSV alone: no cluster, no replay file (P2.5).
+experiment-graph:
+	@if [ -z "$(CSV)" ]; then echo "usage: make experiment-graph CSV=experiments/results/<name>-<hash>.csv"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.graph $(CSV)
+
+# Sums, paired runs and slow first tokens across CSVs of one load, each with the same two variants, from the CSVs alone (P2.5).
+# STALL_SECONDS is what counts as a slow first token, stated at each use because it only chooses what this report lists.
+experiment-compare:
+	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
