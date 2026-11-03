@@ -1,0 +1,24 @@
+# What make experiment, make experiment-compare and make experiment-graph show (P2.5). Not a profile: nothing here changes
+# the load or a measured call, and a result's stamped profile_sha256 must not move when a report does.
+
+# Over fewer tokens than this, one slow token moves a call's speed too far to read as its speed. Decides which calls the
+# reported ms per token covers. At least 2, since the speed divides by the tokens after the first.
+fewest_tokens_for_speed: 5
+
+# How many of the runs that most favour the total's direction make experiment-compare leaves out, to show whether a few
+# runs carry a difference. Chosen after seeing P2.5's result, whose largest stall takes two runs, so they describe and
+# test nothing.
+runs_left_out: [2, 5]
+
+# make experiment-graph's layout, in each axis's own units, as tried on P2.5's graph at the figure's size.
+graph:
+  # Hit-rate bars, on an axis with one unit between variants: leaves a gap between bars.
+  bar_height: 0.3
+  # Between a bar's end and its value, on the 0-1 share axis.
+  value_gap: 0.02
+  # The share axis's end, past 1 so that a value beside a full bar still fits.
+  hit_rate_axis_end: 1.15
+  # Between variants within a first-token band, on an axis with one unit between bands, so they don't overlap.
+  variant_spacing: 0.22
+  # Past the first and last band, so that the variants around them stay inside the axes.
+  band_margin: 0.6

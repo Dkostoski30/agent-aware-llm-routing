@@ -1,0 +1,37 @@
+# P2.5: baseline.yaml's load with the variants the other way round (docs/task-cards/28-P2.5-baseline-experiment.md). The first
+# baseline's default variant, always second, generated 14.5% slower, and so did warm-up calls that skip the picker, so this
+# file tells a place in the order from a picker. Run right after baseline.yaml, it makes round-robin, default, default,
+# round-robin, which cancels a steady drift such as heat. A test holds everything else equal to baseline.yaml.
+# The cluster's profile: its pattern, shared prefixes, model and deadline.
+profile: real
+# The long runs (P2.4): the recorded trace's 2-3 steps at 0.7 calls in flight leave little for a picker to do (P2.3).
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# A name in replay.patterns of the profile. 40 runs at the rate P2.4 measured.
+pattern: baseline
+# The seed of P2.4's replay, chosen there by a stated rule for its mix of task types, so not a random draw. One repetition
+# here; P5 runs three.
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile's kv_cache_memory_bytes: 274 blocks of 16 per pod.
+# Calls that find more than this on their pod are reported apart (P2.4). Measure it again if that size changes.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # Runs dropped from the results, not from the load: the first arrive on empty caches and an empty queue. A first guess of
+  # one eighth of the runs, which take about the first 4 min at this rate.
+  runs_discarded: 5
+  # Calls sent straight to each pod before the replay, skipping the picker. A pod's first call took 26-29 s to its first
+  # token, and the next 15 s, 5 s, 2 s (P2.3, P2.4), cause not measured. 5 is a first guess that the .meta.json shows
+  # was enough or not, in warmup_ttft_ms.
+  calls_per_pod: 5
+  # Any size: a pod's first call was as slow at ~350 tokens (P2.2a) as at 1,900 (P2.4). This one is cheap.
+  words: 200
+  # Enough to reach generation, not to take long: about 4 s at 226.5 ms per token (P2.2b).
+  completion_tokens: 16
+# In this order, one after the other. values is a file on top of infra/helm/router-values.yaml, relative to this file.
+# epp_config is the file the running picker must name, or the experiment stops before sending a call.
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml
+  - name: round-robin
+    values: ../infra/helm/router-round-robin-values.yaml
+    epp_config: round-robin.yaml

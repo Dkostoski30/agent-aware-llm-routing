@@ -267,8 +267,36 @@ def trace_run_id(replayed: str) -> str:
     return replayed.rsplit("-", 1)[0]
 
 
+def run_position(replayed: str) -> int:
+    """A replayed run's place among the plan's runs by start time, from 1."""
+    return int(replayed.rsplit("-", 1)[1])
+
+
 def _words(stream: str, count: int) -> list[str]:
     return random.Random(stream).choices(WORDS, k=count)
+
+
+def warmup_run(pod_number: int, calls: int, words: int, completion_tokens: int) -> PlannedRun:
+    """Calls for one pod before an experiment's replay. Each has its own text, so that each does the
+    work of a call that finds nothing cached. No seed: no result depends on them."""
+    return PlannedRun(
+        run_id=f"warmup-{pod_number}",
+        task_type="warmup",
+        start_seconds=0,
+        steps=[
+            PlannedStep(
+                step=step,
+                expected_steps=calls,
+                gap_before_ms=0,
+                prompt_tokens=words,
+                completion_tokens=completion_tokens,
+                content=" ".join(_words(f"warmup/{pod_number}/{step}", words)),
+                calls=1,
+                parallel_group=None,
+            )
+            for step in range(1, calls + 1)
+        ],
+    )
 
 
 def _run_words(
