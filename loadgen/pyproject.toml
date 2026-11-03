@@ -1,7 +1,7 @@
 [project]
 name = "loadgen"
 version = "0.1.0"
-description = "Load generator: records agent runs as trace.v1 lines (P2.2b)"
+description = "Load generator: records agent runs as trace.v1 lines (P2.2b) and replays them (P2.3)"
 requires-python = "==3.12.*"
 dependencies = [
     "httpx==0.28.1",

@@ -217,8 +217,13 @@ record:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make record EXPERIMENT=experiments/record-demo.yaml"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.record $(EXPERIMENT)
 
+# A trace's LLM calls straight to the gateway, one trace.v1 line per call in experiments/results/replays/, with the
+# runs arriving by a pattern in config/$(PROFILE).yaml, replay.patterns (P2.3). Needs make up with that profile. An
+# existing output is refused; OUT= names another file. SEED= overrides replay.seed. Exits 1 if a call got no full reply.
 replay:
-	@echo "not implemented yet: P2.3"; exit 1
+	@if [ -z "$(TRACE)" ] || [ -z "$(PATTERN)" ]; then echo "usage: make replay TRACE=<trace.jsonl> PATTERN=<name> [PROFILE=real] [SEED=n] [OUT=file]"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
+		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED)) $(if $(OUT),--out $(OUT))
 
 experiment:
 	@echo "not implemented yet: P2.5"; exit 1
