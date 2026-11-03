@@ -51,8 +51,7 @@ replay:
   # are 1-21 ms with a median of 2 ms (P2.2b). A first guess with room: P2.3's replays stayed within 24 ms
   # (experiments/log.md).
   gap_tolerance_ms: 50
-  # How many tokens two runs have in common at the start of a prompt, from the cached_tokens of each run's first step in
-  # the P2.2b trace, a multiple of vLLM's 16-token block.
+  # How many tokens two runs have in common at the start of a prompt.
   shared_prefix_tokens:
     # Any two runs: none, although inside vLLM real runs of different types share their system prompt (192-256 tokens,
     # P2.2b). The picker hashes a request's tools first, then its messages (llm-d-router v0.11.0,
@@ -60,14 +59,23 @@ replay:
     # start would send every run to one pod (P2.3: 111 of 111 calls). The cost, a stated limitation: on the first call
     # after a pod switches type, up to 256 more uncached tokens, about 0.3 s at P2.2b's 1.19 ms per token.
     all_types: 0
-    # Two runs of one task type: the system prompt and that type's tool schemas, the lowest cached_tokens among the
-    # first steps that followed another run of the type. A trace with another type is refused, so P2.4 adds its types
-    # with measured values.
+    # Two runs of one task type. A trace with another type is refused. For the four recorded types (P2.2b): the system
+    # prompt and that type's tool schemas, the lowest cached_tokens among the first steps that followed another run of the
+    # type, a multiple of vLLM's 16-token block.
     by_type:
       csv: 752
       contracts: 736
       support: 800
       arithmetic: 336
+      # The converted types (P2.4): the tokens all kept runs' first prompts have in common, at the type's factor, as make
+      # convert printed it (experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.meta.json). The minimum over
+      # the runs: any two of them may share more (experiments/log.md, bfcl).
+      hotpotqa: 199
+      gaia_dev: 190
+      tau2_airline: 1649
+      tau2_retail: 1628
+      tau2_telecom: 1887
+      bfcl: 227
   # Each pattern: runs started, their mean rate (Poisson, so the seed gives the times), optionally bursts of runs at
   # exact times and a fan_out. Rates are real.yaml's first guesses, for 2 real pods, not measured on this profile: a
   # recorded run takes ~22 s of calls one at a time (P2.2b).
@@ -94,6 +102,13 @@ replay:
       fan_out:
         share: 0.5
         k: 2
+    # For the converted traces (P2.4), whose runs are longer, so steady's rate would likely overload 2 pods. A first guess,
+    # not the same load as steady: on 2 pods at seed 6, the done-when's by its rule for a mix of types, it measured 1.68 calls
+    # in flight on average, at most 5, slowest 87 s, against steady's 0.70 at seed 1 (log). 20 of 879 runs leave the seed a
+    # say: seeds 1-12 give 81-167 calls.
+    steady-long:
+      runs: 20
+      rate_per_second: 0.02
 # Agent runtime (P1.3a).
 agent:
   # vLLM constrains every call to the tool schemas and the run ends with final_answer: a malformed call is
@@ -106,9 +121,23 @@ agent:
   # the real retries per run.
   max_invalid_calls: 3
   # The calculator task "What is 7 times 8?": one tool call and the answer. The 0.6B cannot chain two operations
-  # (P1.3b, experiments/log.md). P2.4 replaces it with a value per task type from recorded runs (D1); D13 updates it
-  # once the scenario is picked.
+  # (P1.3b, experiments/log.md). What a run sends until it knows its scenario (D13).
   expected_steps_default: 2
+  # Each task type's median calls per run, rounded up (D1, loadgen/load_generator/expected_steps.py), over the traces in
+  # experiments/results/traces/: record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl for the first four,
+  # convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl for the others. A test fails if these differ. The runtime sends them once P4.8 knows
+  # the scenario; make convert writes them into its traces now.
+  expected_steps_by_type:
+    csv: 2
+    contracts: 3
+    support: 3
+    arithmetic: 2
+    hotpotqa: 2
+    gaia_dev: 4
+    tau2_airline: 9
+    tau2_retail: 10
+    tau2_telecom: 12
+    bfcl: 9
   # Carried over from real: P0.4's p95 of 9.5 s (4 requests in flight per replica) was measured on the 0.6B, and the
   # 1.7B single replica is not measured under load yet (P1.6b). 120 s is still more than 10x that p95, so it bounds a
   # stuck call, not a slow one.
