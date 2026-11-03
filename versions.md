@@ -149,6 +149,16 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 Revisions are pinned in `config/<profile>.yaml` (`model.revision`) and passed to vLLM as `--revision` and
 `--tokenizer-revision`.
 
+## Datasets
+
+| Dataset | Hugging Face revision (commit) | Size | License | Use |
+|---|---|---|---|---|
+| LulaCola/AgentProcessBench (arXiv 2603.14465) | `cd81f326aece8b0a3f6359e20df370690d3a98bf` | 40 MB, 1,000 runs | MIT on Hugging Face; the authors' GitHub repo states none | Long agent traces (P2.4, `make convert`) |
+
+The revision and each file's sha256 are pinned in `experiments/convert-apb.yaml`. The data stays in
+`~/.cache/thesis/agentprocessbench/`, out of git: the converted trace holds token counts, no text of the dataset. The
+source benchmarks it draws on (GAIA, HotpotQA, BFCL, tau2) may have terms of their own, not checked.
+
 ## Measurements
 
 | Task | Config | VRAM per pod | Host RAM per pod | Notes |

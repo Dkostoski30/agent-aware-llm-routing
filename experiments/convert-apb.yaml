@@ -1,0 +1,38 @@
+# P2.4: AgentProcessBench as trace.v1 lines for the replayer (docs/task-cards/27-P2.4-agentprocessbench.md). Run with
+# make convert EXPERIMENT=experiments/convert-apb.yaml after make up PROFILE=real; the trace's name carries this file's
+# hash (D11), so editing it needs a new conversion.
+# The profile whose tokenizer counts the tokens and whose model.max_model_len every call must fit. make convert refuses a
+# cluster serving another model.
+profile: real
+# Fan et al., AgentProcessBench, arXiv 2603.14465. MIT on Hugging Face (versions.md, Datasets).
+dataset:
+  repo: LulaCola/AgentProcessBench
+  revision: cd81f326aece8b0a3f6359e20df370690d3a98bf
+  # Each file of the revision with its sha256, in the order the trace holds their runs.
+  files:
+    hotpotqa/test.jsonl: 160eef2ded872d8dc6ddf4cee5752295fda691b6a9e99b5bafc2d484e6309c57
+    gaia_dev/test.jsonl: f7b75c668fc1e6ad943e8f6d93a21a9a8f5f076841e1230e1ed2fc6d05ce8192
+    tau2/test.jsonl: 6f22818ff88822512767fe735f56e7b78bed4b9aaf26959144feb92f127e1e95
+    bfcl/test.jsonl: 6aee0b71eff7feb872c6b54d962f8831b56f7bebf770cba9cb657f219afb6fe5
+# A trajectory's data_source and the task_type it becomes. tau2's three domains stay apart: each has its own system prompt
+# and tools, so a run of one shares nothing with a run of another. A source not listed is refused.
+task_types:
+  searchR1_hotpotqa: hotpotqa
+  gaia_dev: gaia_dev
+  tau2_airline: tau2_airline
+  tau2_retail: tau2_retail
+  tau2_telecom: tau2_telecom
+  bfcl_multi_turn_base: bfcl
+# The share of each type's runs, smallest first by their largest call, that decide its factor: the size at this rank maps
+# to max_model_len and larger runs are dropped. Not 1.0, since one gaia_dev run of 1,515,916 tokens would then shrink the
+# whole type to nothing. The cost, stated: the largest runs are mostly the longest, so the trace loses most of the dataset's
+# longest runs (experiments/log.md, its table). A higher share keeps more of them but shrinks every call of the type.
+keep_share: 0.9
+# A run with a longer reply after scaling is dropped: 60 s of generation at P2.2b's 226.5 ms per generated token on an idle
+# GPU, half of agent.llm_timeout_seconds. That counts generation alone: the other half is room for the queue, prefill and a
+# slower token beside another call, no guarantee (P2.3: a replayed call that passes the deadline fails its run).
+max_reply_tokens: 265
+# The recording whose median tool time becomes every later step's gap (D9), since the dataset has no timings: 2 ms, as our
+# tools are Python. A limitation: search tools and user turns would take seconds, so a replay runs heavier than those
+# agents did (decided with the user, docs/task-cards/27-P2.4-agentprocessbench.md).
+gap_trace: results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl
