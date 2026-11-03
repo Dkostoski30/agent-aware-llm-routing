@@ -13,6 +13,143 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-02 · P2.3 · green
+Command: `make replay TRACE=<P2.2b trace> PATTERN=steady`, twice (second with `OUT=`), first and again on the final code ·
+`make replay-compare PATTERN=steady` · `make replay ... PATTERN=steady-fan-out`, before and after the first review's fixes ·
+`grep -c parallel_group` on its output · `journalctl` counted for `Clock change detected` ·
+`kubectl logs deployment/inference-gateway` counted for `"parallel-group"` · pods per task type with jq · `make test` · `make lint`
+Result:
+- Trace: `experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl`, profile real, seed 1,
+  `replay.shared_prefix_tokens.all_types` 0. Outputs in `experiments/results/replays/`.
+- On the final code (`...-steady-1-final.jsonl`, `...-steady-1-final-second.jsonl`): `make replay` steady 48 calls, 0 failed, both
+  times. `make replay-compare PATTERN=steady`: `same sequence, 48 calls, the plan's calls, tokens as in the trace, a reply and TTFT
+  on every call, all gaps in tolerance. Not checked: arrival times, prompt text, pods`; max gap deviation 1 ms and 1 ms against a
+  tolerance of 50 ms. No clock jumps during either (695 lines in the journal before and after). Slowest call 34.2 and 41.0 s against
+  the 120 s deadline. No `.partial` file left behind. `make test`: 933 passed, training 22 passed. `make lint` passed. These
+  pods had already run this seed's fan-out, so the text is not fresh: cached share 0.874 and 0.908.
+- The older steady replays (`...-steady-1.jsonl`, `...-steady-1-second.jsonl`): 48 calls, 0 failed, both times, before the fresh-eyes
+  reviews' fixes, so without the new stream reading or the deadline. The final compare passes them too, max gap deviation 9 ms and 2 ms.
+- `make replay` steady-fan-out: 15 calls, 0 failed. 6 lines with a `parallel_group`, 6 access-log lines with `parallel-group`
+  (3 groups of 2 calls). Largest gap deviation 24 ms, on cold pods.
+- The same pattern again after the review's fixes, proving the new reading path through the real gateway
+  (`...-steady-fan-out-1-after-review.jsonl`): 15 calls, 0 failed, 6 and 6, largest gap deviation 1 ms, every type on the pod
+  it had before (csv and arithmetic on lzx5v, support on mrwpq). The same seed on warm pods, so a check of the code, not a load:
+  cached share 0.988 against 0.741 on the first run, and the picker already knew this text, so it is not a third placement.
+- Before its first call, each `make replay` counted every planned prompt of its pattern on vLLM's `/tokenize`, all matching the
+  trace. A one-off script did the same for all three patterns, so burst's prompts are checked too, but no replay has run burst.
+Notes:
+- The first done-when passed but sent all 111 calls to one pod, while P2.2b's recording split by type. llm-d-router v0.11.0
+  (`tokenizer/estimate.go`, read in the source) hashes a request's tools first, then its messages, so real runs of different
+  types share nothing in the picker's view. Replays send no tools and shared their first 192 words, so the pod that saw them
+  first won every prefix score. With `all_types` 0 each type stays on one pod and both pods serve, as in the recording:
+  | task_type | steady, older two | fan-out, on new pods after a restart | steady, final two, same pods as fan-out |
+  |---|---|---|---|
+  | csv | g8fs5 (16 calls) | lzx5v (9) | lzx5v (16) |
+  | contracts | g8fs5 (11) | not in this pattern | mrwpq (11) |
+  | arithmetic | g8fs5 (10) | lzx5v (3) | lzx5v (10) |
+  | support | b75wv (11) | mrwpq (3) | mrwpq (11) |
+  The split is partly chance: it comes from a few independent placements, and gives 37 and 11 calls on the older steady replays and
+  26 and 22 on the final ones, where the recording had 40 and 38. Ties between idle pods can still put everything on one pod.
+  The limitation this leaves: inside vLLM real runs of different types share 192-256 tokens and replays share none, up to
+  256 more uncached tokens, about 0.3 s, on the first call after a pod switches type.
+- **Two pods sharing one GPU: the slowdown of 2-3 times was mostly not the pods. The same load at the same seed, rerun with no clock
+  jumps, shows about 1.1 times.** Time per generated token, (duration - TTFT) / (completion tokens - 1), on the monotonic clock,
+  leaving out calls with a TTFT over 4 s:
+  | replay | other pod busy >= 75% of the call, median ms (calls) | other pod busy < 10%, median ms (calls) | ratio | clock jumps per hour | mean calls in flight |
+  |---|---|---|---|---|---|
+  | steady, first | 682 (13) | 244 (22) | 2.8 | about 100 | 1.67 |
+  | steady, second | 467 (19) | 218 (21) | 2.1 | about 100 | 1.47 |
+  | fan-out, cold pods | 440 (6) | 227 (2) | 1.9 | about 100 | 1.98 |
+  | fan-out, after the review | 209 (9) | 199 (3) | 1.05 | 0 | 0.90 |
+  | steady, final | 191 (5) | 173 (36) | 1.10 | 0 | 0.71 |
+  | steady, final, second | 207 (7) | 183 (35) | 1.13 | 0 | 0.69 |
+  The older and the final steady replays have the same arrivals. Older against final: calls with nothing else running 245, 217
+  against 170, 179 ms per token; call p50 12.4, 10.8 against 7.1, 7.3 s; p95 70.1, 57.4 against 23.5, 21.4 s; the 142-token support
+  call 97.3, 105.7 against 34.2, 41.0 s. No other pod can slow a call with nothing else running, so something on the host was slowing
+  everything while the clock jumped, and those older times read low too, since that clock ran slow. What it was is unknown, and the
+  jumps may be a symptom. This is the likeliest reading, not a proven one: the split between the pods changed as well (37 and 11
+  calls against 26 and 22), and a slower host makes calls overlap more, so the two effects feed each other. The 1.1 times that remains
+  rests on 5 and 7 calls, and these replays barely test sharing, with at most 2 calls in flight, so heavy sharing is still unmeasured.
+  All of this is exploratory, with no script in the repo. An earlier version of this note called the direction real and it was raised
+  as a thesis risk; that is withdrawn. P2.8's measurement replaces it, should count the jumps and use only runs without them, and
+  should run at 1 pod and under real overload. If a slowdown shows there, round-robin in P2.5 may lose for that reason rather than for
+  cache misses, and the simulator (P2.7, P2.9), which treats pods as independent, would differ from real pods at 2. The plan already
+  allows for this: autoscaling experiments run on the simulator, P2.9's main check is 1 real pod against 1 simulated, P2.8 measures
+  one pod against both, and P4.5 accepts a difference that is explained. For P2.5: at 0.7 calls in flight steady is a light load, so
+  it may not separate routing policies at this rate.
+- WSL2's wall and monotonic clocks disagree by an amount that changes (found by the reviews, one-off checks, no script in the
+  repo). An earlier version of this note said the monotonic clock is about 8% slow and comparisons stay fair; that is wrong:
+  | run | wall time between a run's calls / what was measured | `Clock change detected` lines per hour in the journal |
+  |---|---|---|
+  | recording, 11-02 14:39 | 1.042 | 54 |
+  | four replays, 11-02 19:21-23:46 | 1.069-1.087 | about 100 |
+  | after-review replay, 11-03 07:59 | 1.000 | 0 |
+  | final steady replays, 11-03 08:52 and 09:02 | 1.000 | 0 |
+  With no jumps `ts_start` keeps to the plan's arrivals within 0.075 s; with them it is up to 42 s off. The jumps, about 2.5 s each,
+  stopped at 06:28:43 on 11-03, with no known cause. In one 60 s test while they ran, Windows measured
+  66.05 s, the WSL wall clock 66.51 s and the monotonic clock 60.32 s, so the monotonic clock looks like the slow one, on that one
+  test. Durations from different runs can therefore be on different scales: by 3-4% between the recording and the older replays,
+  by 7-9% between those and the newest. One correction factor will not do, so P2.8 must count the jumps during each calibration run
+  (`journalctl -b 0 -q -o short-iso | grep "Clock change detected"`) and not calibrate across a change. The rule against `ts_start`
+  holds for short spans, where a jump swamps the call. Kubernetes and Prometheus timestamps, on the wall clock, will not line up
+  with durations from the monotonic clock while the jumps last.
+- The 120 s deadline can decide results under overload. It holds the whole call, as a real agent's non-streaming call is held, and
+  the older steady replays' slowest calls took 97.3 and 105.7 s before it existed. support's 142-token step ran there at 684-735 ms
+  per token and would fail above about 845; on the final replays it ran at 239-286 ms and took 34.2 and 41.0 s. So at this load the
+  deadline matters only on a slowed host, but under overload long task types fail first, and P3.4's and P4.4's counts of completed
+  runs lean toward the short ones unless they report failures per task type.
+- Cache reuse matches the prediction: on the first replay of each `all_types` setting,
+  cached == floor((previous prompt - 9) / 16) * 16 on 28 of 28 later steps. First steps cached each type's `by_type` value
+  once warm (csv 752, contracts 736, support 800, arithmetic 336). This corrects P2.2b's note below: a one-message prompt loses
+  9 template tokens at its end against the agent's 4, so the replay's shared prefix is 5 tokens shorter per step, not 4 longer.
+  Cached counts then differ by 0 or 16 tokens, about 19 ms by P2.2b's fit.
+- A second replay with the same seed finds the first one's text: 7 of 28 later steps cached above that bound, up to 1264 of 1277
+  tokens, and the cached share rose from 0.797 to 0.897. Its match with the recording's 0.896 is a coincidence. On fresh text
+  replays reuse less than the recording: first steps 0.763 against 0.879, later steps 0.814 against 0.907, and overall 0.855 against
+  0.929 without each type's first call. Neither gap is a fault in the prompts. First steps are mostly the cold calls: without each
+  type's first call they are 0.955 against 0.973, and the raw gap comes from the same 4 cold calls falling among 20 runs rather
+  than 34. Later steps lose the repeats: on 22 of the recording's 44 later steps a run found an earlier run's repeat of the same
+  question (P2.2b's note below). On a run's own previous step alone the recording would reach 0.823, or 0.818 with a replay's 9
+  template tokens, against the replay's 0.814. Replayed runs each have their own text, so they cannot reproduce that, and hit rates
+  in P2.5 and P3.3 will sit below the recording's.
+- Repetitions need another seed or fresh pods (P2.5, P5), and so does another pattern after this one: run IDs and text depend only
+  on the seed, the position and the run the order picks, so at one seed the patterns start with the same runs, and burst after
+  steady on warm pods would inflate its cache hits. Another seed also changes the load, since so few runs leave it a say: steady's
+  runs start 27.6 s apart at seed 1 and 15.1-24.3 s at seeds 2-5, up to 1.8 times the load.
+- TTFT partly measures the warm-up P2.2b found: the first calls took 35.5 and 49.4 s to first token, both on g8fs5, while b75wv,
+  already warm, took 1.2 s; after the restart 38.9 and 33.6 s; the median is 0.8 s. Warm-up does not explain all of it: the second
+  replay has a 34.0 s TTFT on g8fs5 when it was warm. The slow calls stay slow after the first token too (94 s for 20 tokens). With
+  no clock jumps these shrink: the final replays' largest are 12.4 s, two calls together on warm mrwpq, unexplained, and 1.0 s. P2.5
+  and P2.8 need warm-up on every pod, and P2.8 should look for slow calls on warm pods.
+- Replays with everything on one pod generated faster than the recording: 181 ms per token (fit on 48 warm calls, R2 0.990)
+  against 226.5. The cause is open, and the host's state clouds it: the recording ran at 54 clock jumps per hour. The final two-pod
+  replays fit 210 and 226 ms (R2 0.82 and 0.90), near the recording, and the surviving one-pod fan-out fits 192, so by fit two pods
+  look slower. By median per token they do not: 179 and 190 against that fan-out's 187. Replays also send no tools or seed, and they
+  stream. The fit on the two older steady replays is poor (R2 0.26-0.46), which the slowed host above would explain.
+- Parallel branches have identical prompts, so one can reuse the other's prefill: cached 912 against 768, 1056 against 912, 400 against 352.
+- Gaps are 2 ms at the median, so as P2.2b expected the gap check mostly measures timer jitter. On this trace it cannot even tell a
+  replay with no gaps from a correct one, since every recorded gap is within the tolerance of 0. Until P2.4's traces have longer
+  gaps, D9 is proven only by the fake-clock tests.
+- Two fresh-eyes reviews ran. The second's fixes were not reviewed again, by the user's choice, against `docs/REVIEW_PROMPT.md`'s
+  rule; they were checked by 24 planted bugs and the final steady replays. P2.3 went in as three commits, about 3,500 changed lines
+  against PLAN's rough limit of 200 per task.
+- What a passing `make replay-compare` means: two different replays with the plan's calls, the trace's tokens, a reply and TTFT on
+  every call, and gaps in tolerance. It does not check arrival times, prompt text or pods, so a rate or shared prefix changed in the
+  profile since the replays ran still passes: the old `all_types` 192 fan-out passes under `all_types` 0.
+- Reported, not changed: `.gitignore` is outside this card, so a leftover `.partial` file shows up as untracked. A failed call's
+  reason goes only to stdout, as trace.v1 has no field for it, so P3.4 must save stdout or change the schema to tell a 503 from a
+  timeout. A replay's file name has no profile or config hash, so P2.9's comparison needs `OUT=`. Its only position in time is
+  `ts_start`, on the wall clock. A second replay running at the same time is not refused: the output file is safe, the load doubles.
+  Whether llm-d-router releases its in-flight count when a client cancels a call at the deadline is open, for P3.4 on the cluster.
+  Progress lines are plain text rather than D12's JSON, like `make record`'s: a command's progress, not a component's log.
+  CLAUDE.md's command list lacks `make replay-compare` and `make record`. On the simulator lines have no pod until P2.7 reads
+  `x-inference-pod` in `loadgen/`, which card 30 does not list.
+- Lost files: WSL shut down at 19:57, during the first fan-out replay after the fix. Pasting that command block again, its plain
+  `mv` renamed the two finished steady replays over the original `-all-types-192` ones, which the block had moved aside on its first
+  paste. The steady files were moved back with `mv -n` and are the ones reported here; the original steady replays are gone. Their
+  numbers above come from an analysis made before that. Only the original fan-out survives, as
+  `...-steady-fan-out-1-all-types-192.jsonl`: 15 of 15 calls on one pod.
+
 ### 2026-11-02 · P2.2b · green
 Command: `make up PROFILE=real` · `make record EXPERIMENT=experiments/record-demo.yaml` · `wc -l`, a trace.v1 check with
 jsonschema, jq and `GET /runs/{id}` over the trace · `make test` · `make lint`

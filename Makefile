@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record replay experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record replay replay-compare experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -224,6 +224,13 @@ replay:
 	@if [ -z "$(TRACE)" ] || [ -z "$(PATTERN)" ]; then echo "usage: make replay TRACE=<trace.jsonl> PATTERN=<name> [PROFILE=real] [SEED=n] [OUT=file]"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
 		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED)) $(if $(OUT),--out $(OUT))
+
+# Two replays of one trace: each the pattern's plan at its seed, the same call sequence, tokens as in the trace, every gap
+# within replay.gap_tolerance_ms of the recorded one (P2.3's done-when). Reads only files, so it needs no cluster.
+replay-compare:
+	@if [ -z "$(TRACE)" ] || [ -z "$(PATTERN)" ] || [ -z "$(A)" ] || [ -z "$(B)" ]; then echo "usage: make replay-compare TRACE=<trace.jsonl> PATTERN=<name> A=<replay> B=<replay> [PROFILE=real] [SEED=n]"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.compare $(TRACE) $(PATTERN) $(A) $(B) \
+		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED))
 
 experiment:
 	@echo "not implemented yet: P2.5"; exit 1
