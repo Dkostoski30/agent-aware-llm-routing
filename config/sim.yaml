@@ -32,6 +32,59 @@ monitoring:
   # from it. 5 s: a request took 6-9 s under load (P0.4), so a queue that builds and drains within one request is
   # still seen; the Prometheus Operator default of 30 s would hide it.
   scrape_interval_seconds: 5
+# Replayer: a trace's LLM calls straight to the gateway (P2.3, docs/task-cards/26-P2.3-replayer.md).
+replay:
+  # Same as "real", so a replay's arrivals and prompts are the same on simulated pods (P2.9 compares the two).
+  # Any fixed value: the same seed gives the same runs, start times, prompts and fan-out picks. make replay SEED= picks
+  # another, and P5's repetitions use one each.
+  seed: 1
+  # How far a replay's gap may be from the recorded one. Event-loop and network jitter, not the agent: the recorded gaps
+  # are 1-21 ms with a median of 2 ms (P2.2b). A first guess with room: P2.3's replays stayed within 24 ms
+  # (experiments/log.md).
+  gap_tolerance_ms: 50
+  # How many tokens two runs have in common at the start of a prompt, from the cached_tokens of each run's first step in
+  # the P2.2b trace, a multiple of vLLM's 16-token block.
+  shared_prefix_tokens:
+    # Any two runs: none, although inside vLLM real runs of different types share their system prompt (192-256 tokens,
+    # P2.2b). The picker hashes a request's tools first, then its messages (llm-d-router v0.11.0,
+    # tokenizer/estimate.go), so in its view those runs share nothing. A replay sends no tools, so shared words at the
+    # start would send every run to one pod (P2.3: 111 of 111 calls). The cost, a stated limitation: on the first call
+    # after a pod switches type, up to 256 more uncached tokens, about 0.3 s at P2.2b's 1.19 ms per token.
+    all_types: 0
+    # Two runs of one task type: the system prompt and that type's tool schemas, the lowest cached_tokens among the
+    # first steps that followed another run of the type. A trace with another type is refused, so P2.4 adds its types
+    # with measured values.
+    by_type:
+      csv: 752
+      contracts: 736
+      support: 800
+      arithmetic: 336
+  # Each pattern: runs started, their mean rate (Poisson, so the seed gives the times), optionally bursts of runs at
+  # exact times and a fan_out. Rates are real.yaml's first guesses, for 2 real pods, not measured on this profile: a
+  # recorded run takes ~22 s of calls one at a time (P2.2b).
+  patterns:
+    # A mean of one run per 20 s, and the done-when's 20 runs. So few runs leave the seed a say: they start 27.6 s
+    # apart at seed 1 and 15.1-24.3 s at seeds 2-5, up to 1.8 times the load (P5). At seed 1 on 2 pods P2.3 measured
+    # 0.7 calls in flight on average, at most 2, and 1.5-1.7, at most 5, while the host's clock was jumping (log).
+    steady:
+      runs: 20
+      rate_per_second: 0.05
+    # The base rate alone is 40% of steady's; every 2 min 5 runs arrive at once, meant to overload 2 pods. A first
+    # guess: no replay has run this pattern yet, so the overload is not measured.
+    burst:
+      runs: 30
+      rate_per_second: 0.02
+      burst:
+        runs: 5
+        every_seconds: 120
+    # The live check of fan-out through the gateway (P2.3): half of the later steps become 2 calls with one
+    # x-parallel-group. 5 runs: a check of the headers, not a load. P3.6 adds its own burst with a fan_out.
+    steady-fan-out:
+      runs: 5
+      rate_per_second: 0.05
+      fan_out:
+        share: 0.5
+        k: 2
 # Agent runtime (P1.3a).
 agent:
   # The model calls a tool or answers in plain text, like a real agent; the runtime checks every call and retries
@@ -47,8 +100,10 @@ agent:
   # (P1.3b, experiments/log.md). P2.4 replaces it with a value per task type from recorded runs (D1); D13 updates it
   # once the scenario is picked.
   expected_steps_default: 2
-  # Bounds a stuck call, not a latency target: P0.4 measured p95 9.5 s with 4 requests in flight per replica, so a
-  # call over 120 s means the pod is not answering.
+  # Bounds a stuck call, not a latency target: P0.4 measured p95 9.5 s with 4 requests in flight per replica. Under
+  # load a call that is still answering can come close (P2.3's slowest took 106 s on a slowed host, 41 s otherwise),
+  # and the replayer holds the whole call to it, so an overloaded pod's longest calls fail first, which P3.4's and
+  # P4.4's counts must allow for.
   llm_timeout_seconds: 120
   # How long Redis keeps a run's metadata and messages (D7). 24 h covers a whole demo or experiment day, so the
   # chat's step view (P3.13) still shows the steps of that day's runs; older chats keep their answers (SQLite) but
