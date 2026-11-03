@@ -1,0 +1,73 @@
+{
+  "experiment": "baseline",
+  "hash": "2069d38644d6",
+  "profile": "real",
+  "profile_sha256": "7b7312a4932ea6dc6d2f5891ae3a269fcf1227d8a42b57809a004186339b18e6",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "warmup_ttft_ms": {
+        "vllm-6d66c79f64-ff2mq": [
+          16678,
+          339,
+          325,
+          301,
+          341
+        ],
+        "vllm-6d66c79f64-lmld5": [
+          3291,
+          394,
+          402,
+          398,
+          337
+        ]
+      },
+      "started": 1793712350.6931689,
+      "ended": 1793714618.5635843,
+      "clock_jumps": 2,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6d66c79f64-ff2mq": 154,
+        "vllm-6d66c79f64-lmld5": 155
+      },
+      "pod_switch_share": 0.7272727272727273,
+      "max_gap_deviation_ms": 2
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "warmup_ttft_ms": {
+        "vllm-7944f6446c-vcc6d": [
+          18643,
+          442,
+          426,
+          419,
+          419
+        ],
+        "vllm-7944f6446c-zxvxk": [
+          3838,
+          347,
+          365,
+          447,
+          396
+        ]
+      },
+      "started": 1793715022.8223999,
+      "ended": 1793717300.837788,
+      "clock_jumps": 33,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7944f6446c-vcc6d": 129,
+        "vllm-7944f6446c-zxvxk": 180
+      },
+      "pod_switch_share": 0.32792207792207795,
+      "max_gap_deviation_ms": 64
+    }
+  }
+}

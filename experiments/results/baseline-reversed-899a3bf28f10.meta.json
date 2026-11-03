@@ -1,0 +1,73 @@
+{
+  "experiment": "baseline-reversed",
+  "hash": "899a3bf28f10",
+  "profile": "real",
+  "profile_sha256": "7b7312a4932ea6dc6d2f5891ae3a269fcf1227d8a42b57809a004186339b18e6",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "warmup_ttft_ms": {
+        "vllm-784c9ff97b-9k9dr": [
+          17235,
+          379,
+          310,
+          355,
+          309
+        ],
+        "vllm-784c9ff97b-gmhxp": [
+          3265,
+          372,
+          297,
+          341,
+          382
+        ]
+      },
+      "started": 1793724224.3799822,
+      "ended": 1793726525.575974,
+      "clock_jumps": 70,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-784c9ff97b-gmhxp": 153,
+        "vllm-784c9ff97b-9k9dr": 156
+      },
+      "pod_switch_share": 0.288961038961039,
+      "max_gap_deviation_ms": 10
+    },
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "warmup_ttft_ms": {
+        "vllm-6b5759c649-s9qnj": [
+          17468,
+          471,
+          490,
+          348,
+          425
+        ],
+        "vllm-6b5759c649-xxfmp": [
+          3984,
+          325,
+          318,
+          343,
+          395
+        ]
+      },
+      "started": 1793726804.6467018,
+      "ended": 1793729112.3525314,
+      "clock_jumps": 70,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6b5759c649-s9qnj": 153,
+        "vllm-6b5759c649-xxfmp": 156
+      },
+      "pod_switch_share": 0.7402597402597403,
+      "max_gap_deviation_ms": 2
+    }
+  }
+}
