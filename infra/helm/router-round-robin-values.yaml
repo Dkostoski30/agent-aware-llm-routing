@@ -1,0 +1,24 @@
+# The round-robin variant of P2.5's baseline, on top of infra/helm/router-values.yaml. llm-d-router v0.11.0 has no round-robin
+# picker. With no scorers every endpoint ties and max-score-picker rotates the tied ones by a per-request counter. The
+# list it rotates comes from a Go map, so this is near round-robin: make experiment reports the share of picks that switch
+# pod (spike, docs/task-cards/28-P2.5-baseline-experiment.md). The default's metrics scrape stays, so the picker's other
+# load does not change with the variant.
+router:
+  epp:
+    pluginsConfigFile: round-robin.yaml
+    pluginsCustomConfig:
+      round-robin.yaml: |
+        apiVersion: llm-d.ai/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: metrics-data-source
+          parameters:
+            scheme: "http"
+            path: "/metrics"
+            insecureSkipVerify: true
+        - type: core-metrics-extractor
+        - type: max-score-picker
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: max-score-picker

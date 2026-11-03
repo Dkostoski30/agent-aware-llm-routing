@@ -382,20 +382,15 @@ async def _replay(
         return await replay_runs(gateway, model, plan, timeout, keep_run)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="P2.3: replay a trace through the gateway.")
-    parser.add_argument("trace", type=Path, help="a trace.v1 file, e.g. from make record")
-    parser.add_argument("pattern", help="a name in replay.patterns of the profile")
-    parser.add_argument("--profile", default="real", help="config/<profile>.yaml")
-    parser.add_argument("--seed", type=int, help="default: replay.seed of the profile")
-    parser.add_argument("--out", type=Path, help="default: experiments/results/replays/...")
-    args = parser.parse_args()
-
-    profile = yaml.safe_load((REPO_ROOT / "config" / f"{args.profile}.yaml").read_text())
+def replay_to_file(
+    profile: Mapping[str, Any], trace: Path, pattern_name: str, seed: int | None, out: Path | None
+) -> list[dict[str, Any]]:
+    """A replay of a profile's named pattern to out, by default output_path. seed None is the
+    profile's. Returns its lines, failed calls included."""
     config = load_replay_config(profile["replay"])
-    pattern = named_pattern(config, args.pattern)
-    seed = config.seed if args.seed is None else args.seed
-    out = args.out or output_path(args.trace, args.pattern, seed)
+    pattern = named_pattern(config, pattern_name)
+    seed = config.seed if seed is None else seed
+    out = out or output_path(trace, pattern_name, seed)
     if out.exists():
         raise ReplayError(f"{out} exists: delete it, or name another file with OUT=")
     partial = out.with_name(f"{out.name}.partial")
@@ -409,7 +404,7 @@ def main() -> None:
     lines = asyncio.run(
         _replay(
             served_model(profile["model"]),
-            load_trace(args.trace),
+            load_trace(trace),
             pattern,
             config.shared_prefix,
             seed,
@@ -421,10 +416,23 @@ def main() -> None:
     check_lines(trace_validator(), lines)
     write_trace(out, lines)
     partial.unlink()
-    failed = failed_calls(lines)
-    print(f"replay: {len(lines)} calls, {failed} failed")
+    print(f"replay: {len(lines)} calls, {failed_calls(lines)} failed")
     print(f"replay: wrote {out}")
-    if failed:
+    return lines
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="P2.3: replay a trace through the gateway.")
+    parser.add_argument("trace", type=Path, help="a trace.v1 file, e.g. from make record")
+    parser.add_argument("pattern", help="a name in replay.patterns of the profile")
+    parser.add_argument("--profile", default="real", help="config/<profile>.yaml")
+    parser.add_argument("--seed", type=int, help="default: replay.seed of the profile")
+    parser.add_argument("--out", type=Path, help="default: experiments/results/replays/...")
+    args = parser.parse_args()
+
+    profile = yaml.safe_load((REPO_ROOT / "config" / f"{args.profile}.yaml").read_text())
+    lines = replay_to_file(profile, args.trace, args.pattern, args.seed, args.out)
+    if failed_calls(lines):
         raise SystemExit(1)
 
 
