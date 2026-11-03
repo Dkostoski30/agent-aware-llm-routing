@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record replay replay-compare experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -216,6 +216,14 @@ smoke:
 record:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make record EXPERIMENT=experiments/record-demo.yaml"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.record $(EXPERIMENT)
+
+# A published dataset's agent runs as one trace.v1 line per LLM call in experiments/results/traces/, fitted into the
+# model's context (P2.4). Downloads to ~/.cache/thesis/ once. Needs make up with the experiment's profile, since vLLM's
+# /tokenize counts the tokens; nothing else should use the pods meanwhile. An existing trace is refused. It prints the
+# values the profiles must hold, and a test fails until they do.
+convert:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make convert EXPERIMENT=experiments/convert-apb.yaml"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.convert $(EXPERIMENT)
 
 # A trace's LLM calls straight to the gateway, one trace.v1 line per call in experiments/results/replays/, with the
 # runs arriving by a pattern in config/$(PROFILE).yaml, replay.patterns (P2.3). Needs make up with that profile. An
