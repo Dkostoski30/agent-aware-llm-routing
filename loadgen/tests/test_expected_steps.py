@@ -1,19 +1,15 @@
-"""expected_steps per task type (P2.4, D1): the rule on known runs."""
+"""expected_steps per task type (P2.4, D1): the rule on known runs and what the profiles hold."""
 
 from pathlib import Path
 
 import pytest
+import yaml
 from load_generator.expected_steps import expected_steps
 from load_generator.plan import load_trace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RECORDED_TRACE = (
-    REPO_ROOT
-    / "experiments"
-    / "results"
-    / "traces"
-    / "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
-)
+TRACES = REPO_ROOT / "experiments" / "results" / "traces"
+RECORDED_TRACE = TRACES / "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
 
 
 @pytest.mark.parametrize(
@@ -47,3 +43,16 @@ def test_the_recorded_demo_runs_give_these_values() -> None:
     arithmetic all 2."""
     runs = [(run.task_type, len(run.calls)) for run in load_trace(RECORDED_TRACE)]
     assert expected_steps(runs) == {"csv": 2, "contracts": 3, "support": 3, "arithmetic": 2}
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+def test_the_profiles_hold_the_medians_of_the_committed_traces(profile: str) -> None:
+    """make convert prints these values and they are pasted, since rewriting a profile with PyYAML
+    would lose its comments. So a trace added without its values fails here (D1, D11)."""
+    runs = [
+        (run.task_type, len(run.calls))
+        for trace in sorted(TRACES.glob("*.jsonl"))
+        for run in load_trace(trace)
+    ]
+    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["agent"]
+    assert section["expected_steps_by_type"] == expected_steps(runs)

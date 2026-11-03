@@ -1,0 +1,81 @@
+{
+  "dataset_revision": "cd81f326aece8b0a3f6359e20df370690d3a98bf",
+  "model": {
+    "name": "Qwen/Qwen3-0.6B-GPTQ-Int8",
+    "revision": "d3f20e7e71825fe57ad32705b396e9e156279107",
+    "served_as": "thesis-5554fcf81b09"
+  },
+  "max_model_len": 4096,
+  "keep_share": 0.9,
+  "max_reply_tokens": 265,
+  "gap_trace": "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl",
+  "gap_ms": 2,
+  "task_types": {
+    "hotpotqa": {
+      "factor": 0.716,
+      "largest_kept_size": 5719,
+      "runs_in": 250,
+      "too_large": 25,
+      "long_reply": 5,
+      "runs": 220,
+      "calls": 545,
+      "expected_steps": 2,
+      "shared_prefix_tokens": 199
+    },
+    "gaia_dev": {
+      "factor": 0.262,
+      "largest_kept_size": 15648,
+      "runs_in": 250,
+      "too_large": 25,
+      "long_reply": 8,
+      "runs": 217,
+      "calls": 1092,
+      "expected_steps": 4,
+      "shared_prefix_tokens": 190
+    },
+    "tau2_airline": {
+      "factor": 0.352,
+      "largest_kept_size": 11648,
+      "runs_in": 85,
+      "too_large": 8,
+      "long_reply": 4,
+      "runs": 73,
+      "calls": 713,
+      "expected_steps": 9,
+      "shared_prefix_tokens": 1649
+    },
+    "tau2_retail": {
+      "factor": 0.358,
+      "largest_kept_size": 11445,
+      "runs_in": 85,
+      "too_large": 8,
+      "long_reply": 2,
+      "runs": 75,
+      "calls": 817,
+      "expected_steps": 10,
+      "shared_prefix_tokens": 1628
+    },
+    "tau2_telecom": {
+      "factor": 0.282,
+      "largest_kept_size": 14520,
+      "runs_in": 80,
+      "too_large": 8,
+      "long_reply": 0,
+      "runs": 72,
+      "calls": 919,
+      "expected_steps": 12,
+      "shared_prefix_tokens": 1887
+    },
+    "bfcl": {
+      "factor": 0.476,
+      "largest_kept_size": 8606,
+      "runs_in": 250,
+      "too_large": 25,
+      "long_reply": 3,
+      "runs": 222,
+      "calls": 2232,
+      "expected_steps": 9,
+      "shared_prefix_tokens": 227
+    }
+  }
+}

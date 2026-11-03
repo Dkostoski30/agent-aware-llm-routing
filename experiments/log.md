@@ -13,6 +13,99 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-03 · P2.4 · green
+Command: the spike (read-only, findings in `docs/task-cards/27-P2.4-agentprocessbench.md`) · `make convert EXPERIMENT=experiments/convert-apb.yaml` ·
+`make replay TRACE=<converted> PATTERN=steady-long SEED=6` · `make test` · `make lint`
+Result:
+- Trace: `experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl`, with `.meta.json` beside it. 879 of AgentProcessBench's 1,000
+  runs, 6,318 of its 8,259 calls, all valid trace.v1, largest call 4,095 of 4,096 tokens, no prompt shrinks, every later gap 2 ms, median 6 calls per run, 513
+  runs of 5 or more, 257 of 10 or more, longest 37. Dropped 99 runs as too large and 22 for a long reply:
+  | task_type | factor | runs kept of | too large | long reply | calls | median first prompt | median last prompt | expected_steps | shared prefix |
+  |---|---|---|---|---|---|---|---|---|---|
+  | hotpotqa | 0.716 | 220 of 250 | 25 | 5 | 545 | 221 | 1,184 | 2 | 199 |
+  | gaia_dev | 0.262 | 217 of 250 | 25 | 8 | 1,092 | 208 | 1,045 | 4 | 190 |
+  | tau2_airline | 0.352 | 73 of 85 | 8 | 4 | 713 | 1,673 | 2,604 | 9 | 1,649 |
+  | tau2_retail | 0.358 | 75 of 85 | 8 | 2 | 817 | 1,657 | 2,937 | 10 | 1,628 |
+  | tau2_telecom | 0.282 | 72 of 80 | 8 | 0 | 919 | 1,906 | 2,592 | 12 | 1,887 |
+  | bfcl | 0.476 | 222 of 250 | 25 | 3 | 2,232 | 2,945 | 3,331 | 9 | 227 |
+- expected_steps of the P2.2b trace: csv 2, contracts 3, support 3, arithmetic 2. The dataset's medians of all runs and of the runs labelled good
+  differ by at most 1 step. The medians rest on few independent runs: about 200 distinct tasks with 5 samples each, about 17 distinct demo runs.
+- Replay at seed 6 on the real profile (`...ca5fc26bbb1d-cd81f326aece-steady-long-6.jsonl`): 153 calls, 0 failed, every call's tokens as planned, 17.4 min, no clock
+  jumps (the journal's last was 12:27:45, the replay ran 12:32-12:49), no `.partial` left. Duration p50 5.4 s, p95 46.7 s, slowest 87.0 s against the 120 s
+  deadline, a first call with a 199-token reply. TTFT p50 0.65 s, p95 18.2 s, max 53.4 s. 237 ms per generated token, median. Cached share 0.759. Calls in flight
+  on the monotonic rebuild: mean 1.68, at most 5. vLLM's own counters over the window agree: 304,112 prompt tokens, 230,944 cached, 77 and 76 requests per pod.
+  Largest gap deviation 65 ms, over `replay.gap_tolerance_ms`'s 50: two calls of bfcl-624-13 at 40 and 65 ms, every other within 24, p95 2. `make replay-compare`
+  is not in this card's done-when, but it would refuse this file, so P2.5 should look at the tolerance under this load.
+- `make test` and `make lint` passed on the user's run; root 1063 passed, 0 skipped, on Claude's. 80 of 83 bugs planted one at a time were caught, on a copy; the 3 left
+  give the same output on this dataset (the clamp below put back, reading with `splitlines`, the greeting matched only at position 1).
+Notes:
+- **The first conversion counted bfcl wrongly, and the tests could not see it; a fresh-eyes review did.** bfcl's tool definitions have another shape than the other
+  subsets', which the converter took as needing wrapping. In fact its system message already lists every tool, in 250 of 250 runs and in no other subset, so passing them
+  counted each tool twice: 6,986 tokens against 4,003 at bfcl-500's first prompt. Also, all 1,105 mid-run system messages are bfcl's `<state_info>` snapshots, and
+  246 of its 250 runs end on one, so they look like the benchmark's record and not something the model read: inferred from the data, not stated by the dataset. Both
+  are out, decided with the user. So bfcl's factor went 0.271 -> 0.476, expected_steps 10 -> 9, shared prefix 129 -> 227, 225 -> 222 runs, reply p50 8 -> 14. The other
+  five types did not change. The first trace is in `~/.cache/thesis/agentprocessbench/superseded/`, not in git; its replay, `...79f134ab29df-cd81f326aece-steady-long-6.jsonl`,
+  stays as the "before". The rule that a prompt takes the length of the one before it if it would shrink is gone too: it changed nothing in the trace, and a test now
+  checks the committed trace instead.
+- **What dropping costs: the long runs.** Runs are dropped by size, and the largest are mostly the longest. The user chose to keep 0.9 and state this:
+  | | runs | calls | runs of 15+ calls | of 30+ calls | longest | gaia_dev's factor |
+  |---|---|---|---|---|---|---|
+  | dataset | 1,000 | 8,259 | 116 | 30 | 94 | |
+  | this trace, keep_share 0.9 | 879 | 6,318 | 66 | 8 | 37 | 0.262 |
+  | not built, 0.95 | 936 | 7,139 | 85 | 16 | 56 | 0.144 |
+  | not built, 0.98 | 973 | 7,820 | 104 | 24 | 89 | 0.111 |
+  The card's goal was long runs, and P3.8's and P4.1's "close to finishing" should be read with this in mind. Taken literally, 1,431 of 8,259 calls and 314 whole
+  runs fit 4096 (28 of 5+ calls, none of tau2's or bfcl's), so scaling stays the choice.
+- **What scaling keeps, exactly.** A call's prompt:reply ratio, a run's steps and the shape of its growth. Not the uncached tokens per reply token, which rise (by up to
+  29% by type, on the first trace's counts), since the chat template's 9 tokens and the block remainder do not scale.
+- **The default picker splits runs under concurrent load, which P2.2b could not show one run at a time.** 9 of the 19 runs with more than one call used both pods, and 41 of
+  the 133 later steps moved. A step that stayed cached 0.927 of its prompt and one that moved 0.548. P3.3 has something to beat. tau2_airline and bfcl have 33 of the 41
+  moves. Time to first token by what the step's pod was doing when it arrived:
+  | step | pod | pod idle: calls, p50 | pod busy: calls, p50, max |
+  |---|---|---|---|
+  | stayed | h7xzw | 25, 0.50 s | 22, 0.90 s, 49.9 s |
+  | stayed | s67zx | 34, 0.54 s | 11, 1.00 s, 30.0 s |
+  | moved | h7xzw | 12, 0.53 s | 9, 3.12 s, 53.4 s |
+  | moved | s67zx | 12, 0.62 s | 8, 5.33 s, 18.6 s |
+- **But most of that difference goes with the pod's KV limit, not with the move, so it does not answer P2.2b's risk that cache hits save little time.** Splitting calls by
+  the tokens on their pod up to their first token (their own plus every overlapping call's) against 274 x 16 = 4,384 tokens per pod, in both replays:
+  | | first trace, pods 10 h old | this replay, new pods |
+  |---|---|---|
+  | under the limit, moved | 0.46 s, n=13 | 0.58 s, n=28 |
+  | under the limit, stayed | 0.43 s, n=99 | 0.59 s, n=81 |
+  | over the limit, moved | 21.9 s, n=16 | 6.24 s, n=13 |
+  | over the limit, stayed | 4.26 s, n=7 | 4.40 s, n=11 |
+  Under the limit a move costs almost nothing visible, although its median uncached tokens are 424 against 68. That supports the risk rather than answering it. Over the
+  limit calls are far slower either way, and moved against stayed swings from 5x to 1.4x on too few calls to say. The split is an estimate from the replay file, and capacity
+  is not proven as the mechanism: 8 of this replay's 11 first tokens over 10 s are over the limit, but 7 of the 25 calls over it took under 2 s, there was 1 preemption, and
+  KV usage peaked at 0.989 and 0.791 at 5 s samples (the first replay: 0 preemptions, peak 0.88). **P2.5's `make experiment` must report calls over and under the limit apart**, or P3.3
+  could read a capacity effect as a cache effect.
+- **The first call on a new pod is slow.** These pods had served 0 requests (Prometheus), since the conversion only tokenizes. The first call on each took 26.5 s and 28.7 s to
+  its first token with 1,658 and 1,906 uncached tokens, with nothing else on that pod, against 4.8 s for 2,828 uncached later in the run. The other under-limit stall over 10 s,
+  18.2 s, arrived during the second of them. Cause not measured. So a pod that is Ready is not yet fast, which P2.7/P2.8's cold start and P4.2's warm-up need, and this replay's
+  latencies cannot be compared with the first replay's, whose pods were warm. All 11 stalls fall in minutes 0-5.2 of the 17, when the most calls were in flight.
+- **For P2.7-P2.9: where a first token's time goes is not settled.** Of 445 s of TTFT in vLLM's counters, 225 s is queue time, all with reason `capacity`. Inference minus decode
+  is 199 s for 73,168 uncached tokens, 2.77 and 2.67 ms each on the two pods, so the first replay's one slow pod (6.0 against 1.03 ms) did not repeat and was no property of a pod.
+  Calls alone on both pods fit TTFT = 479 ms + 0.933 ms x uncached (n=35, r=0.66, without the two first calls), against 328 ms + 0.291 ms (n=59, r=0.63) in the first replay and
+  P2.2b's 1.19 ms. A slope that moves 3x between replays gives no prefill figure, so P2.8 has to measure one. P2.2b's fit gave 20.1 min of durations against the 29.1 measured, so
+  a simulator with only prefill and per-token time (D4) may miss P2.9's 10-15% here. Two pods share one GPU, at 3,879 of 4,096 MiB after the replay: a lead only.
+- **0.02 is not the same load as steady.** The plan said it would be, by P2.2b's fit of ~49 s a run. It measured 1.68 calls in flight against steady's 0.70, and 87 s of calls per
+  run. It finished, with the slowest call at 87 s of the 120 s deadline, but P2.5 should choose its rates from measurements, and bursts may start failing calls.
+- **For P2.5, P3, P5:** 20 of 879 runs are few. Seeds 1-12 of `steady-long` give 81-167 calls and, by P2.2b's fit, 0.48-1.88 runs at once (seed 6: 1.18 by the fit). Seed 1 draws 1 tau2
+  run of 20, a 2.4% chance: the sampling is unbiased, 5.15 of 20 on average over seeds 1-40. The done-when's seed comes from a stated rule, the first seed with 4-6 runs from each of
+  hotpotqa, gaia_dev, tau2 and bfcl: seed 6, with 6, 4, 6, 4 and a 30-call run. So it is not a random draw. Use more runs, or several seeds. The profile's default stays seed 1, which no
+  replay of this trace has run.
+- A stated limitation of the shared prefix: bfcl's 227 is the minimum over all pairs of kept runs. The median pair shares 227 and the 90th percentile 1,842, so a replay gives some pairs
+  less to share than the dataset did. tau2_telecom's runs hold tool calls on the user's side, about 1% of the tokens (factor 0.282, or 0.292
+  without them): left in, since the model reads them.
+- Later steps that stayed follow P2.3's rule, cached == floor((previous prompt - 9) / 16) * 16, on 87 of 92. 5 lost 16-704 tokens more, so a pod does evict a run's history here. P3.3's
+  check on a replay needs previous prompt - 24 (the 9 and a block's 15), not P2.2b's - 19, which holds for real agent runs.
+- The spike's numbers: it predicted 874 runs and 6,287 calls, on counts that left out 13 runs and only estimated prompts over 60k characters. Its rank was also one too high, the code's is
+  the nearest rank.
+- These breakdowns come from one-off scripts over the replay file and Prometheus, not in the repo, so they are exploratory. P2.5's `make experiment` is what regenerates numbers for the thesis.
+- For P3.8: half of a type's runs go past its median by definition, so remaining work must not go negative. Reported, not changed: CLAUDE.md's command list lacks `make convert`, `make record`
+  and `make replay-compare`.
+
 ### 2026-11-02 · P2.3 · green
 Command: `make replay TRACE=<P2.2b trace> PATTERN=steady`, twice (second with `OUT=`), first and again on the final code ·
 `make replay-compare PATTERN=steady` · `make replay ... PATTERN=steady-fan-out`, before and after the first review's fixes ·
