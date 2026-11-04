@@ -9,6 +9,7 @@ import { RunCall, RunCalls } from './run-calls';
 import { RunEvents } from './run-events';
 import {
   NO_RUN,
+  answerUnbacked,
   applyEvent,
   computedBy,
   expectedSteps,
@@ -61,6 +62,14 @@ import {
           }
           @if (view().end; as end) {
             @if (end.status === 'done') {
+              @if (unbacked()) {
+                <div class="ag-section">
+                  <div class="ag-notice ag-notice--warn">
+                    <app-icon name="warn" />
+                    <div><b>No tool result backs this answer.</b></div>
+                  </div>
+                </div>
+              }
               <app-answer [text]="end.answer">
                 {{ view().steps.length }} {{ view().steps.length === 1 ? 'step' : 'steps' }} ·
                 {{ elapsed() }}
@@ -124,6 +133,7 @@ export class RunScreen implements OnInit {
   protected readonly expected = computed(() => expectedSteps(this.view()));
   protected readonly stepInFlight = computed(() => stepInFlight(this.view()));
   protected readonly computedBy = computed(() => computedBy(this.view()));
+  protected readonly unbacked = computed(() => answerUnbacked(this.view()));
   protected readonly elapsed = computed(() => formatMs(this.view().end?.elapsed_ms ?? 0));
   // Counts the step events, not end.steps, which also counts a call that failed without an answer (card 18b).
   protected readonly caption = computed(() =>

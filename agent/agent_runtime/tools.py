@@ -143,7 +143,14 @@ def run_call(
         return documents.run_document_tool(name, arguments, texts, config)
     if name in support.TOOL_NAMES:
         return support.run_support_tool(name, arguments, tables, texts, config)
-    return run_tool(name, arguments, tables, config.max_result_rows, config.result_decimals)
+    return run_tool(
+        name,
+        arguments,
+        tables,
+        config.max_result_rows,
+        config.max_result_chars,
+        config.result_decimals,
+    )
 
 
 def run_tool(
@@ -151,6 +158,7 @@ def run_tool(
     arguments: dict[str, Any],
     tables: Mapping[str, Table],
     max_result_rows: int,
+    max_result_chars: int,
     result_decimals: int,
 ) -> dict[str, Any]:
     """Runs a call that passed check_call, to the calculator or a CSV tool (run_call sends the
@@ -170,6 +178,7 @@ def run_tool(
                 arguments["value"],
                 arguments["agg"],
                 max_result_rows,
+                max_result_chars,
                 result_decimals,
             )
         if name == COMPARE:
@@ -181,6 +190,7 @@ def run_tool(
                 arguments["left"],
                 arguments["right"],
                 max_result_rows,
+                max_result_chars,
                 result_decimals,
             )
     except ToolError as error:

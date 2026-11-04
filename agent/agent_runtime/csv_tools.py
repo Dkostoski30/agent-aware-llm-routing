@@ -1,7 +1,7 @@
 """The CSV tools of the demo (P1.6a): the run request carries the files, the model names a file by
 its ID and columns by name, Python computes (D10, D13). Files never enter the context; only the
-tool results do, capped at agent.max_result_rows rows and rounded to agent.result_decimals
-(P1.6c).
+tool results do, capped at agent.max_result_rows rows and agent.max_result_chars characters of
+group names (P2.6c), and rounded to agent.result_decimals (P1.6c).
 """
 
 import csv
@@ -231,12 +231,27 @@ def _aggregate(table: Table, by: str, value: str, agg: str) -> dict[str, float]:
     return {group: _NUMBER_AGGREGATES[agg](numbers) for group, numbers in groups.items()}
 
 
+def _fitting(groups: Sequence[str], max_rows: int, max_chars: int) -> int:
+    """How many leading groups a result lists: at most max_rows, with at most max_chars characters
+    of names in total. It stops at the first that does not fit, so "first n" stays true."""
+    total = 0
+    for count, group in enumerate(groups[:max_rows]):
+        total += len(group)
+        if total > max_chars:
+            return count
+    return min(len(groups), max_rows)
+
+
 def group_by(
-    table: Table, by: str, value: str, agg: str, max_rows: int, decimals: int
+    table: Table, by: str, value: str, agg: str, max_rows: int, max_chars: int, decimals: int
 ) -> dict[str, Any]:
     results = _aggregate(table, by, value, agg)
     # Largest first; ties by group name, so the order never depends on the file's row order.
     ordered = sorted(results.items(), key=lambda item: (-item[1], item[0]))
+    count = _fitting([group for group, _ in ordered], max_rows, max_chars)
+    # Empty rows would read as a success with nothing behind it.
+    if count == 0:
+        raise ToolError(f"the groups of {by} in {table.id} are too long to list")
     return {
         "file": table.id,
         "by": by,
@@ -244,7 +259,7 @@ def group_by(
         "agg": agg,
         "group_count": len(ordered),
         "rows": [
-            {"group": group, agg: round(result, decimals)} for group, result in ordered[:max_rows]
+            {"group": group, agg: round(result, decimals)} for group, result in ordered[:count]
         ],
     }
 
@@ -257,6 +272,7 @@ def compare(
     left: str,
     right: str,
     max_rows: int,
+    max_chars: int,
     decimals: int,
 ) -> dict[str, Any]:
     """agg of value for two groups, as the higher and the lower one, so the result does not depend
@@ -267,9 +283,12 @@ def compare(
     for group in (left, right):
         if group not in results:
             groups = sorted(results)
-            shown = ", ".join(groups[:max_rows])
-            if len(groups) > max_rows:
-                shown += f" (first {max_rows} of {len(groups)})"
+            count = _fitting(groups, max_rows, max_chars)
+            shown = ", ".join(groups[:count])
+            if count == 0:
+                shown = f"{len(groups)}, too long to list"
+            elif count < len(groups):
+                shown += f" (first {count} of {len(groups)})"
             raise ToolError(f"{group!r} is not a group of {by} in {table.id}; groups: {shown}")
     higher, lower = (right, left) if results[right] > results[left] else (left, right)
     high = round(results[higher], decimals)

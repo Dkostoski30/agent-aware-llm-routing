@@ -1,6 +1,15 @@
 import { RunCall } from './run-calls';
 import { RunEnd, RunStarted, RunStep, ToolCall } from './run-events';
-import { NO_RUN, RunView, applyEvent, formatMs, segments, shortPod, stepCards } from './run-view';
+import {
+  NO_RUN,
+  RunView,
+  answerUnbacked,
+  applyEvent,
+  formatMs,
+  segments,
+  shortPod,
+  stepCards,
+} from './run-view';
 
 const RUN: RunStarted = {
   run_id: 'run-0a1b2c3d4e5f',
@@ -249,6 +258,40 @@ describe('stepCards with call records', () => {
   it('keeps a retried step in its state with its badges', () => {
     const [card] = stepCards(view([step(1, [], { error: 'Error: answer with a call' })]), [CALL]);
     expect([card.state, card.served?.latency]).toEqual(['retried', '290 ms']);
+  });
+});
+
+describe('answerUnbacked', () => {
+  const failed: ToolCall = { name: 'compare', arguments: {}, result: { error: 'not a group' } };
+  const answer = (n: number) => step(n, [], { content: 'The row Ci9D left the highest review.' });
+
+  it('is true when every tool call failed and the model answered anyway', () => {
+    expect(answerUnbacked(view([step(1, [failed]), answer(2)]))).toBe(true);
+  });
+
+  it('is true when the call never got a result', () => {
+    const unanswered: ToolCall = { name: 'compare', arguments: 'not json', result: null };
+    expect(answerUnbacked(view([step(1, [unanswered]), answer(2)]))).toBe(true);
+  });
+
+  it('is true when the runtime rejected a call written as text and no tool ran', () => {
+    expect(
+      answerUnbacked(view([step(1, [], { error: 'Error: could not be parsed' }), answer(2)])),
+    ).toBe(true);
+  });
+
+  it('is false when one tool succeeded, even if another failed', () => {
+    const steps = [step(1, [failed]), step(2, [calc('multiply', 7, 8, 56)]), answer(3)];
+    expect(answerUnbacked(view(steps))).toBe(false);
+  });
+
+  it('is false for a reply that never tried a tool', () => {
+    expect(answerUnbacked(view([answer(1)]))).toBe(false);
+  });
+
+  it('is false for a final_answer call alone, which is how required mode replies', () => {
+    const final: ToolCall = { name: 'final_answer', arguments: { answer: 'Hi' }, result: null };
+    expect(answerUnbacked(view([step(1, [final])]))).toBe(false);
   });
 });
 

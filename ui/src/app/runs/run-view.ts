@@ -156,6 +156,16 @@ export function computedBy(view: RunView): string[] {
   return [...new Set(names)];
 }
 
+/** The run tried a tool and none gave a result, so nothing computed stands behind the answer: the model may have made
+ * it up (P2.6c). A reply that never tried a tool, such as a greeting, is not flagged. step.error counts as trying: it
+ * is how the runtime rejects a call the model wrote as text. */
+export function answerUnbacked(view: RunView): boolean {
+  const tried = view.steps.some(
+    (step) => step.error !== null || step.tool_calls.some((call) => call.name !== 'final_answer'),
+  );
+  return tried && computedBy(view).length === 0;
+}
+
 /** Under a second in ms, above in seconds with one decimal (README: Content). */
 export function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
