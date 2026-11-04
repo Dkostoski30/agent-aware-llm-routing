@@ -1,8 +1,8 @@
 import { Component, input } from '@angular/core';
-import { StepState } from '../runs/run-view';
+import { Served, StepState } from '../runs/run-view';
 
-/** One LLM call of the run, as evidence: its number, the tool the model chose and the arguments (StepCard card).
- * The pod, cache and latency tags come with the call recorder (P2.6). */
+/** One LLM call of the run, as evidence: its number, the tool the model chose, the arguments and how it was served
+ * (StepCard card). Tags in the Tag card's order: pod, cache, latency, then any event. */
 @Component({
   selector: 'app-step-card',
   template: `
@@ -17,13 +17,31 @@ import { StepState } from '../runs/run-view';
       @if (note()) {
         <div class="ag-step-note">{{ note() }}</div>
       }
-      @switch (state()) {
-        @case ('running') {
-          <div class="ag-tags"><span class="ag-tag ag-tag--muted">running</span></div>
-        }
-        @case ('retried') {
-          <div class="ag-tags"><span class="ag-tag ag-tag--retry">error</span></div>
-        }
+      @if (served() || state() === 'running' || state() === 'retried') {
+        <div class="ag-tags">
+          @if (served(); as how) {
+            @if (how.pod; as pod) {
+              <span class="ag-tag" [title]="pod.full">{{ pod.short }}</span>
+            }
+            @if (how.cache; as cache) {
+              <span
+                class="ag-tag"
+                [class]="cache.hit ? 'ag-tag--hit' : 'ag-tag--miss'"
+                [title]="cache.detail"
+                >{{ cache.text }}</span
+              >
+            }
+            <span class="ag-tag">{{ how.latency }}</span>
+          }
+          @switch (state()) {
+            @case ('running') {
+              <span class="ag-tag ag-tag--muted">running</span>
+            }
+            @case ('retried') {
+              <span class="ag-tag ag-tag--retry">error</span>
+            }
+          }
+        </div>
       }
     </div>
   `,
@@ -35,4 +53,5 @@ export class StepCard {
   readonly args = input('');
   readonly state = input.required<StepState>();
   readonly note = input<string>();
+  readonly served = input<Served>();
 }

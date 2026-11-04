@@ -578,3 +578,69 @@ def test_failed_run_ends_with_its_error() -> None:
 def test_events_of_an_unknown_run_is_404() -> None:
     response = Service([]).client.get("/runs/run-000000000000/events")
     assert response.status_code == 404
+
+
+CALLS_VALIDATOR = Draft202012Validator(
+    json.loads((Path(__file__).resolve().parents[2] / "schemas" / "run-calls.v1.json").read_text())
+)
+POD = "vllm-5c9565db76-6bq8s"
+
+
+class ServedService(Service):
+    """Every reply has the usage and the fingerprint a vLLM pod sends (P2.2a)."""
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        reply = super().handle(request)
+        served = {
+            "usage": {
+                "prompt_tokens": 398,
+                "completion_tokens": 9,
+                "prompt_tokens_details": {"cached_tokens": 352},
+            },
+            "system_fingerprint": POD,
+        }
+        return httpx.Response(reply.status_code, json={**reply.json(), **served})
+
+
+def read_calls(service: Service, run_id: str) -> list[dict[str, Any]]:
+    response = service.client.get(f"/runs/{run_id}/calls")
+    assert response.status_code == 200
+    body = response.json()
+    CALLS_VALIDATOR.validate(body)
+    assert body["run_id"] == run_id
+    calls: list[dict[str, Any]] = body["calls"]
+    return calls
+
+
+def test_calls_are_the_records_the_run_saved_in_step_order() -> None:
+    service = ServedService([calc("7*8"), text("56")])
+    run_id = service.start({"task": TASK})
+    [first, second] = read_calls(service, run_id)
+    assert [first["step"], second["step"]] == [1, 2]
+    assert (first["prompt_tokens"], first["completion_tokens"], first["cached_tokens"]) == (
+        398,
+        9,
+        352,
+    )
+    assert (first["pod"], first["expected_steps"], first["gap_before_ms"]) == (
+        POD,
+        EXPECTED_STEPS,
+        0,
+    )
+    assert [first, second] == [call.fields() for call in service.store.calls[-1]]
+
+
+def test_calls_leave_out_a_measurement_the_reply_did_not_have() -> None:
+    service = Service([text("56")])
+    [call] = read_calls(service, service.start({"task": TASK}))
+    assert set(call) == {"step", "ts_start", "duration_ms", "gap_before_ms", "expected_steps"}
+
+
+def test_calls_of_a_run_whose_first_call_got_no_reply_are_empty() -> None:
+    service = Service([], failure=httpx.Response(500, json={"error": "scripted failure"}))
+    assert read_calls(service, service.start({"task": TASK})) == []
+
+
+def test_calls_of_an_unknown_run_is_404() -> None:
+    response = Service([]).client.get("/runs/run-000000000000/calls")
+    assert response.status_code == 404

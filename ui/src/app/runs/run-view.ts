@@ -1,3 +1,4 @@
+import { RunCall } from './run-calls';
 import { RunEnd, RunEvent, RunStarted, RunStep, ToolCall } from './run-events';
 
 /** What the run screen knows about a run: its run event, the steps so far and, once it is over, its end. */
@@ -23,13 +24,22 @@ export function applyEvent(view: RunView, event: RunEvent): RunView {
 
 export type StepState = 'done' | 'running' | 'pending' | 'retried';
 
-/** The inputs of one StepCard. Pod, cache and latency come with the call recorder (P2.6). */
+/** How a step's call was served, as its badges read (Tag card). A measurement the call lacks has no badge. */
+export interface Served {
+  pod?: { short: string; full: string };
+  // hit: at least one token came from the prefix cache; text says how much of the prompt, detail the exact counts.
+  cache?: { text: string; detail: string; hit: boolean };
+  latency: string;
+}
+
+/** The inputs of one StepCard. served is absent on a step whose call record has not arrived, or that has none. */
 export interface StepCardData {
   n: number;
   tool: string;
   args: string;
   state: StepState;
   note?: string;
+  served?: Served;
 }
 
 /** x-expected-steps of the latest step, which the run tracker may update after step 1 (D13). */
@@ -42,9 +52,11 @@ export function stepInFlight(view: RunView): number {
   return (view.steps.at(-1)?.step ?? 0) + 1;
 }
 
-/** The landed steps; while the run goes, also the call in flight and dashed cards up to the estimate. */
-export function stepCards(view: RunView): StepCardData[] {
-  const cards = view.steps.map(landedCard);
+/** The landed steps, each with its call record if calls has one; while the run goes, also the call in flight and
+ * dashed cards up to the estimate. */
+export function stepCards(view: RunView, calls: RunCall[] = []): StepCardData[] {
+  const callOfStep = new Map(calls.map((call) => [call.step, call]));
+  const cards = view.steps.map((step) => landedCard(step, callOfStep.get(step.step)));
   if (view.end) return cards;
   const running = stepInFlight(view);
   cards.push({ n: running, tool: 'Waiting for the model', args: '', state: 'running' });
@@ -54,17 +66,49 @@ export function stepCards(view: RunView): StepCardData[] {
   return cards;
 }
 
-function landedCard(step: RunStep): StepCardData {
+function landedCard(step: RunStep, call: RunCall | undefined): StepCardData {
   const card: StepCardData = {
     n: step.step,
     tool: toolLabel(step.tool_calls),
-    args: step.tool_calls.map((call) => argsText(call.arguments)).join(', '),
+    args: step.tool_calls.map((toolCall) => argsText(toolCall.arguments)).join(', '),
     state: 'done',
+    served: call && served(call),
   };
   // The runtime sent an error back to the model: an invalid call or a tool's error on the data (in a result; the
   // event does not tell the two apart), or a rejected text reply (on the step).
   const note = step.error ?? step.tool_calls.map(resultError).find((error) => error !== undefined);
   return note === undefined ? card : { ...card, state: 'retried', note };
+}
+
+function served(call: RunCall): Served {
+  return {
+    pod: call.pod ? { short: shortPod(call.pod), full: call.pod } : undefined,
+    cache: cacheBadge(call),
+    latency: formatMs(call.duration_ms),
+  };
+}
+
+function cacheBadge({ prompt_tokens: prompt, cached_tokens: cached }: RunCall): Served['cache'] {
+  if (prompt === undefined || cached === undefined) return undefined;
+  // The schema can't rule out all of these and the agent only checks types (card 24): no percent for them.
+  if (prompt <= 0 || cached < 0 || cached > prompt) return undefined;
+  // Down, so 100% means every token was cached: vLLM leaves a part-filled block uncached, so 99.6% is not.
+  const percent = Math.floor((100 * cached) / prompt);
+  return {
+    text: `${percent}% cached`,
+    detail: `${cached.toLocaleString('en')} of ${prompt.toLocaleString('en')} prompt tokens cached`,
+    hit: cached > 0,
+  };
+}
+
+// <Deployment>-<ReplicaSet hash>-<pod suffix>, as Kubernetes names a Deployment's pods. The suffix has 5 characters.
+// The hashes here have 9 or 10; 5 as the lower bound is this project's choice, so a word such as the d of llm-d-6bq8s
+// is not taken for a hash. The shape can match other workloads' names: recheck when P2.7 names the simulator's pods.
+const DEPLOYMENT_POD = /^(.+)-[a-z0-9]{5,10}-([a-z0-9]{5})$/;
+
+/** The pod's name without its ReplicaSet hash, which only separates rollouts: vllm-5c9565db76-6bq8s is vllm-6bq8s. */
+export function shortPod(name: string): string {
+  return name.replace(DEPLOYMENT_POD, '$1-$2');
 }
 
 function toolLabel(calls: ToolCall[]): string {

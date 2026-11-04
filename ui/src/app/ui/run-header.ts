@@ -4,7 +4,7 @@ import { Status } from './status';
 
 /** The task as a heading, then where the run is (RunHeader card). Running reads "Step 3 · 5 expected": expected
  * is x-expected-steps, an estimate, so the wording never promises it. The task type comes with the scenario step
- * (P4.8), the Answer/Steps tabs with the step table (P2.6). */
+ * (P4.8). The Answer/Steps tabs have no task, at most Phase 6 polish (card 29). */
 @Component({
   selector: 'app-run-header',
   imports: [Horse, Status],

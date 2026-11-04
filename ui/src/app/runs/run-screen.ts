@@ -1,9 +1,11 @@
 import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subject, catchError, of, switchMap } from 'rxjs';
 import { Answer } from '../ui/answer';
 import { Icon } from '../ui/icon';
 import { RunHeader } from '../ui/run-header';
 import { StepCard } from '../ui/step-card';
+import { RunCall, RunCalls } from './run-calls';
 import { RunEvents } from './run-events';
 import {
   NO_RUN,
@@ -46,9 +48,15 @@ import {
                     [args]="card.args"
                     [state]="card.state"
                     [note]="card.note"
+                    [served]="card.served"
                   />
                 }
               </div>
+              @if (callsLost()) {
+                <div class="ag-step-note ag-calls-lost">
+                  Pod, cache and duration could not be read.
+                </div>
+              }
             </div>
           }
           @if (view().end; as end) {
@@ -88,18 +96,30 @@ import {
       </div>
     </div>
   `,
-  styles: ':host { display: contents; }',
+  styles: `
+    :host {
+      display: contents;
+    }
+    .ag-calls-lost {
+      margin-top: var(--space-2);
+    }
+  `,
 })
 export class RunScreen implements OnInit {
   // Bound from the route's :id (withComponentInputBinding in app.config.ts).
   readonly id = input.required<string>();
   private readonly events = inject(RunEvents);
+  private readonly runCalls = inject(RunCalls);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly stepLanded = new Subject<void>();
   protected readonly view = signal(NO_RUN);
   // The stream failed for good (unknown or expired run, agent unreachable).
   protected readonly lost = signal(false);
+  private readonly calls = signal<RunCall[]>([]);
+  // The last request for the calls failed; the cards keep the badges of the last answer.
+  protected readonly callsLost = signal(false);
 
-  protected readonly cards = computed(() => stepCards(this.view()));
+  protected readonly cards = computed(() => stepCards(this.view(), this.calls()));
   protected readonly segments = computed(() => segments(this.view()));
   protected readonly expected = computed(() => expectedSteps(this.view()));
   protected readonly stepInFlight = computed(() => stepInFlight(this.view()));
@@ -114,11 +134,25 @@ export class RunScreen implements OnInit {
 
   // The id input is set before ngOnInit, not in the constructor.
   ngOnInit(): void {
+    // Every answer holds all the calls so far, so a newer step replaces a request still waiting (switchMap), and the
+    // next answer makes up for a failed one.
+    this.stepLanded
+      .pipe(
+        switchMap(() => this.runCalls.read(this.id()).pipe(catchError(() => of(undefined)))),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((calls) => {
+        this.callsLost.set(calls === undefined);
+        if (calls !== undefined) this.calls.set(calls);
+      });
     this.events
       .watch(this.id())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (event) => this.view.update((view) => applyEvent(view, event)),
+        next: (event) => {
+          this.view.update((view) => applyEvent(view, event));
+          if (event.kind === 'step') this.stepLanded.next();
+        },
         error: () => this.lost.set(true),
       });
   }

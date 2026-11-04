@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = SCHEMAS_DIR / "examples"
-SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1", "run-events.v1"]
+SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1", "run-events.v1", "run-calls.v1"]
 REMOVE = object()
 
 
@@ -276,3 +276,57 @@ def test_run_and_end_event_rules(
 ) -> None:
     changed = with_change(event, field, value)
     assert validator_for("run-events.v1").is_valid(changed) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("calls", [], True),
+        ("run_id", REMOVE, False),
+        ("calls", REMOVE, False),
+        ("run_id", "", False),
+        ("calls", {}, False),
+        ("pod", "vllm-0", False),
+    ],
+)
+def test_run_calls_rules(field: str, value: object, accepted: bool) -> None:
+    body = with_change(valid_example("run-calls.v1"), field, value)
+    assert validator_for("run-calls.v1").is_valid(body) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("prompt_tokens", REMOVE, True),
+        ("completion_tokens", REMOVE, True),
+        ("cached_tokens", REMOVE, True),
+        ("pod", REMOVE, True),
+        ("cached_tokens", 0, True),
+        ("completion_tokens", 0, True),
+        ("gap_before_ms", 0, True),
+        ("duration_ms", 0, True),
+        ("step", REMOVE, False),
+        ("ts_start", REMOVE, False),
+        ("duration_ms", REMOVE, False),
+        ("gap_before_ms", REMOVE, False),
+        ("expected_steps", REMOVE, False),
+        ("step", 0, False),
+        ("step", "1", False),
+        ("expected_steps", 0, False),
+        ("duration_ms", -1, False),
+        ("duration_ms", 1.5, False),
+        ("gap_before_ms", -1, False),
+        ("ts_start", -1, False),
+        ("prompt_tokens", 0, False),
+        ("completion_tokens", -1, False),
+        ("cached_tokens", -1, False),
+        ("cached_tokens", None, False),
+        ("pod", "", False),
+        ("pod", None, False),
+        ("latency_ms", 10, False),
+    ],
+)
+def test_run_calls_call_rules(field: str, value: object, accepted: bool) -> None:
+    body = valid_example("run-calls.v1")
+    body["calls"] = [with_change(body["calls"][0], field, value)]
+    assert validator_for("run-calls.v1").is_valid(body) is accepted
