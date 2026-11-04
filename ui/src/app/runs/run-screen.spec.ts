@@ -151,6 +151,18 @@ describe('RunScreen', () => {
     expect(text('.ag-answer-foot')).toBe('2 steps · 2.1 s');
   });
 
+  it('keeps a tool error whole on hover, since the card shows only its first lines', async () => {
+    const error = `'photos' is not a group of id in reviews; groups: ${'a'.repeat(68)}`;
+    await send({ kind: 'run', data: RUN });
+    await send({
+      kind: 'step',
+      data: { ...STEP_1, tool_calls: [{ name: 'compare', arguments: {}, result: { error } }] },
+    });
+    const note = page.querySelector<HTMLElement>('.ag-step-note');
+    expect(note?.textContent?.trim()).toBe(error);
+    expect(note?.title).toBe(error);
+  });
+
   it('shows no warning on an answer a tool result backs', async () => {
     await send({ kind: 'run', data: RUN });
     await send({ kind: 'step', data: STEP_1 });

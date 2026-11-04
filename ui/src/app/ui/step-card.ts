@@ -15,7 +15,7 @@ import { Served, StepState } from '../runs/run-view';
         <div class="ag-step-args">{{ args() }}</div>
       }
       @if (note()) {
-        <div class="ag-step-note">{{ note() }}</div>
+        <div class="ag-step-note" [title]="note()">{{ note() }}</div>
       }
       @if (served() || state() === 'running' || state() === 'retried') {
         <div class="ag-tags">
@@ -45,7 +45,20 @@ import { Served, StepState } from '../runs/run-view';
       }
     </div>
   `,
-  styles: ':host { display: contents; }',
+  // A tool's error can quote the values of an attached file: a long ID has no space to wrap at, and a long note would
+  // stretch its whole row of cards, so it breaks anywhere and stops at 4 lines. The title holds the whole note.
+  styles: `
+    :host {
+      display: contents;
+    }
+    .ag-step-note {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 4;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+    }
+  `,
 })
 export class StepCard {
   readonly n = input.required<number>();
