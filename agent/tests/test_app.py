@@ -93,6 +93,11 @@ class MemoryStore:
         found = [save for save in self.saves if save[0].run_id == run_id]
         return found[-1] if found else None
 
+    async def get_calls(self, run_id: str) -> list[dict[str, Any]]:
+        saved = zip(self.saves, self.calls, strict=True)
+        found = [calls for save, calls in saved if save[0].run_id == run_id]
+        return [call.fields() for call in found[-1]] if found else []
+
 
 class Service:
     """The app with a scripted LLM (or one failure for every call) and a MemoryStore."""
