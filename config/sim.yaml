@@ -159,6 +159,11 @@ agent:
   # max_model_len beside the prompt and the tool schemas (D13: only tool results enter the context). csv_summary
   # applies it to the columns it lists, one result row per column.
   max_result_rows: 20
+  # Bounds the group names group_by and compare's error list, which a row count does not (P2.6c): 20 IDs of 68 random
+  # characters took ~1,000 tokens in run-e3ed93177366, ~1.4 characters per token, not the ~20 tokens a row above.
+  # 560 is ~400 tokens at that rate, the same budget. It changes nothing the adapter was trained on: the longest
+  # list in the 10,000 group_by results of the P1.7 data is 35 characters.
+  max_result_chars: 560
   # CSV tool results are rounded to this many decimals before they enter the context: the model copies numbers as
   # it sees them (P1.6b: "17.833333333333332"). 2 keeps money exact and means readable; the rounding error of 0.005
   # stays inside the go/no-go's 1% tolerance for any value from 0.5 up.

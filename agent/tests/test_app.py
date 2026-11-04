@@ -50,6 +50,7 @@ def make_config() -> AgentConfig:
         max_file_bytes=MAX_FILE_BYTES,
         max_files=2,
         max_result_rows=20,
+        max_result_chars=560,
         result_decimals=2,
         max_clause_chars=1600,
         max_diff_changes=20,
