@@ -34,6 +34,7 @@ from agent_runtime.tools import (
 
 SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 MAX_ROWS = 20
+MAX_CHARS = 560
 DECIMALS = 2
 
 
@@ -161,7 +162,7 @@ def test_csv_summary_rounds_to_decimals() -> None:
     ],
 )
 def test_group_by(by: str, value: str, agg: str, rows: list[tuple[str, float]]) -> None:
-    assert group_by(sales(), by, value, agg, MAX_ROWS, DECIMALS) == {
+    assert group_by(sales(), by, value, agg, MAX_ROWS, MAX_CHARS, DECIMALS) == {
         "file": "sales",
         "by": by,
         "value": value,
@@ -172,14 +173,74 @@ def test_group_by(by: str, value: str, agg: str, rows: list[tuple[str, float]]) 
 
 
 def test_group_by_shows_at_most_max_rows_groups() -> None:
-    result = group_by(sales(), "region", "revenue", "sum", 2, DECIMALS)
+    result = group_by(sales(), "region", "revenue", "sum", 2, MAX_CHARS, DECIMALS)
     assert result["group_count"] == 3
     assert result["rows"] == [{"group": "South", "sum": 380.0}, {"group": "North", "sum": 350.5}]
 
 
+# Three groups with 68-character names, like the IDs of run-e3ed93177366.
+LONG_A, LONG_B, LONG_C = "a" * 68, "b" * 68, "c" * 68
+
+
+def long_ids() -> Table:
+    # c has the largest score and a the smallest, so by value the order is the reverse of by name.
+    content = f"id,score\n{LONG_A},1\n{LONG_B},2\n{LONG_C},3\n"
+    return parse_file("reviews", "reviews.csv", content)
+
+
+def test_group_by_stops_at_max_chars_and_still_counts_every_group() -> None:
+    result = group_by(long_ids(), "id", "score", "sum", MAX_ROWS, 2 * 68, DECIMALS)
+    assert result["group_count"] == 3
+    assert result["rows"] == [{"group": LONG_C, "sum": 3.0}, {"group": LONG_B, "sum": 2.0}]
+
+
+def test_group_by_keeps_a_group_that_ends_exactly_at_max_chars() -> None:
+    assert len(group_by(long_ids(), "id", "score", "sum", MAX_ROWS, 3 * 68, DECIMALS)["rows"]) == 3
+    assert (
+        len(group_by(long_ids(), "id", "score", "sum", MAX_ROWS, 3 * 68 - 1, DECIMALS)["rows"]) == 2
+    )
+
+
+def test_group_by_stops_at_the_first_group_that_does_not_fit() -> None:
+    """A shorter group after it stays out: the rows are the largest first, with none skipped."""
+    content = f"id,score\nbig,3\n{LONG_A},2\nsmall,1\n"
+    table = parse_file("reviews", "reviews.csv", content)
+    result = group_by(table, "id", "score", "sum", MAX_ROWS, 60, DECIMALS)
+    assert result["rows"] == [{"group": "big", "sum": 3.0}]
+
+
+def test_group_by_with_no_group_that_fits_is_a_tool_error() -> None:
+    """An empty result would read as a success with nothing behind it."""
+    with pytest.raises(ToolError, match="groups of id in reviews are too long to list"):
+        group_by(long_ids(), "id", "score", "sum", MAX_ROWS, 67, DECIMALS)
+
+
+def test_compare_error_stops_listing_at_max_chars() -> None:
+    with pytest.raises(ToolError) as raised:
+        compare(long_ids(), "id", "score", "sum", "photos", "text", MAX_ROWS, 2 * 68, DECIMALS)
+    assert str(raised.value) == (
+        f"'photos' is not a group of id in reviews; groups: {LONG_A}, {LONG_B} (first 2 of 3)"
+    )
+
+
+def test_compare_error_with_no_group_that_fits_gives_only_the_count() -> None:
+    with pytest.raises(ToolError) as raised:
+        compare(long_ids(), "id", "score", "sum", "photos", "text", MAX_ROWS, 67, DECIMALS)
+    assert str(raised.value) == (
+        "'photos' is not a group of id in reviews; groups: 3, too long to list"
+    )
+
+
+def test_a_short_list_is_not_changed_by_max_chars() -> None:
+    """The lists the adapter was trained on: every name fits, so no "first n of m" appears."""
+    with pytest.raises(ToolError) as raised:
+        compare(sales(), "region", "revenue", "sum", "North", "West", MAX_ROWS, MAX_CHARS, DECIMALS)
+    assert str(raised.value).endswith("groups: East, North, South")
+
+
 def test_group_by_rounds_to_decimals() -> None:
     table = parse_file("t", "t.csv", "team,score\na,1\na,2\na,2\nb,1\n")
-    assert group_by(table, "team", "score", "mean", MAX_ROWS, DECIMALS)["rows"] == [
+    assert group_by(table, "team", "score", "mean", MAX_ROWS, MAX_CHARS, DECIMALS)["rows"] == [
         {"group": "a", "mean": 1.67},
         {"group": "b", "mean": 1.0},
     ]
@@ -187,17 +248,19 @@ def test_group_by_rounds_to_decimals() -> None:
 
 def test_row_count_includes_a_group_whose_value_cells_are_all_empty() -> None:
     table = parse_file("t", "t.csv", "team,score\na,\na,\nb,5\n")
-    assert group_by(table, "team", "score", "row_count", MAX_ROWS, DECIMALS)["rows"] == [
+    assert group_by(table, "team", "score", "row_count", MAX_ROWS, MAX_CHARS, DECIMALS)["rows"] == [
         {"group": "a", "row_count": 2},
         {"group": "b", "row_count": 1},
     ]
-    assert group_by(table, "team", "score", "sum", MAX_ROWS, DECIMALS)["rows"] == [
+    assert group_by(table, "team", "score", "sum", MAX_ROWS, MAX_CHARS, DECIMALS)["rows"] == [
         {"group": "b", "sum": 5.0}
     ]
 
 
 def test_compare() -> None:
-    result = compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS)
+    result = compare(
+        sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, MAX_CHARS, DECIMALS
+    )
     assert result == {
         "file": "sales",
         "by": "region",
@@ -215,8 +278,12 @@ def test_compare() -> None:
 
 def test_compare_does_not_depend_on_which_group_is_left() -> None:
     """P1.6b: given a signed right-minus-left difference, the model read it backwards."""
-    north_first = compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS)
-    south_first = compare(sales(), "region", "revenue", "sum", "South", "North", MAX_ROWS, DECIMALS)
+    north_first = compare(
+        sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, MAX_CHARS, DECIMALS
+    )
+    south_first = compare(
+        sales(), "region", "revenue", "sum", "South", "North", MAX_ROWS, MAX_CHARS, DECIMALS
+    )
     assert north_first == south_first
 
 
@@ -288,7 +355,7 @@ def test_compare_cases(
     percent_more: float | None,
     summary: str,
 ) -> None:
-    result = compare(scores(content), "team", "score", agg, "a", "b", MAX_ROWS, DECIMALS)
+    result = compare(scores(content), "team", "score", agg, "a", "b", MAX_ROWS, MAX_CHARS, DECIMALS)
     assert result["higher"] == {"group": higher[0], agg: higher[1]}
     assert result["lower"] == {"group": lower[0], agg: lower[1]}
     assert (result["difference"], result["percent_more"]) == (difference, percent_more)
@@ -299,33 +366,39 @@ def test_compare_cases(
     ("call", "error_parts"),
     [
         (
-            lambda t: group_by(t, "region", "product", "sum", MAX_ROWS, DECIMALS),
+            lambda t: group_by(t, "region", "product", "sum", MAX_ROWS, MAX_CHARS, DECIMALS),
             ["'product'", "text column", "units, revenue"],
         ),
         (
             lambda t: compare(
-                t, "region", "region", "row_count", "North", "South", MAX_ROWS, DECIMALS
+                t, "region", "region", "row_count", "North", "South", MAX_ROWS, MAX_CHARS, DECIMALS
             ),
             ["'region'", "text column", "units, revenue"],
         ),
         (
-            lambda t: group_by(t, "team", "revenue", "sum", MAX_ROWS, DECIMALS),
+            lambda t: group_by(t, "team", "revenue", "sum", MAX_ROWS, MAX_CHARS, DECIMALS),
             ["'team'", "not in sales", "region, product, units, revenue"],
         ),
         (
-            lambda t: group_by(t, "region", "score", "sum", MAX_ROWS, DECIMALS),
+            lambda t: group_by(t, "region", "score", "sum", MAX_ROWS, MAX_CHARS, DECIMALS),
             ["'score'", "not in sales"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "north", "South", MAX_ROWS, DECIMALS),
+            lambda t: compare(
+                t, "region", "revenue", "sum", "north", "South", MAX_ROWS, MAX_CHARS, DECIMALS
+            ),
             ["'north'", "not a group of region", "East, North, South"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "North", "West", MAX_ROWS, DECIMALS),
+            lambda t: compare(
+                t, "region", "revenue", "sum", "North", "West", MAX_ROWS, MAX_CHARS, DECIMALS
+            ),
             ["'West'", "East, North, South"],
         ),
         (
-            lambda t: compare(t, "region", "revenue", "sum", "North", "West", 2, DECIMALS),
+            lambda t: compare(
+                t, "region", "revenue", "sum", "North", "West", 2, MAX_CHARS, DECIMALS
+            ),
             ["'West'", "East, North", "first 2 of 3"],
         ),
     ],
@@ -348,7 +421,7 @@ def test_data_errors_name_what_is_allowed(call: Any, error_parts: list[str]) -> 
 
 def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
     arguments = {"file": "sales", "by": "region", "value": "product", "agg": "sum"}
-    result = run_tool(GROUP_BY, arguments, {"sales": sales()}, MAX_ROWS, DECIMALS)
+    result = run_tool(GROUP_BY, arguments, {"sales": sales()}, MAX_ROWS, MAX_CHARS, DECIMALS)
     assert list(result) == ["error"]
     assert "text column" in result["error"]
 
@@ -362,7 +435,7 @@ def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
         (
             GROUP_BY,
             {"file": "sales", "by": "region", "value": "revenue", "agg": "sum"},
-            group_by(sales(), "region", "revenue", "sum", MAX_ROWS, DECIMALS),
+            group_by(sales(), "region", "revenue", "sum", MAX_ROWS, MAX_CHARS, DECIMALS),
         ),
         (
             COMPARE,
@@ -374,7 +447,9 @@ def test_text_value_column_is_a_tool_error_not_a_crash() -> None:
                 "left": "North",
                 "right": "South",
             },
-            compare(sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, DECIMALS),
+            compare(
+                sales(), "region", "revenue", "sum", "North", "South", MAX_ROWS, MAX_CHARS, DECIMALS
+            ),
         ),
     ],
 )
@@ -383,7 +458,7 @@ def test_run_tool_runs_the_named_tool_on_the_named_file(
 ) -> None:
     other = parse_file("other", "other.csv", "region,revenue\nNorth,1\n")
     tables = {"other": other, "sales": sales()}
-    assert run_tool(name, arguments, tables, MAX_ROWS, DECIMALS) == expected
+    assert run_tool(name, arguments, tables, MAX_ROWS, MAX_CHARS, DECIMALS) == expected
 
 
 def two_tables() -> list[Table]:

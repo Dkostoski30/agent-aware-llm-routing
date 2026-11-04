@@ -29,10 +29,12 @@ class AgentConfig:
     history_ttl_seconds: int
     sampling: Sampling
     system_prompt: str
-    # Limits on the files of a run request (D13) and on the rows of a tool result (P1.6a).
+    # Limits on the files of a run request (D13) and on the rows of a tool result (P1.6a), and on
+    # the group names a CSV tool lists (P2.6c).
     max_file_bytes: int
     max_files: int
     max_result_rows: int
+    max_result_chars: int
     # Decimals the CSV tools round their numbers to (P1.6c).
     result_decimals: int
     # Bounds on what the contracts tools put into the context (P2.1a-1).
@@ -68,6 +70,7 @@ def load_config(path: Path) -> AgentConfig:
         max_file_bytes=agent["max_file_bytes"],
         max_files=agent["max_files"],
         max_result_rows=agent["max_result_rows"],
+        max_result_chars=agent["max_result_chars"],
         result_decimals=agent["result_decimals"],
         max_clause_chars=agent["max_clause_chars"],
         max_diff_changes=agent["max_diff_changes"],

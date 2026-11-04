@@ -135,6 +135,30 @@ describe('RunScreen', () => {
     expect(text('.ag-notice--fail')).toBe('The run failed. LLM call failed: HTTP 500');
   });
 
+  it('warns above an answer no tool result backs, and still shows the answer', async () => {
+    await send({ kind: 'run', data: RUN });
+    await send({
+      kind: 'step',
+      data: {
+        ...STEP_1,
+        tool_calls: [{ name: 'compare', arguments: {}, result: { error: 'not a group' } }],
+      },
+    });
+    await send({ kind: 'step', data: STEP_2 });
+    await send({ kind: 'end', data: END });
+    expect(text('.ag-notice--warn')).toBe('No tool result backs this answer.');
+    expect(text('.ag-answer p')).toBe('The result is 56.');
+    expect(text('.ag-answer-foot')).toBe('2 steps · 2.1 s');
+  });
+
+  it('shows no warning on an answer a tool result backs', async () => {
+    await send({ kind: 'run', data: RUN });
+    await send({ kind: 'step', data: STEP_1 });
+    await send({ kind: 'step', data: STEP_2 });
+    await send({ kind: 'end', data: END });
+    expect(page.querySelector('.ag-notice--warn')).toBeNull();
+  });
+
   it('says so when the run events cannot be read', async () => {
     events.error(new Error('closed'));
     await fixture.whenStable();

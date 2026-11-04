@@ -296,7 +296,7 @@ class _Context:
     tools and the scorer use."""
 
     def __init__(
-        self, file: dict[str, str], tolerance: float, max_rows: int, decimals: int
+        self, file: dict[str, str], tolerance: float, max_rows: int, max_chars: int, decimals: int
     ) -> None:
         self.file = file
         self.files = [file]
@@ -306,13 +306,19 @@ class _Context:
         self.rows = list(csv.DictReader(io.StringIO(file["content"])))
         self.tolerance = tolerance
         self.max_rows = max_rows
+        self.max_chars = max_chars
         self.decimals = decimals
         self.texts = [c for c in self.table.columns if self.table.types[c] == "text"]
         self.numbers = [c for c in self.table.columns if self.table.types[c] == "number"]
 
     def run(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         result = run_tool(
-            name, arguments, {self.file["id"]: self.table}, self.max_rows, self.decimals
+            name,
+            arguments,
+            {self.file["id"]: self.table},
+            self.max_rows,
+            self.max_chars,
+            self.decimals,
         )
         if "error" in result:
             raise ValueError(f"{self.file['id']}: planned call {name} {arguments}: {result}")
@@ -836,7 +842,7 @@ def _calculator_expression(start: float, steps: list[list[Any]]) -> str:
 
 def _calculated(arguments: dict[str, Any]) -> float:
     """The calculator's result for a planned call, as the agent's run_tool computes it."""
-    result = run_tool(CALCULATOR, arguments, {}, 0, 0)["result"]
+    result = run_tool(CALCULATOR, arguments, {}, 0, 0, 0)["result"]
     if not isinstance(result, int | float):
         raise ValueError(f"planned calculator call {arguments}: {result}")
     return result
@@ -914,8 +920,9 @@ def plan(spec: dict[str, Any], split: str, tolerance: float, config: AgentConfig
     pool = spec["pools"][split]
     files_rng = _rng(spec, split, "files")
     files = [make_file(files_rng, pool, spec["table"]) for _ in range(spec["csvs"][split])]
-    max_rows, decimals = config.max_result_rows, config.result_decimals
-    contexts = [_Context(file, tolerance, max_rows, decimals) for file in files]
+    max_rows, max_chars = config.max_result_rows, config.max_result_chars
+    decimals = config.result_decimals
+    contexts = [_Context(file, tolerance, max_rows, max_chars, decimals) for file in files]
     support_rng = _rng(spec, split, "support-files")
     supports = [
         make_support(support_rng, spec, pool["support"], config)
