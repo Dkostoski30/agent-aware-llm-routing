@@ -121,3 +121,29 @@ async def test_save_writes_the_calls_with_the_runs_ttl_in_the_same_transaction()
         "pod": "vllm-6f9c8d7b5-x2kqp",
     }
     assert (json.loads(value), ttl) == ([saved], TTL_SECONDS)
+
+
+async def test_get_calls_reads_back_what_save_wrote() -> None:
+    call = CallRecord(
+        step=2,
+        ts_start=1_793_600_000_000,
+        duration_ms=812,
+        gap_before_ms=40,
+        expected_steps=3,
+        prompt_tokens=398,
+        completion_tokens=9,
+        cached_tokens=352,
+        pod="vllm-5c9565db76-6bq8s",
+    )
+    redis = FakeRedis()
+    store = RedisStore(cast(Redis, redis), TTL_SECONDS)
+    await store.save(record(), [], [call])
+    [(_, _, commands)] = redis.sent
+    key = f"thesis:run:{RUN_ID}:calls"
+    [(_, _, value, _)] = [c for c in commands if c[:2] == ("set", key)]
+    redis.values[key] = value
+    assert await store.get_calls(RUN_ID) == [call.fields()]
+
+
+async def test_get_calls_of_a_run_with_no_calls_key_is_empty() -> None:
+    assert await RedisStore(cast(Redis, FakeRedis()), TTL_SECONDS).get_calls(RUN_ID) == []

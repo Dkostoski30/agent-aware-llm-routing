@@ -1,5 +1,5 @@
-"""The agent runtime's HTTP API: start a run, read it back, stream its events, health
-(P1.3a-2, P1.4b-1)."""
+"""The agent runtime's HTTP API: start a run, read it back, stream its events, read its call
+records, health (P1.3a-2, P1.4b-1, P2.6b)."""
 
 import asyncio
 import json
@@ -202,9 +202,17 @@ def create_app(
         }
 
     async def known_run(run_id: str) -> None:
-        """Answers 404 before the stream starts; once it has started, the status is already 200."""
+        """Answers 404 before the response starts; once a stream has started, the status is already
+        200."""
         if await store.get(run_id) is None:
             raise HTTPException(404, f"unknown run {run_id}")
+
+    @app.get("/runs/{run_id}/calls", dependencies=[Depends(known_run)])
+    async def get_calls(run_id: str) -> dict[str, Any]:
+        """schemas/run-calls.v1.json: the records of the calls so far; the UI's badges read them
+        (P2.6b). A step and its call are saved in one transaction, so a client that asks after a
+        step event gets that step's call."""
+        return {"run_id": run_id, "calls": await store.get_calls(run_id)}
 
     @app.get(
         "/runs/{run_id}/events",

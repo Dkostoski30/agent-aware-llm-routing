@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Subject } from 'rxjs';
+import { Subject, of } from 'rxjs';
+import { RunCall, RunCalls } from './run-calls';
 import { RunEnd, RunEvent, RunEvents, RunStarted, RunStep } from './run-events';
 import { RunScreen } from './run-screen';
 
@@ -59,6 +60,7 @@ describe('RunScreen', () => {
           provide: RunEvents,
           useValue: { watch: (id: string) => (watched.push(id), events.asObservable()) },
         },
+        { provide: RunCalls, useValue: { read: () => of([]) } },
       ],
     });
     fixture = TestBed.createComponent(RunScreen);
@@ -137,5 +139,166 @@ describe('RunScreen', () => {
     events.error(new Error('closed'));
     await fixture.whenStable();
     expect(text('.ag-notice--fail')).toContain('The run events could not be read.');
+  });
+});
+
+describe('RunScreen badges', () => {
+  const CALL_1: RunCall = {
+    step: 1,
+    ts_start: 1_793_600_000_000,
+    duration_ms: 812,
+    gap_before_ms: 0,
+    expected_steps: 2,
+    prompt_tokens: 398,
+    completion_tokens: 9,
+    cached_tokens: 352,
+    pod: 'vllm-5c9565db76-6bq8s',
+  };
+  const CALL_2: RunCall = { ...CALL_1, step: 2, duration_ms: 1_600, cached_tokens: 0 };
+
+  let fixture: ComponentFixture<RunScreen>;
+  let page: HTMLElement;
+  let events: Subject<RunEvent>;
+  // One per request, in order, so a test decides what each answers and when.
+  let reads: Subject<RunCall[]>[];
+  let asked: string[];
+
+  const tags = (n: number) =>
+    Array.from(page.querySelectorAll('.ag-step')[n].querySelectorAll('.ag-tag')).map((tag) =>
+      tag.textContent?.trim(),
+    );
+  const lostLine = () => page.querySelector('.ag-calls-lost')?.textContent?.trim();
+
+  async function send(event: RunEvent) {
+    events.next(event);
+    await fixture.whenStable();
+  }
+
+  async function answer(read: number, calls: RunCall[]) {
+    reads[read].next(calls);
+    reads[read].complete();
+    await fixture.whenStable();
+  }
+
+  beforeEach(async () => {
+    events = new Subject<RunEvent>();
+    reads = [];
+    asked = [];
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: RunEvents, useValue: { watch: () => events.asObservable() } },
+        {
+          provide: RunCalls,
+          useValue: {
+            read: (id: string) => {
+              asked.push(id);
+              const read = new Subject<RunCall[]>();
+              reads.push(read);
+              return read.asObservable();
+            },
+          },
+        },
+      ],
+    });
+    fixture = TestBed.createComponent(RunScreen);
+    fixture.componentRef.setInput('id', RUN.run_id);
+    page = fixture.nativeElement;
+    await fixture.whenStable();
+    await send({ kind: 'run', data: RUN });
+  });
+
+  it('does not ask before a step lands', () => {
+    expect(asked).toEqual([]);
+  });
+
+  it('shows the card first, asks for the calls of its run, then shows the badges', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    expect(asked).toEqual([RUN.run_id]);
+    expect(tags(0)).toEqual([]);
+
+    await answer(0, [CALL_1]);
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms']);
+  });
+
+  it('gives each step its own call, by step number', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await send({ kind: 'step', data: STEP_2 });
+    await answer(1, [CALL_1, CALL_2]);
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms']);
+    expect(tags(1)).toEqual(['vllm-6bq8s', '0% cached', '1.6 s']);
+  });
+
+  it('drops a request still waiting when a newer step lands', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await send({ kind: 'step', data: STEP_2 });
+    expect(reads[0].observed).toBe(false);
+    expect(reads[1].observed).toBe(true);
+  });
+
+  it('still shows the badges when the last answer comes after the end event', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await send({ kind: 'end', data: { ...END, steps: 1 } });
+    await answer(0, [CALL_1]);
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms']);
+  });
+
+  it('keeps the run on a failed request, says so, and recovers with the next answer', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    reads[0].error(new Error('502'));
+    await fixture.whenStable();
+    expect(lostLine()).toBe('Pod, cache and duration could not be read.');
+    expect(tags(0)).toEqual([]);
+    expect(page.querySelector('.ag-notice--fail')).toBeNull();
+
+    await send({ kind: 'step', data: STEP_2 });
+    await send({ kind: 'end', data: END });
+    expect(page.querySelector('.ag-answer')).not.toBeNull();
+    await answer(1, [CALL_1, CALL_2]);
+    expect(lostLine()).toBeUndefined();
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms']);
+  });
+
+  it('keeps the badges it has when a later request fails', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await answer(0, [CALL_1]);
+    await send({ kind: 'step', data: STEP_2 });
+    reads[1].error(new Error('502'));
+    await fixture.whenStable();
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms']);
+    expect(lostLine()).toBe('Pod, cache and duration could not be read.');
+  });
+
+  it('puts the error tag after the badges on a retried step', async () => {
+    const rejected: RunStep = { ...STEP_2, step: 1, error: 'Error: answer with a call' };
+    await send({ kind: 'step', data: rejected });
+    await answer(0, [CALL_1]);
+    expect(tags(0)).toEqual(['vllm-6bq8s', '88% cached', '812 ms', 'error']);
+  });
+
+  it('shows no tags row on a landed step without a record', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await answer(0, []);
+    expect(page.querySelector('.ag-step--done .ag-tags')).toBeNull();
+  });
+
+  it('hides only the badge a missing field belongs to', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await answer(0, [{ ...CALL_1, pod: undefined }]);
+    expect(tags(0)).toEqual(['88% cached', '812 ms']);
+  });
+
+  it('tints a hit, outlines a miss, and keeps the full pod name on hover', async () => {
+    await send({ kind: 'step', data: STEP_1 });
+    await send({ kind: 'step', data: STEP_2 });
+    await answer(1, [CALL_1, CALL_2]);
+    const [first, second] = Array.from(page.querySelectorAll('.ag-step')).map((card) =>
+      Array.from(card.querySelectorAll<HTMLElement>('.ag-tag')),
+    );
+    expect(first[1].className).toBe('ag-tag ag-tag--hit');
+    expect(second[1].className).toBe('ag-tag ag-tag--miss');
+    expect(first[0].title).toBe('vllm-5c9565db76-6bq8s');
+    expect(first[1].title).toBe('352 of 398 prompt tokens cached');
+    expect(first[0].className).toBe('ag-tag');
+    expect(first[2].className).toBe('ag-tag');
   });
 });
