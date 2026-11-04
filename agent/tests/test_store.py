@@ -47,6 +47,10 @@ class FakePipeline:
 class FakeRedis:
     def __init__(self) -> None:
         self.sent: list[tuple[Any, ...]] = []
+        self.values: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
 
     def pipeline(self, transaction: bool) -> FakePipeline:
         return FakePipeline(transaction, self.sent)
