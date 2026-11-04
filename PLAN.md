@@ -151,7 +151,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 | P2.3 | Routing | Trace format + replayer: arrival patterns (steady, burst), inter-call gaps (D9), fixed seed, fan-out of steps into parallel calls with one `x-parallel-group` (the P3.6 workload; decided 2026-11-01) | Replaying 20 recorded runs reproduces the same call sequence and gaps twice in a row |
 | P2.4 | Routing | AgentProcessBench converter to the trace format; `expected-steps` per task type derived from recorded runs (D1) | Converted traces pass the schema check; replayer runs them |
 | P2.5 | Routing | First baseline: round-robin vs default picker, defined as `experiments/baseline.yaml` (D11), results to CSV + graph script (matplotlib, loadgen only; decided 2026-11-01). llm-d-router v0.11.0 has no round-robin picker: the variant is `max-score-picker` with no scorers, near round-robin, with the live share of picks that switch pod reported (spike 2026-11-03, card 28) | `make experiment NAME=baseline` regenerates the CSV and graph from scratch |
-| P2.6 | UI | Angular: per-step badges (pod, cache hit, latency) | Badges match the recorder's log for the same run |
+| P2.6 | UI | Angular: per-step badges (pod, cache hit, latency). Split 2026-11-04 (card 29): P2.6a file attach in the composer, pulled forward from P3.13 since a CSV question needs a file; P2.6b the badges, read from a new `GET /runs/{id}/calls`. The step table, tabs and detail sheet have no task, at most Phase 6 polish | Badges match the recorder's log for the same run |
 | P2.7 | Autoscaling | Simulator (llm-d-inference-sim) deployed as a pool backend | Replayer runs against simulated pods through the same gateway |
 | P2.8 | Autoscaling | Calibration on the real 0.6B: TTFT and per-token time vs concurrency, cached vs uncached prefill, cold start time (D4) | Calibration table saved in `sim/`; simulator configured from it |
 | P2.9 | Autoscaling | Validation: same replay on 1 real pod vs 1 simulated pod | Error within ~10–15%, table saved; if not, recalibrate |
@@ -178,7 +178,7 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 | P3.10 | Autoscaling | Baselines: HPA on CPU, KEDA on queue depth | Both run on the same replay; results in CSV |
 | P3.11 | UI | Angular: infrastructure panel (pods, queues, remaining work) | Panel numbers match Grafana |
 | P3.12 | App | Chats, messages, attachments API; one message → one agent-runtime call with files in the request (`schemas/run-request`, D12, D13); `run_id` stored on the assistant message; steps fetched from the agent runtime by `run_id` | pytest with mocked runtime passes; run-request contract tests pass in app and agent; a real message through every layer returns an answer and its run_id; another user's chat returns 404; `make smoke` goes through the app backend |
-| P3.13 | UI | Angular: login/register, chat list, open chat with file attach; step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons in the cluster panel beside the chat, shown or hidden by a toggle (D14) | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
+| P3.13 | UI | Angular: login/register, chat list, open chat with file attach (the composer's attach exists since P2.6a and posts to the agent; here it goes through the app backend); step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons in the cluster panel beside the chat, shown or hidden by a toggle (D14) | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
 
 **Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work.
 
@@ -213,6 +213,7 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 - Mon 30.11: full draft to mentor (Checkpoint 3).
 - Fixes from mentor feedback, chapter 7, second demo rehearsal.
 - UI polish: loading, error and out-of-scope states, consistent layout. Done when the P5.4 rehearsal shows no raw errors or stuck spinners.
+- UI cohesion (the user, 2026-11-04: too much going on, not cohesive; left until now on purpose, since P3.11 and P3.13 change these screens). Look again once the chat and panel exist. The list then: one horse per page; a thin, quiet progress bar once a run ends; scenario cards with only a title and a question, no invented file names or tool tags; a shorter New task paragraph, since "fixed data" stopped being true with attach (P2.6a); fewer font switches and look-alike pills. Departures from the design system's previews get recorded under D14.
 - **Wed 9.12: mentor uploads the final text.**
 
 ### Phase 7: Procedure and defense (10–18.12)
