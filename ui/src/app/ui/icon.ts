@@ -4,6 +4,7 @@ import { Component, computed, input } from '@angular/core';
 const ICONS = {
   send: 'M8 13V3M4 7l4-4 4 4',
   plus: 'M8 3v10M3 8h10',
+  close: 'M4 4l8 8M12 4l-8 8',
   moon: 'M13 9.6A5.5 5.5 0 1 1 6.4 3a4.4 4.4 0 0 0 6.6 6.6z',
   table:
     'M3.5 3h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM2.5 6.5h11M6.5 6.5V13',
