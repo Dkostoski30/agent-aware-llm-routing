@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/run-calls.v1.json",
+  "title": "Run calls v1",
+  "description": "Body of GET /runs/{run_id}/calls on the agent runtime: the run's LLM calls that got a reply so far (D12, P2.2a, P2.6b), as the agent saved them. Field names follow trace.v1.",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "description": "Same value as the x-run-id header of the run's calls.",
+      "type": "string",
+      "minLength": 1
+    },
+    "calls": {
+      "description": "In step order. Holds every call so far, so a later answer replaces an earlier one. A call that got no reply has no entry.",
+      "type": "array",
+      "items": {
+        "description": "One call. A measurement the reply did not have is left out, so it never reads as 0.",
+        "type": "object",
+        "properties": {
+          "step": {
+            "description": "Same value as the x-step header of the call, and as step in its run-events.v1 step event.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "ts_start": {
+            "description": "When the call was sent, in milliseconds since the Unix epoch.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "gap_before_ms": {
+            "description": "From the end of the previous reply to this call's start; 0 on step 1.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "expected_steps": {
+            "description": "The x-expected-steps the call carried (D1).",
+            "type": "integer",
+            "minimum": 1
+          },
+          "prompt_tokens": {
+            "description": "At least 1: a chat prompt always holds the system prompt, so a cached share of it is defined.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "completion_tokens": { "type": "integer", "minimum": 0 },
+          "cached_tokens": {
+            "description": "How many prompt tokens came from the prefix cache; 0 on a miss.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "pod": {
+            "description": "The name of the pod that served the call.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["step", "ts_start", "duration_ms", "gap_before_ms", "expected_steps"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["run_id", "calls"],
+  "additionalProperties": false
+}

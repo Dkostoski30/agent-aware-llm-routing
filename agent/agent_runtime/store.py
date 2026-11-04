@@ -70,6 +70,10 @@ class RunStore(Protocol):
         """The run's last saved record and messages, or None if it is unknown or expired."""
         ...
 
+    async def get_calls(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's call records as saved (CallRecord.fields); empty if it has none."""
+        ...
+
 
 _INT_FIELDS = ("step", "expected_steps", "invalid_calls", "created_ms", "updated_ms")
 
@@ -123,3 +127,10 @@ class RedisStore:
         for name in _INT_FIELDS:
             values[name] = int(values[name])
         return RunRecord(**values), json.loads(messages)
+
+    async def get_calls(self, run_id: str) -> list[dict[str, Any]]:
+        calls = await self._redis.get(f"thesis:run:{run_id}:calls")
+        if calls is None:
+            return []
+        records: list[dict[str, Any]] = json.loads(calls)
+        return records
