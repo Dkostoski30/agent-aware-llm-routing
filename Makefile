@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -116,6 +116,17 @@ vllm-deploy:
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
 	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
 
+# Simulated pods in place of the vLLM ones, values rendered from config/sim.yaml (P2.7). The release has the vllm chart's
+# name, so make down removes either, and a cluster on another profile needs make down first: the two charts own the same
+# objects. Each pod is Ready after simulator.startup_duration; VLLM_DEPLOY_TIMEOUT covers that and the first image pull.
+sim-deploy:
+	@set -eu; \
+	yq -e '{"replicas": .replicas, "model": .model, "simulator": .simulator, "monitoring": .monitoring}' config/sim.yaml | \
+		helm upgrade --install vllm infra/charts/sim --values -; \
+	echo "sim-deploy: waiting for the simulated cold start"; \
+	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
+	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
+
 # chat_check.sh through the Service plus a count of which pod answered (P0.7).
 service-check:
 	bash infra/checks/service_check.sh
@@ -150,14 +161,19 @@ ui:
 
 # The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
+# PROFILE=sim deploys simulated pods and no model; it has no agent either, since nothing there can answer a tool call,
+# so make smoke is not expected to pass on it (P2.7). install-k3s.sh still sets up the GPU, which those pods don't use.
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
 	bash infra/install-monitoring.sh $(or $(PROFILE),real)
-	bash infra/download-model.sh $(or $(PROFILE),real)
-	$(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real)
+	if [ "$(PROFILE)" = sim ]; then \
+		$(MAKE) sim-deploy; \
+	else \
+		bash infra/download-model.sh $(or $(PROFILE),real) && $(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real); \
+	fi
 	bash infra/install-gateway.sh
-	bash infra/deploy-agent.sh $(or $(PROFILE),real)
+	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-agent.sh $(or $(PROFILE),real); fi
 
 # Uninstalls what make up installs and stops k3s; keeps the k3s install, its images and the model cache (P1.0).
 down:

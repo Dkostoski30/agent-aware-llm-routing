@@ -135,7 +135,8 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | Redis (image `redis`) | 8.10.2-alpine (2026-09-17, the newest release at least two weeks old on 2026-10-27; 8.10.3 was a day old), digest `sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b`, no persistence (D7). Pinned in `infra/manifests/redis.yaml` (P1.3b) |
 | Agent runtime base image (`python`) | 3.12.15-slim (2026-09-30, the newest 3.12 release at least two weeks old on 2026-10-27; 3.12.16 was two days old), digest `sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704`. The built image is ~220 MB. Pinned in `agent/Dockerfile` (P1.3b) |
 | SQLite (Python `sqlite3`, app backend) | |
-| llm-d-inference-sim | |
+| llm-d-inference-sim (image `ghcr.io/llm-d/llm-d-inference-sim`) | v1.0.0 (2026-10-15, the newest release at least two weeks old on 2026-11-05; v1.1.0 was 2 days old), digest `sha256:1908c421cbb44130a3212934a0dd1e279dacfe3480be93f4c28b45cd29b93ec8`. Pinned in `infra/charts/sim/values.yaml` (P2.7) |
+| Simulator chart | local, `infra/charts/sim` 0.1.0 (P2.7) |
 
 ## Models
 

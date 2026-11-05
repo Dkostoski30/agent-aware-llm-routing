@@ -1,0 +1,6 @@
+# Local chart for simulated pods in place of the vLLM ones (P2.7). Not published; versioned with the repo.
+apiVersion: v2
+name: sim
+description: llm-d-inference-sim replicas behind the Service the vLLM pods use, no GPU
+type: application
+version: 0.1.0

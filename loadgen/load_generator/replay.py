@@ -64,6 +64,8 @@ CHAT_PATH = "/v1/chat/completions"
 VLLM_SERVICE = "vllm"
 VLLM_PORT = 8000
 TOKENIZE_PATH = "/tokenize"
+# llm-d-inference-sim names the pod here; it has no system_fingerprint, which names a real vLLM pod.
+SIMULATED_POD_HEADER = "x-inference-pod"
 # httpx queues a request over 100 connections by default, and that wait would count as the gateway's
 # latency, so the client sets no limit: what is in flight is what the pattern asks for.
 NO_CONNECTION_LIMIT = httpx.Limits(max_connections=None, max_keepalive_connections=None)
@@ -169,9 +171,9 @@ async def _stream_reply(
     loop = asyncio.get_running_loop()
     first_token: float | None = None
     usage: Mapping[str, Any] | None = None
-    pod: str | None = None
     async with client.stream("POST", CHAT_PATH, json=body, headers=headers) as response:
         response.raise_for_status()
+        pod = response.headers.get(SIMULATED_POD_HEADER)
         async for line in _lines_of(response):
             chunk = _chunk_of(line)
             if chunk is None:
