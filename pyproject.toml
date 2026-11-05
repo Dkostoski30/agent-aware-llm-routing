@@ -35,8 +35,8 @@ package = false
 # training/ has its own environment with torch (P1.7); make test runs its tests there.
 addopts = ["--import-mode=importlib", "--strict-markers", "--ignore=training"]
 # importlib mode does not put a test's directory on sys.path; scripts tested in place and the directories that hold
-# a component's package (agent/ and loadgen/ are not installed, they have no build backend) are listed here.
-pythonpath = ["infra/checks", "agent", "experiments", "loadgen"]
+# a component's package (agent/, loadgen/ and sim/ are not installed, they have no build backend) are listed here.
+pythonpath = ["infra/checks", "agent", "experiments", "loadgen", "sim"]
 
 [tool.ruff]
 target-version = "py312"
@@ -50,5 +50,6 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Finds agent_runtime, the experiment scripts and loadgen when pre-commit passes only a test file that imports them.
-mypy_path = "agent:experiments:loadgen"
+# Finds agent_runtime, the experiment scripts, loadgen and sim's calibrator when pre-commit passes only a test file
+# that imports them.
+mypy_path = "agent:experiments:loadgen:sim"
