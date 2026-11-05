@@ -6,14 +6,48 @@ model:
   revision: d3f20e7e71825fe57ad32705b396e9e156279107
   # Same as "real".
   gpu_memory_utilization: 0.42
-  # Same as "real", so a simulated pod has the same KV-cache budget as a real one.
+  # Same as "real". The sim chart does not read it: a simulated pod's cache is simulator.kv_cache_blocks.
   kv_cache_memory_bytes: 503316480
   # Same as "real", so the same traces fit within the context limit.
   max_model_len: 4096
-  # Same as "real", so the agent sees the same tool-call format.
+  # Same as "real". The sim chart does not read it: no agent runs on this profile, and the simulator's replies
+  # carry no tool calls the replayer reads.
   tool_call_parser: hermes
 # Starts at the same size as "real"; autoscaling changes the count from here.
 replicas: 2
+# llm-d-inference-sim's behaviour (P2.7). Until P2.8's calibration table replaces them, the timings are the earlier
+# measurements each comment names, not calibrated, and P2.8 also decides what the simulator cannot express: the 26-29 s
+# first call on a pod that served nothing (P2.4) and waiting by tokens rather than by request count.
+simulator:
+  # Added once to a call's time to first token. P2.2b's fit over the recording: duration = 340 ms + 1.19 ms x uncached
+  # prompt tokens + 226.5 ms x completion tokens (experiments/log.md).
+  prefill_overhead: 340ms
+  # Per uncached prompt token, which is how a prefix-cache hit saves time (D4). The same fit; two later replays gave 0.291
+  # and 0.933 ms (P2.4), so this one is the weakest of the values here.
+  prefill_time_per_token: 1190us
+  # Per output token. P2.5's four quiet variants on 2 real pods: 143.5, 146.0, 147.7, 149.0 ms, median 146.85, rounded
+  # down; newer than the fit's 226.5, which ran on a host with a jumping clock.
+  inter_token_latency: 146ms
+  # 1.0 is no slowdown: the simulator scales the timings linearly up to this factor at max_num_seqs running. Not measured
+  # yet (P2.8).
+  time_factor_under_load: 1.0
+  # Requests a pod runs at once; the rest wait in its queue. P0.4 held 4 per replica for 10 minutes without an OOM. Real
+  # vLLM's limit is its KV cache, in tokens, not a request count.
+  max_num_seqs: 4
+  # Not the real 274 blocks (4,384 tokens): a full cache makes the simulator answer HTTP 500 where real vLLM makes the
+  # call wait, and two long prompts can fill 274. This is max_num_seqs x 256 blocks for a prompt of max_model_len, so a
+  # call never fails that way; a test fails if it gets too small. The cost, a stated limitation: 3.7x the real cache, so
+  # blocks are evicted later and hit rates can read higher than on real pods, which P2.9 measures (decided 2026-11-05).
+  kv_cache_blocks: 1024
+  # vLLM's block size, so cached_tokens moves in the same steps as on a real pod.
+  block_size: 16
+  # A pod becomes Ready this long after it starts (D4). The 0.6B's start alone with HF_HUB_OFFLINE=1, as the pods run it,
+  # in Docker (P0.3): one pod starting alone, as when autoscaling adds one. Two pods loading at once from one disk and
+  # GPU took 4.5 min in k3s (P1.0), a case the simulator cannot express, since its pods start independently. P2.8
+  # measures both on pods.
+  startup_duration: 115s
+  # Any fixed value, for the same reply words on every run; the timings above have no random part yet.
+  seed: 1
 # Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
 routing:
   # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).

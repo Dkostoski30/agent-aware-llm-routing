@@ -13,6 +13,26 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-05 · P2.7 · green (Grafana check pending)
+Command: `make test` · `make lint` · `make down` · `make up PROFILE=sim` · `kubectl get pods -l app.kubernetes.io/name=vllm` · `make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady PROFILE=sim OUT=experiments/results/replays/sim-steady-1.jsonl` · a `jq` count of its lines · `kubectl logs deployment/inference-gateway --tail=5` · `kubectl top pods -l app.kubernetes.io/name=vllm`. Before them, one `docker run` of the pinned image with the chart's flags (removed after).
+Result:
+- `make test`: 1,263 + 22 passed. `make lint`: passed.
+- `make up PROFILE=sim`: two sim pods Ready about 2 min after they started (simulator.startup_duration 115 s plus the probe period), no vLLM pod, no agent. The gateway, the InferencePool and the picker installed unchanged on them.
+- Replay: 48 calls, 0 failed, all 48 answered. 44 have cached_tokens above 0; the 4 without are the first call of each task type, on a cold pod. Each line names its pod from the x-inference-pod header, which reaches the replayer through agentgateway: 37 calls on r8ghq, 11 on qhp8h (contracts on one pod, the other types on the other, as P2.3 saw on real pods). The access log has the sim pods' IPs as endpoints and the D1 headers.
+- The simulator kept its configuration: time to first token is 340 ms + 1.19 ms x uncached prompt tokens, plus 5-12 ms for most calls (p50 8, p90 12, max 187); later tokens 146.6 ms each (146.4-153.9). Later steps on the same pod cache the previous prompt less 2-16 tokens, a cut to vLLM's 16-token block, as on real pods (9-22 there, whose chat template adds 12 tokens to the simulator's 5). First steps after another run of the type cache exactly replay.shared_prefix_tokens.by_type.
+- Per sim pod after the replay: 31-33 MiB and 87-88 millicores while idle (`kubectl top`); 13.5 MiB in the Docker run.
+- Docker run of the image: /health/ready 503 until --startup-duration, /health 200 at once; cached_tokens 0 then 96 on a 105-token prompt with no render sidecar; another model name answers 404; the vllm:* metrics the dashboard reads exist, each with a model_name label.
+Notes:
+- Decided in plan mode (card 30): image v1.0.0 by digest (v1.1.0 was 2 days old); a new chart infra/charts/sim, named and labelled like the vllm chart, release vllm, so make down needs no change and moving between profiles needs make down first; the replayer reads x-inference-pod when a reply has no system_fingerprint.
+- **KV cache 1024 blocks, not the real 274: a stated limitation.** A full cache makes v1.0.0 answer HTTP 500 (pkg/kvcache/block_cache.go), where real vLLM makes the call wait, and 61.5% of the converted trace's prompts are over 2,000 tokens, so two of them would fill 274 blocks. 1024 is max_num_seqs 4 x 256 blocks, so a call never fails that way; a test fails if it gets too small. The cost: 3.7x the real cache, so blocks are evicted later and hit rates can read higher than on real pods. P2.9 measures it.
+- Cached share 0.801 here against 0.874 in P2.3's final real replay at the same seed. Not a like-for-like comparison: that real replay ran on pods already warmed by earlier replays of the same prompts (7 of its later steps cached more than their previous prompt), while these sim pods were new. P2.9 compares the two from equal starts.
+- The values in config/sim.yaml's simulator section are earlier measurements, not a calibration: P2.8 replaces them. The simulator cannot express the 26-29 s first call on a pod that served nothing (P2.4), waiting by tokens rather than request count, or two pods sharing one GPU. P2.8 decides how to handle each.
+- Not set: the simulator's waiting queue per pod, at v1.0.0's default of 1000 (docs/configuration.md); a request beyond it is refused, which real vLLM would not do. P2.7's loads stay far below it; a burst experiment must too.
+- From the fresh-eyes review (subagent, 2026-11-05, nothing blocking): the sim chart, unlike the vllm one, keeps Kubernetes' service variables (VLLM_PORT), which the simulator does not read; it pulls its small image on the first rollout instead of before it.
+- The host's clock jumped 27 times between make up (21:20) and the analysis, the replay included (`journalctl -b 0 -q -o short-iso --since "2026-11-05 21:20" | grep -c "Clock change detected"`). The timings above match the configuration to a few ms, so the replay looks unaffected.
+
+---
+
 ### 2026-11-03 · P2.5 · green
 Command: the spike (read-only, findings in `docs/task-cards/28-P2.5-baseline-experiment.md`) · `make experiment NAME=baseline-check` · `make experiment NAME=baseline` (twice, the
 first run's results moved to `experiments/results/first-baseline-laptop-in-use/`) · `make experiment NAME=baseline-reversed` · `make experiment-compare CSVS="experiments/results/baseline-2069d38644d6.csv experiments/results/baseline-reversed-899a3bf28f10.csv" STALL_SECONDS=5` · `kubectl get configmap vllm-pool-epp -o jsonpath='{.data.default-plugins\.yaml}'` · `nvidia-smi --query-gpu=timestamp,temperature.gpu,utilization.gpu,clocks.gr,power.draw,clocks_throttle_reasons.active --format=csv -l 30` beside them

@@ -1,0 +1,66 @@
+# Named and labelled like the vllm chart's Deployment, so the InferencePool, the PodMonitor, make experiment's restart and
+# make replay's /tokenize find these pods unchanged (P2.7).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+spec:
+  replicas: {{ required "replicas from the profile" .Values.replicas }}
+  # As in the vllm chart, so make experiment's restart replaces every pod at once and no old pod serves during it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vllm
+    spec:
+      containers:
+        - name: sim
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            # The same name as "real" without an adapter, which is the name make replay asks for on this profile.
+            - --model={{ required "model.name from the profile" .Values.model.name }}
+            - --port=8000
+            - --max-model-len={{ required "model.max_model_len from the profile" .Values.model.max_model_len }}
+            - --max-num-seqs={{ required "simulator.max_num_seqs from the profile" .Values.simulator.max_num_seqs }}
+            # Time to first token grows with the uncached prompt tokens, which D4 needs. "constant" ignores cache hits.
+            - --latency-calculator=per-token
+            - --prefill-overhead={{ required "simulator.prefill_overhead from the profile" .Values.simulator.prefill_overhead }}
+            - --prefill-time-per-token={{ required "simulator.prefill_time_per_token from the profile" .Values.simulator.prefill_time_per_token }}
+            - --inter-token-latency={{ required "simulator.inter_token_latency from the profile" .Values.simulator.inter_token_latency }}
+            - --time-factor-under-load={{ required "simulator.time_factor_under_load from the profile" .Values.simulator.time_factor_under_load }}
+            - --startup-duration={{ required "simulator.startup_duration from the profile" .Values.simulator.startup_duration }}
+            - --seed={{ required "simulator.seed from the profile" .Values.simulator.seed }}
+            - --enable-kvcache
+            - --kv-cache-size={{ required "simulator.kv_cache_blocks from the profile" .Values.simulator.kv_cache_blocks }}
+            - --block-size={{ required "simulator.block_size from the profile" .Values.simulator.block_size }}
+            # Empty turns off the KV-cache events, which only a precise prefix scorer reads; the picker's prefix scorer
+            # estimates from the requests it routes. The default endpoint would redial forever with nobody listening.
+            - --zmq-endpoint=
+          env:
+            # The simulator names the pod in each reply's x-inference-pod header, which make replay records.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # --enable-kvcache refuses to start without it, although it is used only in the events' topic.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              # 503 until --startup-duration has passed, which is the simulated cold start (D4); /health is 200 at once.
+              path: /health/ready
+              port: http
+            # As in the vllm chart: a pod joins the Service within 5 s of finishing its start.
+            periodSeconds: 5

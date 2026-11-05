@@ -127,6 +127,8 @@ class FakeGateway:
     fail: Callable[[Seen], httpx.Response | Exception | None] | None = None
     # A reply's whole stream, instead of the default one.
     stream: Callable[[dict[str, Any]], AsyncIterator[bytes]] | None = None
+    # A reply's response headers.
+    reply_headers: dict[str, str] = field(default_factory=dict)
 
     async def _stream(self, body: dict[str, Any]) -> AsyncIterator[bytes]:
         await asyncio.sleep(self.ttft)
@@ -155,7 +157,7 @@ class FakeGateway:
                 raise answer
             return answer
         stream = self._stream if self.stream is None else self.stream
-        return httpx.Response(200, content=stream(body))
+        return httpx.Response(200, content=stream(body), headers=self.reply_headers)
 
 
 def client_of(handler: Callable[..., Any]) -> httpx.AsyncClient:
@@ -592,6 +594,28 @@ def test_nulls_a_server_may_send_are_read_as_absent() -> None:
     assert line["ttft_ms"] == 1000
     assert "cached_tokens" not in line
     assert "pod" not in line
+
+
+def test_a_reply_without_a_fingerprint_takes_its_pod_from_the_simulators_header() -> None:
+
+    async def stream(body: dict[str, Any]) -> AsyncIterator[bytes]:
+        yield event(content_chunk("hello"))
+        yield usage_chunk(body, pod=None)
+
+    gateway = FakeGateway(stream=stream, reply_headers={"x-inference-pod": "vllm-sim-1"})
+    line = replay(plan_of(runs=[trace_run(prompts=(60,))]), gateway)[0]
+    assert line["pod"] == "vllm-sim-1"
+
+
+def test_a_fingerprint_names_the_pod_even_with_the_header() -> None:
+
+    async def stream(body: dict[str, Any]) -> AsyncIterator[bytes]:
+        yield event(content_chunk("hello"))
+        yield usage_chunk(body)
+
+    gateway = FakeGateway(stream=stream, reply_headers={"x-inference-pod": "vllm-sim-1"})
+    line = replay(plan_of(runs=[trace_run(prompts=(60,))]), gateway)[0]
+    assert line["pod"] == POD
 
 
 # Reading the stream.

@@ -1,0 +1,15 @@
+# Prometheus scrapes every vLLM pod's /metrics on its own (P1.1), so each series carries a pod label; a scrape
+# through the Service would reach one pod at random. The interval is Prometheus's global one, from config/.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: vllm
+  labels:
+    app.kubernetes.io/name: vllm
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vllm
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
