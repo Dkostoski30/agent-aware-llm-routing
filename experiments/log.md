@@ -13,13 +13,14 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
-### 2026-11-05 · P2.7 · green (Grafana check pending)
+### 2026-11-05 · P2.7 · green
 Command: `make test` · `make lint` · `make down` · `make up PROFILE=sim` · `kubectl get pods -l app.kubernetes.io/name=vllm` · `make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady PROFILE=sim OUT=experiments/results/replays/sim-steady-1.jsonl` · a `jq` count of its lines · `kubectl logs deployment/inference-gateway --tail=5` · `kubectl top pods -l app.kubernetes.io/name=vllm`. Before them, one `docker run` of the pinned image with the chart's flags (removed after).
 Result:
 - `make test`: 1,263 + 22 passed. `make lint`: passed.
 - `make up PROFILE=sim`: two sim pods Ready about 2 min after they started (simulator.startup_duration 115 s plus the probe period), no vLLM pod, no agent. The gateway, the InferencePool and the picker installed unchanged on them.
 - Replay: 48 calls, 0 failed, all 48 answered. 44 have cached_tokens above 0; the 4 without are the first call of each task type, on a cold pod. Each line names its pod from the x-inference-pod header, which reaches the replayer through agentgateway: 37 calls on r8ghq, 11 on qhp8h (contracts on one pod, the other types on the other, as P2.3 saw on real pods). The access log has the sim pods' IPs as endpoints and the D1 headers.
 - The simulator kept its configuration: time to first token is 340 ms + 1.19 ms x uncached prompt tokens, plus 5-12 ms for most calls (p50 8, p90 12, max 187); later tokens 146.6 ms each (146.4-153.9). Later steps on the same pod cache the previous prompt less 2-16 tokens, a cut to vLLM's 16-token block, as on real pods (9-22 there, whose chat template adds 12 tokens to the simulator's 5). First steps after another run of the type cache exactly replay.shared_prefix_tokens.by_type.
+- Grafana (the user's screenshot, 21:46, last 15 min): the vLLM pods dashboard lists both sim pods, vllm-76866d457b-qhp8h and -r8ghq, in all three panels. The queue stayed at 0 (at most 2 calls in flight against max_num_seqs 4); KV-cache usage rose to about 7% of the 1024 blocks on r8ghq; r8ghq's prefix-cache hit rate read about 80-95% at the end of the replay. qhp8h's lines are not visible at this scale (11 calls, outside or under the window). Only the replay's last minutes fall inside the window.
 - Per sim pod after the replay: 31-33 MiB and 87-88 millicores while idle (`kubectl top`); 13.5 MiB in the Docker run.
 - Docker run of the image: /health/ready 503 until --startup-duration, /health 200 at once; cached_tokens 0 then 96 on a 105-token prompt with no render sidecar; another model name answers 404; the vllm:* metrics the dashboard reads exist, each with a model_name label.
 Notes:
