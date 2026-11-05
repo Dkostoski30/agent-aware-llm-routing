@@ -13,12 +13,12 @@ The full plan with task IDs is in `PLAN.md`. Every piece of work maps to one tas
 - Every LLM call carries headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`. Agent LLM calls are non-streaming. Run history lives in Redis; users, sessions, chats, messages and attachments live in SQLite in the app backend (D7).
 - Autoscaling experiments run on simulated pods (llm-d-inference-sim) calibrated from the real GPU, including cold start; validated on real vLLM at 1↔2 pods.
 - Pinned versions live in `versions.md`. Never upgrade anything without being asked.
-- Every tunable lives in a `config/` profile (`real`, `sim`, `demo`); nothing is hardcoded. Each routing rule has a feature flag. Experiments are YAML files in `experiments/` (D11).
+- Every tunable lives in a `config/` profile (`real`, `sim`, `demo`; `real-plain` is `real` without the adapter, for P2.8's calibration only); nothing is hardcoded. Each routing rule has a feature flag. Experiments are YAML files in `experiments/` (D11).
 - Infra wait times (install and readiness timeouts in `infra/` scripts) are not experiment tunables: they stay in the script as a named constant with a comment saying why, not in `config/`.
 - Headers, the trace format, the run request, the run events and the run calls follow the versioned schemas in `schemas/`; contract tests must pass in every component that reads or writes them. Metrics start with `thesis_`; logs are JSON with `run-id` on every line that belongs to a run, `request-id` on app backend lines outside a run (D12).
 
 ## Layout
-- `config/` profiles: real, sim, demo
+- `config/` profiles: real, sim, demo, real-plain
 - `schemas/` versioned JSON schemas for headers, traces, the run request, the run events and the run calls
 - `infra/` cluster setup, Helm values, manifests
 - `gateway/` Go scheduling plugin

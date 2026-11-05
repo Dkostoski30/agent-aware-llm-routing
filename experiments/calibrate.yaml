@@ -1,0 +1,58 @@
+# make calibrate (P2.8, docs/task-cards/31-P2.8-calibration.md): streaming calls straight to real vLLM pods, not through
+# the picker, so each call's pod is known. Its files in sim/ are stamped with this file's hash, so an edit, comments
+# included, starts a new calibration.
+# The two models, each the profile make vllm-deploy deploys for it: with the P1.7 adapter, and the same pods without it
+# (P1.7 saw runs ~2x slower with --enable-lora). Which one config/sim.yaml is calibrated on is decided with the numbers
+# (P2.8b).
+profiles:
+  lora: real
+  plain: real-plain
+# Pods measured at once: one alone, and both of the profile's pods loaded alike, since they share one GPU and D5
+# validates autoscaling at 1 and 2 pods.
+pods: [1, 2]
+# Calls in flight on one pod. 4 is the simulator's max_num_seqs (P0.4); 8 is past it, where long prompts wait for the
+# KV cache (274 blocks, 4,384 tokens per pod) rather than for a request slot.
+concurrency: [1, 2, 4, 8]
+# Prompt lengths in tokens, the chat template included: from a short demo step to near max_model_len 4096 (the
+# converted bfcl prompts have a median of ~3,000, P2.4). The longest plus the reply stays under 4,096.
+prompt_tokens: [256, 1024, 2048, 3584]
+# Every reply's length (ignore_eos): 63 gaps between tokens for the per-token time, ~9 s a call at P2.5's ~146 ms.
+completion_tokens: 64
+# Measured calls per cell, which makes p95 the 19th of 20 rather than the slowest call. The whole grid then takes
+# about 8-9 h, so it runs overnight.
+calls_per_cell: 20
+cache:
+  # uncached: new words on every call. full: the same prompt was sent just before, so all but its last partial block
+  # can be cached. partial: the start of the prompt was sent just before and the rest is new, as an agent step extends
+  # its history. The cached_tokens vLLM reports is what the table records, so evictions show.
+  modes: [uncached, full, partial]
+  # The share of a partial prompt's words sent before. A first guess, not measured: it leaves the 256-token prompt an
+  # uncached tail of ~60 tokens, long enough to time.
+  partial_share: 0.75
+# After every pod start, calls that stay out of the table until one is fast. A fresh pod's first calls took 25.0, 14.9,
+# 4.6, 1.8, 1.2 s to the first token, then under 1 s (P2.3); the first one's time goes to the cold-start file.
+warmup:
+  # Each warm-up call has new words, like an uncached cell, at about the length P2.5's warmed calls had.
+  prompt_tokens: 1024
+  # Under this, the pod counts as warm: above P2.5's warmed calls (278-490 ms), below P2.3's fourth and fifth.
+  settled_ttft_ms: 1000
+  # A pod still slow after this many stops the calibration instead of measuring a cold pod; P2.3's settled on the sixth.
+  max_calls: 10
+# Pod starts timed per model from Kubernetes' timestamps. alone: one pod added beside a running one, as autoscaling
+# adds one, which the simulator expresses. both: both pods deleted and started at once, which it cannot (P1.0: 4.5 min).
+cold_start:
+  alone: 5
+  both: 3
+# make calibrate refuses to start on another host setting: a run of 8-9 h stops when Windows sleeps, and a change of
+# power mode moved generation speed by 15% in P2.5.
+host:
+  # Windows' Performance plan, the one versions.md names.
+  power_scheme: 27fa6203-3987-4dcc-918d-748559d549ec
+  # powercfg's SUB_SLEEP settings that must be 0 (never) on AC: sleep after, hibernate after.
+  sleep_settings: [STANDBYIDLE, HIBERNATEIDLE]
+# Any fixed value: the same seed gives the same prompt words.
+seed: 1
+# Bounds one call, not a latency target. At concurrency 8 with 3,584-token prompts the calls run one at a time (224 of
+# 274 blocks each), so the last of a round waits for seven others of ~10 s; 300 s leaves room for a slowed host, on
+# which P2.3's slowest call took 106 s.
+call_timeout_seconds: 300
