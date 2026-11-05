@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -273,3 +273,10 @@ experiment-graph:
 experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
+
+# Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
+# Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys
+# real again. About 9-10 h, so it refuses to start unless Windows is on Performance with AC sleep and hibernate off. A
+# rerun skips finished files and redoes the others from their start.
+calibrate:
+	PYTHONPATH=loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml
