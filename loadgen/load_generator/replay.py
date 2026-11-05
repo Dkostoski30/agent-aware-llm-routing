@@ -159,7 +159,7 @@ def _has_content(chunk: Mapping[str, Any]) -> bool:
     return any(choice.get("delta", {}).get("content") for choice in chunk.get("choices", []))
 
 
-async def _stream_reply(
+async def stream_reply(
     client: httpx.AsyncClient,
     body: Mapping[str, Any],
     headers: Mapping[str, str],
@@ -235,7 +235,7 @@ async def _call(
     body = chat_request(model, step.content, step.completion_tokens)
     try:
         async with asyncio.timeout(deadline_seconds):
-            reply = await _stream_reply(client, body, call_headers(run.run_id, step), started)
+            reply = await stream_reply(client, body, call_headers(run.run_id, step), started)
     except (httpx.HTTPError, ReplyError, TimeoutError) as error:
         print(f"replay: {run.run_id} step {step.step}: no full reply: {error!r}", flush=True)
         return line, None
