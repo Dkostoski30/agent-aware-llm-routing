@@ -13,6 +13,42 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-06 · P2.8a · green
+Command: `make test` · `make lint` · `make down` · `make up` · `make calibrate` (2026-11-05 23:00 to 2026-11-06 08:44) · `make calibrate` again · `journalctl -b 0 -q -S "2026-11-05 23:00" -U "2026-11-06 08:45" -g "Clock change detected" | wc -l`
+Result:
+- `make test`, `make lint`: passed (1,342 Python tests).
+- Files, all under hash 5553d79b34d7: `sim/calibration-5553d79b34d7-{lora,plain}-{1pod,2pods}.csv` with 48, 96, 48, 96 rows and `sim/cold-start-5553d79b34d7-{lora,plain}.csv` with 11 rows each, each with its .meta.json. No call failed. Real redeployed with 2 pods at the end (adapter thesis-5554fcf81b09 served); the second `make calibrate` printed `every file is finished (6)`.
+- Time taken: lora 1 pod 1 h 58 min, 2 pods 3 h 56 min, cold starts 25 min; plain 49 min, 1 h 9 min, 22 min. Between lora's cold starts (ended 05:20) and plain's first file (started 06:22) the run waited about an hour at a sudo prompt (see the notes).
+- **The adapter makes generation 2.4-3.9x slower.** Per-token time, the median of the cells' p50s (ms; 48 cells on 1 pod, 96 pod-cells on 2):
+  | | 1 pod | 2 pods at once |
+  |---|---|---|
+  | lora | 150.4 (see the note on its first cells) | 311.4 |
+  | plain | 62.1 (60.6-64.1 across concurrency) | 80.6 (78.1-86.8) |
+  TTFT at concurrency 1, uncached, from 256 to 3,584 tokens: lora 392 → 852 ms, plain 202 → 621 ms; a least-squares line gives lora 354 ms + 0.141 ms/token, plain 180 ms + 0.124 ms/token. The per-token cost of a prompt differs by 14%, the fixed part by 174 ms, so lora's TTFT on a short prompt is about 2x plain's.
+- **Two pods on one GPU:** plain's per-token time rises ~30% (29-36% by concurrency; 62 → 81 ms); lora's doubles (150 → 311 ms), and lora's TTFT p95 at concurrency 1 sits at 1.4-2.1 s in 23 of the 24 pod-cells against a p50 of ~0.3-0.5 s (1.8 s at 3,584 uncached).
+- **Prefix cache:** a full repeat at concurrency 1 cuts TTFT to 122-140 ms on plain (from 202-621) and 300-393 ms on lora (from 392-852). cached_tokens is floor((P-1)/16) x 16: the last token is never served from cache, so these block-aligned prompts lose their whole last block (240 of 256, 3,568 of 3,584), as P2.3 found; partial caches 176 / 752 / 1,520 / 2,672.
+- **Waiting for KV blocks, not slots:** once concurrency x prompt passes the 4,384-token cache, calls run in rounds of as many as fit, and uncached TTFT grows by about one call's length per round ahead. On 1 pod, 2 x 3,584, 4 x 2,048 and 8 x 1,024 (one round ahead) each give a p50 of ~10.2-10.6 s on lora and ~4.8-5.0 s on plain; 8 x 2,048 and 4 x 3,584 (about three) give 30-31 s on lora; 8 x 3,584 (seven, one call at a time) gives 66 s on lora and 30 s on plain. Per-token time stays as without waiting.
+- Past that limit cached_tokens' p50 is 0 (720 at 2 x 3,584), yet at the first level past it the full and partial cells keep a TTFT p50 of 0.8-1.3 s on lora and 0.6-0.9 s on plain, with p95 at the waiting level. The unmeasured primer seems to do the waiting; why the measured call then reports no cached tokens is not explained.
+- **Cold start** (created → Ready and Ready → first answer in s, wall clock; first TTFT in s, monotonic):
+  | | created → Ready | Ready → first answer | first TTFT |
+  |---|---|---|---|
+  | lora alone (5) | 122-141 | 28.2-30.6 | 13.7-15.0 |
+  | lora both (3 x 2) | 124-143 | 40.8-52.4 | 19.4-27.0 |
+  | plain alone (5) | 122-126 | 16.1-22.6 | 9.5-13.4 |
+  | plain both (3 x 2) | 128-137 | 20.5-25.9 | 11.1-11.9 |
+  Ready → first answer is up to the end of the first warm-up reply: kubectl's rollout wait, the port-forward, two check calls, the first TTFT and the reply's 63 later tokens (lora alone: ~14 s TTFT + ~12 s of tokens + ~2 s of the rest). All but two pods were warm after their second call; one lora pod of a "both" start took 3 calls, one 4. Only the first call's TTFT and the count are kept, so how the later calls fell is not in the files.
+- Clock: the VM's monotonic clock ran 3.0-4.4% slow against Windows' over each file (meta `drift`, uncertainty under 0.03%), more than P2.5's 2%. The wall clock was stepped 1,046 times during the run, every ~33 s, so cells have up to 14 clock jumps each, and only 5 of the 192 cells (all plain) have none.
+Notes:
+- Not corrected, as decided: the TTFT and per-token times, the cold starts' first TTFT included, are on the monotonic clock and read ~3-4% low. The cold starts' first two columns are wall clock on both ends (Kubernetes and time.time), which the steps keep within ~1.3 s.
+- With the jumps that regular, the per-cell clock_jumps column flags nothing; the drift in each meta is what to correct by, if P2.8b does.
+- The first cell at each new concurrency (256 tokens, uncached) has slow calls: TTFT p95 3.6-11.4 s on lora and 2.7-8.2 s on plain on 1 pod, up to 16.5 and 11.9 s on 2, where the cell's p50 is 0.2-0.6 s. With nearest rank, a slow p95 of 20 calls means at least 2 slow calls. On 2 pods it shows only on the pod that is new in that file (lora 569v9, plain 586cw), not on the one that already ran the 1-pod file, which fits vLLM compiling kernels for a batch size it has not run yet (--enforce-eager); a guess, not checked. It also raises lora's per-token p50 in the c=2 cell (166 against 140-145 beside it).
+- lora on 1 pod: per-token p50 is 187-198 ms over its first 9 cells (concurrency 1, up to 2,048 tokens), then 172, then 140-144 from cell 11 on, still at concurrency 1, and 135-166 for the rest. A step in time, not an effect of concurrency (on 2 pods concurrency 1 is flat at ~310). Not explained. lora's TTFT line and its 375-393 ms full-repeat values above come from the slow stretch.
+- The sudo prompt: `make vllm-deploy` checked for the image with `sudo k3s crictl inspecti`. The switch to real-plain asked for the password once sudo had forgotten it, and the run waited about an hour (above). The check now reads the node's status.images by digest, with no sudo (Makefile); the final redeploy of this run already used it and did not ask (helm revision 4 at 08:41:57, pods Ready 08:44).
+- From the fresh-eyes review (subagent, 2026-11-06): the numbers above were recomputed from the files; findings fixed here were wording and counts. Left as is: an image named without a digest would make vllm-deploy pull with sudo on every deploy, and a failing `kubectl get nodes` reads as "image missing"; the pinned image has a digest, and helm fails right after on a down cluster. Every call goes through kubectl port-forward, a few ms on TTFTs of 120 ms and more.
+- For P2.8b: whether to calibrate on lora or plain; the KV-block waiting, two pods on one GPU and the first slow call, which the simulator cannot express as such; whether to correct for the drift; what the p95s map to.
+
+---
+
 ### 2026-11-05 · P2.7 · green
 Command: `make test` · `make lint` · `make down` · `make up PROFILE=sim` · `kubectl get pods -l app.kubernetes.io/name=vllm` · `make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady PROFILE=sim OUT=experiments/results/replays/sim-steady-1.jsonl` · a `jq` count of its lines · `kubectl logs deployment/inference-gateway --tail=5` · `kubectl top pods -l app.kubernetes.io/name=vllm`. Before them, one `docker run` of the pinned image with the chart's flags (removed after).
 Result:

@@ -1,0 +1,12 @@
+restart,case,pod,created_to_ready_s,ready_to_first_answer_s,first_ttft_ms,warmup_calls
+1,alone,vllm-5c9565db76-8fbs9,126.0,30.6,14703,2
+2,alone,vllm-5c9565db76-vbf94,132.0,29.0,14019,2
+3,alone,vllm-5c9565db76-4kmwd,125.0,29.0,14322,2
+4,alone,vllm-5c9565db76-grn2q,122.0,28.2,13741,2
+5,alone,vllm-5c9565db76-642vw,141.0,29.5,14991,2
+1,both,vllm-86cdbb69cf-lzwrk,132.0,50.7,24699,2
+1,both,vllm-86cdbb69cf-mjvgw,133.0,51.4,26996,3
+2,both,vllm-7f5766bff8-bwf5k,124.0,43.2,19376,4
+2,both,vllm-7f5766bff8-z6vn9,126.0,43.7,20368,2
+3,both,vllm-59745d9cfb-zdrjg,142.0,40.8,20418,2
+3,both,vllm-59745d9cfb-zwczp,143.0,52.4,20362,2
