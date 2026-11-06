@@ -13,6 +13,29 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-06 · P2.8b · green
+Command: `make test` · `make lint` · `make down` · `make up PROFILE=sim` · `kubectl get deployment vllm -o jsonpath='{.spec.template.spec.containers[0].args}'`
+Result:
+- `make test`: 1,352 Python tests and 22 training tests passed. The first `make lint` failed on five lines over ruff's 100 characters in the new mapping and its tests; rewrapped, then green.
+- config/sim.yaml's simulator section now comes from `sim/calibration-5553d79b34d7-lora-1pod.csv` and `sim/cold-start-5553d79b34d7-lora.csv` through `sim/calibrator/mapping.py`, and `sim/tests/test_calibration_mapping.py` fails if the profile and the table differ. The mapping and its limitations are in `sim/calibration.md`.
+  | | before (P2.7's placeholders) | now | from |
+  |---|---|---|---|
+  | prefill_overhead | 340ms | 343ms | least-squares line, TTFT p50 of the 12 concurrency-1 cells against uncached tokens |
+  | prefill_time_per_token | 1190us | 137us | the same line |
+  | inter_token_latency | 146ms | 191ms | median per-token p50 of those cells (190.6) |
+  | time_factor_under_load | 1.0 | 1.0 | concurrency 2 over 1 is 146.1 / 190.6 = 0.77, raised to 1 |
+  | max_num_seqs | 4 | 2 | 4,384 KV tokens over the converted trace's 2,195-token median prompt |
+  | kv_cache_blocks | 1024 | 512 | max_num_seqs x 256 (P2.7's rule) |
+  | startup_duration | 115s | 140s | median created → Ready alone 126 s + first TTFT 14.3 s − warm 0.48 s |
+- Sim pods: both Running and Ready at 2 min 26 s after the install (140 s simulated start plus the container's). The deployment's args carry every new value; helm renders 1.0 as `--time-factor-under-load=1`, which the simulator takes.
+Notes:
+- Decided 2026-11-06: the adapter's table as it stands (real serves the adapter; no rerun of the lora 1-pod file), one pod alone (GPU sharing is the laptop's limitation), max_num_seqs 2, and the slow first call folded into startup_duration. Not corrected: the clock's 3-4% drift, since simulated pods sleep on the VM clock that timed the real ones. No std-devs: v1.0.0 caps them at 30% of the mean, and the tails are 10-50x the p50s.
+- The cost of keeping the table: lora's first 9 cells (187-198 ms per token, unexplained, P2.8a) are the concurrency-1 cells the line and the token gap come from. Simulated replies run ~30% slower per token than the table's later cells and P2.5 (140-149 ms), and the line misses a cell by up to 146 ms. P2.9's 1-pod comparison shows how far that moves a replay.
+- llm-d-inference-sim v1.0.0 (pkg/simulator/latencies.go, read 2026-11-06): one load factor scales TTFT and token gaps alike, linear from 1 running to max_num_seqs. Real TTFT under load grows by an added amount (plain, fully cached 256 tokens: 122 → 160 ms at concurrency 2), which the simulator does not give.
+- Reported, not changed (outside the card): config/sim.yaml's replay section still prices 256 uncached tokens at "about 0.3 s at P2.2b's 1.19 ms per token", now ~35 ms; experiments/calibrate.yaml still calls 4 the simulator's max_num_seqs, and an edit there would change the calibration's hash.
+
+---
+
 ### 2026-11-06 · P2.8a · green
 Command: `make test` · `make lint` · `make down` · `make up` · `make calibrate` (2026-11-05 23:00 to 2026-11-06 08:44) · `make calibrate` again · `journalctl -b 0 -q -S "2026-11-05 23:00" -U "2026-11-06 08:45" -g "Clock change detected" | wc -l`
 Result:
