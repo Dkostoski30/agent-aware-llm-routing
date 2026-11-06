@@ -1,0 +1,22 @@
+{
+  "calibration": "calibrate",
+  "hash": "5553d79b34d7",
+  "model": "plain",
+  "profile": "real-plain",
+  "profile_sha256": "29ac2a91c6338c7f9e83979c903b2ce08f5e4249c62d1873969e21f7ee89b006",
+  "started_unix": 1793942538,
+  "ended_unix": 1793945490,
+  "drift": {
+    "share": -0.04265124476784786,
+    "uncertainty": 0.0001123526633067776
+  },
+  "pods": [
+    "vllm-5888d76bff-2v5vl"
+  ],
+  "warmup_ttft_ms": {
+    "vllm-5888d76bff-2v5vl": [
+      9263,
+      395
+    ]
+  }
+}

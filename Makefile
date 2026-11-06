@@ -78,7 +78,9 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # Needs the model in ~/.cache/huggingface (infra/download-model.sh), the PodMonitor CRD (infra/install-monitoring.sh),
 # both run by make up, and the vLLM containers stopped. A model.lora is checked before anything is pulled or deployed:
 # its name and path must end with the first 12 digits of its sha256, since an edit of the name alone once served the
-# old weights under the new name (P2.1b, P2.11), and the weights at its path must have that sha256.
+# old weights under the new name (P2.1b, P2.11), and the weights at its path must have that sha256. Whether the image
+# is there is read from the node's status, which names it by digest, without sudo: make calibrate redeploys hours into
+# a run, after sudo has stopped remembering the password (P2.8).
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
@@ -104,7 +106,8 @@ vllm-deploy:
 		fi; \
 	fi; \
 	image=$$(yq -e .image infra/charts/vllm/values.yaml); \
-	if ! sudo k3s crictl inspecti "$$image" >/dev/null 2>&1; then \
+	digest=$${image##*@}; \
+	if ! kubectl get nodes -o jsonpath='{.items[*].status.images[*].names[*]}' | tr ' ' '\n' | grep -qF "@$$digest"; then \
 		echo "vllm-deploy: k3s pulls $$image (~9 GB), once per machine; no output until it is done" \
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
