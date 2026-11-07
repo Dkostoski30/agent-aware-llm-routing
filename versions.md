@@ -64,11 +64,11 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 
 | Package | Version | Component, added in |
 |---|---|---|
-| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06); loadgen, P2.2b (the agent's API), the agent's pin |
+| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06); loadgen, P2.2b (the agent's API), the agent's pin; root dev group, P2.10a (FastAPI's TestClient in the app tests), the agent's pin |
 | jsonschema | 4.26.0 | agent, P1.3a-1 (tool-call checks, D10); a dev tool since P0.0, runtime since P1.3a-1; loadgen, P2.2b (every trace line against trace.v1), the agent's pin |
-| PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles); loadgen, P2.2b (reads experiment files and profiles), the agent's pin |
-| fastapi | 0.143.0 | agent, P1.3a-2 (run API: POST /runs, GET /runs/{id}, /healthz; 2026-10-08). Pulls in starlette 1.10.0 and pydantic 2.14.1, pinned by uv.lock |
-| uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25) |
+| PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles); loadgen, P2.2b (reads experiment files and profiles), the agent's pin; app, P2.10a (reads the profile's app section), the agent's pin |
+| fastapi | 0.143.0 | agent, P1.3a-2 (run API: POST /runs, GET /runs/{id}, /healthz; 2026-10-08). Pulls in starlette 1.10.0 and pydantic 2.14.1, pinned by uv.lock; app, P2.10a (register, login, logout), the agent's pin |
+| uvicorn | 0.54.0 | agent, P1.3a-2 (ASGI server of the run API; 2026-09-25); app, P2.10a (ASGI server of the app API), the agent's pin |
 | redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
 | matplotlib | 3.11.2 | loadgen, P2.5 (experiment graphs; 2026-09-11), never in the agent image, which installs `agent/requirements.txt`. Pulls in numpy 2.5.4, pillow 13.0.0 and others, pinned by uv.lock |
 
