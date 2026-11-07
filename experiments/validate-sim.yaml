@@ -1,0 +1,52 @@
+# P2.9: the same replay on real vLLM pods and on simulated ones (docs/task-cards/32-P2.9-sim-validation.md). Run with
+# make experiment NAME=validate-sim, with the cluster up on either profile (make up or make up PROFILE=sim), about
+# 3.3 h. Each variant deploys its profile's vLLM release when the profile changes, so the cluster ends on sim at its
+# own 2 replicas. Results carry this file's hash (D11); after a recalibration, note it below so the rerun gets its own.
+# The converted trace (P2.4), the one config/sim.yaml's max_num_seqs was set for (its 2,195-token median prompt).
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# P2.5's and P5's load: 40 runs at 0.02 runs/s, the same in config/real.yaml and config/sim.yaml (checked before the
+# run). On one pod that is twice P2.5's load per pod, so calls queue in bursts (decided 2026-11-06).
+pattern: baseline
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types.
+seed: 6
+# The real pods' KV cache, as in experiments/baseline.yaml: 274 blocks of 16 per pod. The sim rows are split by the same
+# limit, so "over" means a call that would wait for KV blocks on a real pod.
+kv_capacity_tokens_per_pod: 4384
+# As experiments/baseline.yaml, for both profiles alike: a simulated pod has no slow first call, but the same warm-up
+# keeps the two replays' starts the same.
+warmup:
+  runs_discarded: 5
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# Each pair runs one after the other, so the host drifts little within a pair (P2.5 saw 15% from use of the laptop).
+# Two pods as well, as card 32 asks when GPU sharing changes per-pod timing, which P2.8a found (decided 2026-11-06).
+variants:
+  - name: real-1pod
+    profile: real
+    replicas: 1
+    values: null
+    epp_config: default-plugins.yaml
+  - name: sim-1pod
+    profile: sim
+    replicas: 1
+    values: null
+    epp_config: default-plugins.yaml
+  - name: real-2pods
+    profile: real
+    replicas: 2
+    values: null
+    epp_config: default-plugins.yaml
+  - name: sim-2pods
+    profile: sim
+    replicas: 2
+    values: null
+    epp_config: default-plugins.yaml
+validation:
+  # PLAN.md's P2.9 row: an error within ~10-15%; its upper end, since one replay per variant carries the host's noise.
+  tolerance: 0.15
+  pairs:
+    - real: real-1pod
+      sim: sim-1pod
+    - real: real-2pods
+      sim: sim-2pods

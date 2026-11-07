@@ -22,7 +22,9 @@ from load_generator.experiment import (
     ExperimentError,
     Warmup,
     check_journal_readable,
+    check_same_replay,
     count_clock_jumps,
+    finish,
     load_experiment,
     main,
     outputs,
@@ -145,6 +147,12 @@ class FakeCluster:
 
     def check_ready(self) -> None:
         self.asked.append("check")
+
+    def deploy(self, profile: str) -> None:
+        self.asked.append(f"deploy {profile}")
+
+    def scale(self, replicas: int | None) -> None:
+        self.asked.append(f"scale {'profile' if replicas is None else replicas}")
 
     def restart_pods(self) -> None:
         self.asked.append("restart")
@@ -862,3 +870,241 @@ def test_the_round_robin_variant_is_the_default_without_its_scorers() -> None:
 
 def test_the_trace_the_experiment_names_is_committed() -> None:
     assert (TRACE_DIR / f"{APB_TRACE}.jsonl").exists()
+
+
+# P2.9: variants that name their own profile and replica count.
+PROFILE_VARIANTS = [
+    {
+        "name": "real-1pod",
+        "profile": "real",
+        "replicas": 1,
+        "values": None,
+        "epp_config": "default-plugins.yaml",
+    },
+    {
+        "name": "sim-1pod",
+        "profile": "sim",
+        "replicas": 1,
+        "values": None,
+        "epp_config": "default-plugins.yaml",
+    },
+    {
+        "name": "sim-2pods",
+        "profile": "sim",
+        "replicas": 2,
+        "values": None,
+        "epp_config": "default-plugins.yaml",
+    },
+]
+VALIDATION = {"tolerance": 0.15, "pairs": [{"real": "real-1pod", "sim": "sim-1pod"}]}
+
+
+def by_profile(directory: Path, **changes: Any) -> Experiment:
+    return loaded(directory, profile=None, variants=PROFILE_VARIANTS, **changes)
+
+
+def test_a_variant_can_name_its_own_profile_and_replicas(tmp_path: Path) -> None:
+    experiment = by_profile(tmp_path)
+    assert experiment.profile is None
+    assert [(v.profile, v.replicas) for v in experiment.variants] == [
+        ("real", 1),
+        ("sim", 1),
+        ("sim", 2),
+    ]
+
+
+def test_without_one_a_variant_takes_the_files_profile_and_its_replicas(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    assert [(v.profile, v.replicas) for v in experiment.variants] == [
+        ("real", None),
+        ("real", None),
+    ]
+
+
+def test_a_variant_with_no_profile_of_its_own_or_the_files_is_refused(tmp_path: Path) -> None:
+    variants = [dict(PROFILE_VARIANTS[0]), {"name": "x", "values": None, "epp_config": "y.yaml"}]
+    with pytest.raises(ExperimentError, match="x"):
+        loaded(tmp_path, profile=None, variants=variants)
+
+
+def test_replicas_under_one_are_refused(tmp_path: Path) -> None:
+    variants = [dict(PROFILE_VARIANTS[0], replicas=0)]
+    with pytest.raises(ExperimentError, match="replicas"):
+        loaded(tmp_path, profile=None, variants=variants)
+
+
+def test_a_file_without_validation_has_none(tmp_path: Path) -> None:
+    assert loaded(tmp_path).validation is None
+
+
+def test_the_validation_section_is_read_with_the_files_variants(tmp_path: Path) -> None:
+    validation = by_profile(tmp_path, validation=VALIDATION).validation
+    assert validation is not None
+    assert validation.tolerance == 0.15
+    assert [(pair.real, pair.sim) for pair in validation.pairs] == [("real-1pod", "sim-1pod")]
+
+
+def profiles_with(**replay_changes: Any) -> dict[str, dict[str, Any]]:
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    sim = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())
+    sim["replay"].update(replay_changes)
+    return {"real": real, "sim": sim}
+
+
+def test_real_and_sim_replay_the_baseline_pattern_alike() -> None:
+    """P2.9's premise, on the committed profiles."""
+    check_same_replay(profiles_with(), "baseline")
+
+
+def test_a_pattern_that_differs_between_profiles_is_refused() -> None:
+    profiles = profiles_with()
+    profiles["sim"]["replay"]["patterns"]["baseline"]["runs"] = 41
+    with pytest.raises(ExperimentError, match="sim"):
+        check_same_replay(profiles, "baseline")
+
+
+def test_a_pattern_one_profile_lacks_is_refused() -> None:
+    profiles = profiles_with()
+    del profiles["sim"]["replay"]["patterns"]["baseline"]
+    with pytest.raises(ExperimentError, match="baseline"):
+        check_same_replay(profiles, "baseline")
+
+
+def test_shared_prefixes_that_differ_are_refused() -> None:
+    profiles = profiles_with(shared_prefix_tokens={"all_types": 16, "by_type": {}})
+    with pytest.raises(ExperimentError, match="shared_prefix_tokens"):
+        check_same_replay(profiles, "baseline")
+
+
+def test_a_call_deadline_that_differs_is_refused() -> None:
+    """The deadline decides which calls fail, so it is part of the replay."""
+    profiles = profiles_with()
+    profiles["sim"]["agent"]["llm_timeout_seconds"] = 60
+    with pytest.raises(ExperimentError, match="llm_timeout_seconds"):
+        check_same_replay(profiles, "baseline")
+
+
+def test_a_profile_is_deployed_when_it_changes_and_scaled_before_the_restart(
+    tmp_path: Path,
+) -> None:
+    experiment = by_profile(tmp_path)
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    run_experiment(experiment, out, cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    variant_steps = ["restart", "routing default", "config", "warm"]
+    assert cluster.asked == [
+        "check",
+        "deploy real",
+        "scale 1",
+        *variant_steps,
+        f"replay {stem}-real-1pod.jsonl",
+        "jumps 101 102",
+        "deploy sim",
+        "scale 1",
+        *variant_steps,
+        f"replay {stem}-sim-1pod.jsonl",
+        "jumps 103 104",
+        "scale 2",
+        *variant_steps,
+        f"replay {stem}-sim-2pods.jsonl",
+        "jumps 105 106",
+        "scale profile",
+    ]
+
+
+def test_a_failed_variant_still_scales_the_profile_back(tmp_path: Path) -> None:
+    experiment = by_profile(tmp_path)
+    cluster = FakeCluster(fail_replay_of="sim-1pod")
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked[-1] == "scale profile"
+
+
+def test_a_deploy_that_breaks_does_not_scale_what_it_was_replacing(tmp_path: Path) -> None:
+    class BreaksOnSim(FakeCluster):
+        def deploy(self, profile: str) -> None:
+            super().deploy(profile)
+            if profile == "sim":
+                raise RuntimeError("the deploy broke")
+
+    experiment = by_profile(tmp_path)
+    cluster = BreaksOnSim()
+    with pytest.raises(RuntimeError, match="deploy broke"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked[-1] == "deploy sim"
+
+
+def test_each_variants_meta_names_its_profile_replicas_and_stamp(tmp_path: Path) -> None:
+    experiment = by_profile(tmp_path)
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    sim_sha256 = hashlib.sha256((REPO_ROOT / "config" / "sim.yaml").read_bytes()).hexdigest()
+    assert meta["profile"] is None
+    assert meta["profile_sha256"] is None
+    sim = meta["variants"]["sim-1pod"]
+    assert (sim["profile"], sim["replicas"], sim["profile_sha256"]) == ("sim", 1, sim_sha256)
+    assert meta["variants"]["real-1pod"]["profile"] == "real"
+
+
+def test_the_validation_table_is_an_output_and_a_leftover(tmp_path: Path) -> None:
+    experiment = by_profile(tmp_path, validation=VALIDATION)
+    out = outputs(experiment, tmp_path)
+    assert out.validation == tmp_path / "sim" / f"validation-{experiment.hash}.csv"
+    out.validation.parent.mkdir()
+    out.validation.write_text("kept")
+    with pytest.raises(ExperimentError, match=experiment.hash):
+        refuse_leftovers(experiment, out)
+
+
+def test_finish_writes_the_results_and_the_table_and_prints_both(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = by_profile(tmp_path, validation=VALIDATION)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    finish(experiment, out, rows, meta)
+    with out.validation.open() as file:
+        assert len(list(csv.DictReader(file))) == 7
+    assert out.csv.exists()
+    assert out.graph.exists()
+    printed = capsys.readouterr().out
+    assert "runs finished" in printed
+    assert "validation real-1pod vs sim-1pod: 7 of 7 metrics within 0.15" in printed
+
+
+def test_finish_writes_no_table_without_validation(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    finish(experiment, out, rows, meta)
+    assert out.csv.exists()
+    assert not out.validation.exists()
+
+
+VALIDATE_SIM = REPO_ROOT / "experiments" / "validate-sim.yaml"
+
+
+def test_validate_sim_replays_the_baseline_load_on_both_profiles_at_1_and_2_pods() -> None:
+    """P2.9's file against the committed profiles: the decided load, each real variant next to its
+    simulated one, and the card's tolerance."""
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    experiment = load_experiment(VALIDATE_SIM, load_replay_config(real["replay"]).patterns)
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern == Pattern(40, 0.02, None, None)
+    assert experiment.seed == 6
+    assert experiment.warmup == committed(BASELINE).warmup
+    assert [(v.name, v.profile, v.replicas) for v in experiment.variants] == [
+        ("real-1pod", "real", 1),
+        ("sim-1pod", "sim", 1),
+        ("real-2pods", "real", 2),
+        ("sim-2pods", "sim", 2),
+    ]
+    assert experiment.validation is not None
+    assert experiment.validation.tolerance == 0.15
+    assert [(pair.real, pair.sim) for pair in experiment.validation.pairs] == [
+        ("real-1pod", "sim-1pod"),
+        ("real-2pods", "sim-2pods"),
+    ]
+    load_trace(experiment.trace)

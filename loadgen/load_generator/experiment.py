@@ -6,6 +6,10 @@ second would find the first's text cached. A failed call is a result, not a stop
 under overload on purpose. After any failure the default picker is put back, since a variant left
 behind would silently change every later run; if even that fails, the run ends with that error.
 
+A variant may name its own profile and replica count (P2.9): the vLLM release is swapped for the
+profile's whenever it changes, with no make down, since make up asks for sudo, and the pods are
+scaled before the restart. The deployed profile is scaled back to its own count at the end.
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -46,12 +50,27 @@ from load_generator.results import (
     variant_rows,
     write_csv,
 )
+from load_generator.validation import (
+    Validation,
+    load_validation,
+    table,
+    table_path,
+    write_table,
+)
+from load_generator.validation import report_lines as validation_lines
 
 VLLM_SELECTOR = "app.kubernetes.io/name=vllm"
 EPP_DEPLOYMENT = "vllm-pool-epp"
 CLOCK_JUMP_LINE = "Clock change detected"
 # journalctl's exit codes with --grep: 0 found lines, 1 found none. Anything else is an error.
 JOURNAL_FOUND_OR_NONE = (0, 1)
+VLLM_DEPLOYMENT = "deployment/vllm"
+# make up's rule: this profile's pods come from make sim-deploy, any other's from make vllm-deploy.
+SIM_PROFILE = "sim"
+# As infra/down.sh: the pods' 30 s grace period plus the API calls, with a wide margin.
+UNINSTALL_TIMEOUT = "120s"
+# Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
+SCALE_TIMEOUT = "900s"
 
 
 class ExperimentError(Exception):
@@ -73,6 +92,10 @@ class Variant:
     values: Path | None
     # The file the running picker must name.
     epp_config: str
+    # The variant's own or the file's.
+    profile: str
+    # None is the profile's own count.
+    replicas: int | None
 
 
 @dataclass(frozen=True)
@@ -80,7 +103,8 @@ class Experiment:
     # The file's stem, which names its results.
     name: str
     hash: str
-    profile: str
+    # None when every variant names its own.
+    profile: str | None
     trace: Path
     pattern_name: str
     pattern: Pattern
@@ -88,6 +112,11 @@ class Experiment:
     kv_capacity_tokens_per_pod: int
     warmup: Warmup
     variants: list[Variant]
+    validation: Validation | None
+
+    def profiles(self) -> list[str]:
+        """Each profile once, in the variants' order."""
+        return list(dict.fromkeys(variant.profile for variant in self.variants))
 
 
 @dataclass(frozen=True)
@@ -95,6 +124,7 @@ class Outputs:
     csv: Path
     meta: Path
     graph: Path
+    validation: Path
 
     def replay(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}.jsonl")
@@ -104,6 +134,11 @@ class Cluster(Protocol):
     """What an experiment asks of the cluster; LiveCluster is the real one."""
 
     def check_ready(self) -> None: ...
+
+    def deploy(self, profile: str) -> None: ...
+
+    # None is the deployed profile's own count.
+    def scale(self, replicas: int | None) -> None: ...
 
     def restart_pods(self) -> None: ...
 
@@ -118,13 +153,45 @@ class Cluster(Protocol):
     def clock_jumps(self, since: float, until: float) -> int: ...
 
 
-def _variant(directory: Path, section: Mapping[str, Any]) -> Variant:
+def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
+    profile: str | None = section.get("profile", spec.get("profile"))
+    if profile is None:
+        raise ExperimentError(f"variant {section['name']} has no profile, nor has the file")
+    return profile
+
+
+def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any]) -> Variant:
     values = None
     if section["values"] is not None:
         values = (directory / section["values"]).resolve()
         if not values.exists():
             raise ExperimentError(f"variant {section['name']}: no file {section['values']}")
-    return Variant(section["name"], values, section["epp_config"])
+    replicas = section.get("replicas")
+    if replicas is not None and replicas < 1:
+        raise ExperimentError(f"variant {section['name']}: replicas {replicas}, at least 1")
+    return Variant(
+        section["name"], values, section["epp_config"], variant_profile(spec, section), replicas
+    )
+
+
+def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -> None:
+    """Variants on different profiles compare only if those replay alike: the pattern, the shared
+    prefixes and the call deadline, which decides which calls fail. The seed is the file's."""
+
+    def replay(profile: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            f"replay.patterns.{pattern}": profile["replay"]["patterns"].get(pattern),
+            "replay.shared_prefix_tokens": profile["replay"]["shared_prefix_tokens"],
+            "agent.llm_timeout_seconds": profile["agent"]["llm_timeout_seconds"],
+        }
+
+    (first, first_profile), *others = profiles.items()
+    expected = replay(first_profile)
+    for name, profile in others:
+        found = replay(profile)
+        for key, value in found.items():
+            if value != expected[key]:
+                raise ExperimentError(f"{key} differs: {first} has {expected[key]}, {name} {value}")
 
 
 def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
@@ -144,15 +211,18 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     trace = (path.parent / spec["trace"]).resolve()
     if not trace.exists():
         raise ExperimentError(f"no trace {spec['trace']}")
-    variants = [_variant(path.parent, section) for section in spec["variants"]]
+    variants = [_variant(path.parent, spec, section) for section in spec["variants"]]
     names = [variant.name for variant in variants]
     for name in names:
         if names.count(name) > 1:
             raise ExperimentError(f"two variants named {name}: their results would mix")
+    validation = None
+    if spec.get("validation") is not None:
+        validation = load_validation(spec["validation"], names)
     return Experiment(
         name=path.stem,
         hash=experiment_hash(path),
-        profile=spec["profile"],
+        profile=spec.get("profile"),
         trace=trace,
         pattern_name=spec["pattern"],
         pattern=pattern,
@@ -160,6 +230,7 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
         kv_capacity_tokens_per_pod=spec["kv_capacity_tokens_per_pod"],
         warmup=warmup,
         variants=variants,
+        validation=validation,
     )
 
 
@@ -170,6 +241,7 @@ def outputs(experiment: Experiment, root: Path) -> Outputs:
         csv=results / f"{stem}.csv",
         meta=results / f"{stem}.meta.json",
         graph=root / "experiments" / "graphs" / f"{stem}.png",
+        validation=table_path(root, experiment.hash),
     )
 
 
@@ -178,6 +250,7 @@ def refuse_leftovers(experiment: Experiment, out: Outputs) -> None:
     that stopped included. A long run must not start only to fail at its first write."""
     stem = f"{experiment.name}-{experiment.hash}"
     found = sorted(out.csv.parent.glob(f"{stem}*")) + sorted(out.graph.parent.glob(f"{stem}*"))
+    found += [out.validation] if out.validation.exists() else []
     if found:
         names = ", ".join(str(path) for path in found)
         raise ExperimentError(f"results of this file exist, delete them to run it again: {names}")
@@ -193,6 +266,7 @@ def _trace_lines(path: Path) -> list[dict[str, Any]]:
 
 def _variant_meta(
     variant: Variant,
+    profile_sha256: str,
     warmup_ttft: Mapping[str, list[int]],
     lines: Sequence[Mapping[str, Any]],
     trace: Sequence[Mapping[str, Any]],
@@ -202,6 +276,9 @@ def _variant_meta(
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
+        "profile": variant.profile,
+        "replicas": variant.replicas,
+        "profile_sha256": profile_sha256,
         "warmup_ttft_ms": warmup_ttft,
         "started": times[0],
         "ended": times[1],
@@ -221,6 +298,7 @@ def _run_variant(
     out: Outputs,
     cluster: Cluster,
     clock: Callable[[], float],
+    profile_sha256: str,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     running = cluster.epp_config_file()
     if running != variant.epp_config:
@@ -233,6 +311,7 @@ def _run_variant(
     ended = clock()
     meta = _variant_meta(
         variant,
+        profile_sha256,
         warmup_ttft,
         lines,
         _trace_lines(experiment.trace),
@@ -255,21 +334,37 @@ def run_experiment(
     default picker is put back, so a switch that fails after the last variant does not lose them."""
     out.csv.parent.mkdir(parents=True, exist_ok=True)
     cluster.check_ready()
-    # Now and not at the end: the profile was loaded just before, and a run takes hours.
-    profile_sha256 = _file_sha256(REPO_ROOT / "config" / f"{experiment.profile}.yaml")
+    # Now and not at the end: the profiles were loaded just before, and a run takes hours.
+    profile_sha256 = {
+        name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
+    }
     starts = start_times(experiment.pattern, experiment.seed)
     rows: list[CallRow] = []
     variants_meta: dict[str, Any] = {}
     # True from a switch away from the default until a switch back has finished: a switch that fails
     # halfway may have changed the picker.
     off_default = False
+    # The profile up now: the file's is up before the run, a variant's is deployed by the run.
+    deployed = experiment.profile
+    # True once the deployed profile runs another count than its own.
+    scaled = False
     try:
         for variant in experiment.variants:
+            if variant.profile != deployed:
+                # The release it scaled is being replaced, so there is nothing to scale back.
+                scaled = False
+                cluster.deploy(variant.profile)
+                deployed = variant.profile
+            if variant.replicas is not None:
+                cluster.scale(variant.replicas)
+                scaled = True
             cluster.restart_pods()
             off_default = off_default or variant.values is not None
             cluster.set_routing(variant.values)
             off_default = variant.values is not None
-            lines, variant_meta = _run_variant(experiment, variant, out, cluster, clock)
+            lines, variant_meta = _run_variant(
+                experiment, variant, out, cluster, clock, profile_sha256[variant.profile]
+            )
             rows += call_rows(
                 variant.name,
                 lines,
@@ -283,7 +378,10 @@ def run_experiment(
             "hash": experiment.hash,
             "profile": experiment.profile,
             # The hash covers the experiment file only, and its pattern and prompts come from here.
-            "profile_sha256": profile_sha256,
+            # Each variant's own is in its meta.
+            "profile_sha256": (
+                None if experiment.profile is None else profile_sha256[experiment.profile]
+            ),
             "trace": experiment.trace.name,
             "pattern": experiment.pattern_name,
             "seed": experiment.seed,
@@ -296,6 +394,8 @@ def run_experiment(
     finally:
         if off_default:
             cluster.set_routing(None)
+        if scaled:
+            cluster.scale(None)
     return rows, meta
 
 
@@ -364,25 +464,77 @@ def count_clock_jumps(since: float, until: float) -> int:
 
 
 class LiveCluster:
-    def __init__(self, experiment: Experiment, profile: Mapping[str, Any]) -> None:
+    def __init__(self, experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
         self.experiment = experiment
-        self.profile = profile
+        self.profiles = profiles
+        # The profile up now; None until the first deploy of a file whose variants name their own.
+        self.current = experiment.profile
+        # None is the profile's own count.
+        self.replicas: int | None = None
+
+    @property
+    def profile(self) -> Mapping[str, Any]:
+        if self.current is None:
+            raise ExperimentError("no profile is deployed yet")
+        return self.profiles[self.current]
 
     def _ready_pods(self) -> dict[str, str]:
         pods = json.loads(kubectl("get", "pods", "-l", VLLM_SELECTOR, "-o", "json"))
-        return pods_to_warm(pods, self.profile["replicas"])
+        return pods_to_warm(pods, self.replicas or self.profile["replicas"])
 
     def check_ready(self) -> None:
-        self._ready_pods()
+        """Before a first deploy, whatever runs is about to be replaced, so only the journal."""
+        if self.current is not None:
+            self._ready_pods()
         check_journal_readable()
+
+    def deploy(self, profile: str) -> None:
+        """The vLLM release only: the gateway, picker and monitoring stay, and set_routing points
+        the picker's probe at the new profile's model. Foreground, so the old pods are gone before
+        it returns: they carry the label the picker selects by, and a real one holds the GPU."""
+        subprocess.run(
+            [
+                "helm",
+                "uninstall",
+                "vllm",
+                "--ignore-not-found",
+                "--cascade",
+                "foreground",
+                "--wait",
+                "--timeout",
+                UNINSTALL_TIMEOUT,
+            ],
+            check=True,
+        )
+        target = ["sim-deploy"] if profile == SIM_PROFILE else ["vllm-deploy", f"PROFILE={profile}"]
+        subprocess.run(["make", *target], cwd=REPO_ROOT, check=True)
+        self.current = profile
+        self.replicas = None
+
+    def scale(self, replicas: int | None) -> None:
+        """As make calibrate's: status.replicas leaves out pods being deleted, so once it is the
+        count the ReplicaSet has chosen which to delete; they are waited for, since a real pod holds
+        the GPU until gone."""
+        count = replicas or self.profile["replicas"]
+        timeout = f"--timeout={SCALE_TIMEOUT}"
+        kubectl("scale", VLLM_DEPLOYMENT, f"--replicas={count}")
+        kubectl("wait", VLLM_DEPLOYMENT, f"--for=jsonpath={{.status.replicas}}={count}", timeout)
+        pods = json.loads(kubectl("get", "pods", "-l", VLLM_SELECTOR, "-o", "json"))
+        for pod in pods["items"]:
+            if "deletionTimestamp" in pod["metadata"]:
+                kubectl("wait", f"pod/{pod['metadata']['name']}", "--for=delete", timeout)
+        kubectl("rollout", "status", VLLM_DEPLOYMENT, timeout)
+        self.replicas = replicas
 
     def restart_pods(self) -> None:
         subprocess.run(["bash", str(REPO_ROOT / "infra" / "restart-vllm.sh")], check=True)
 
     def set_routing(self, values: Path | None) -> None:
+        if self.current is None:
+            raise ExperimentError("no profile is deployed yet")
         script = str(REPO_ROOT / "infra" / "set-routing.sh")
         extra = [] if values is None else [str(values)]
-        subprocess.run(["bash", script, self.experiment.profile, *extra], check=True)
+        subprocess.run(["bash", script, self.current, *extra], check=True)
 
     def epp_config_file(self) -> str:
         return served_config_file(
@@ -482,25 +634,43 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
     return report
 
 
+def finish(
+    experiment: Experiment, out: Outputs, rows: Sequence[CallRow], meta: Mapping[str, Any]
+) -> None:
+    """The results, the validation table if the file has one, and the numbers to read first."""
+    write_results(out, rows, meta)
+    for line in report_lines(rows, meta):
+        print(line)
+    print(f"experiment: wrote {out.csv}, {out.meta} and {out.graph}")
+    if experiment.validation is not None:
+        entries = table(rows, experiment.validation)
+        write_table(out.validation, entries)
+        for line in validation_lines(entries):
+            print(line)
+        print(f"experiment: wrote {out.validation}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="P2.5: run an experiment file.")
     parser.add_argument("experiment", type=Path)
     args = parser.parse_args()
 
     spec = yaml.safe_load(args.experiment.read_text())
-    profile = yaml.safe_load((REPO_ROOT / "config" / f"{spec['profile']}.yaml").read_text())
-    patterns = load_replay_config(profile["replay"]).patterns
+    names = dict.fromkeys(variant_profile(spec, section) for section in spec["variants"])
+    profiles = {
+        name: yaml.safe_load((REPO_ROOT / "config" / f"{name}.yaml").read_text()) for name in names
+    }
+    check_same_replay(profiles, spec["pattern"])
+    first = next(iter(profiles.values()))
+    patterns = load_replay_config(first["replay"]).patterns
     experiment = load_experiment(args.experiment, patterns)
     out = outputs(experiment, REPO_ROOT)
     refuse_leftovers(experiment, out)
 
     def finished(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> None:
-        write_results(out, rows, meta)
-        for line in report_lines(rows, meta):
-            print(line)
-        print(f"experiment: wrote {out.csv}, {out.meta} and {out.graph}")
+        finish(experiment, out, rows, meta)
 
-    run_experiment(experiment, out, LiveCluster(experiment, profile), time.time, finished)
+    run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
 
 
 if __name__ == "__main__":
