@@ -5,19 +5,22 @@ description = "LLM call routing and vLLM autoscaling on Kubernetes (FCSE bachelo
 # The Python that Ubuntu 24.04 ships; uv uses it instead of downloading another one.
 requires-python = "==3.12.*"
 # The components, so one uv sync installs what every test needs.
-dependencies = ["agent", "loadgen"]
+dependencies = ["agent", "app", "loadgen"]
 
 [tool.uv.workspace]
-members = ["agent", "loadgen"]
+members = ["agent", "app", "loadgen"]
 
 [tool.uv.sources]
 agent = { workspace = true }
+app = { workspace = true }
 loadgen = { workspace = true }
 
 [dependency-groups]
 dev = [
     # Its pytest plugin runs the async agent tests; httpx depends on it too.
     "anyio==4.15.1",
+    # FastAPI's TestClient runs on it (the app tests, P2.10a); the agent's pin, already in uv.lock.
+    "httpx==0.28.1",
     "mypy==2.4.0",
     "pre-commit==4.6.2",
     "pytest==9.1.1",
@@ -35,8 +38,9 @@ package = false
 # training/ has its own environment with torch (P1.7); make test runs its tests there.
 addopts = ["--import-mode=importlib", "--strict-markers", "--ignore=training"]
 # importlib mode does not put a test's directory on sys.path; scripts tested in place and the directories that hold
-# a component's package (agent/, loadgen/ and sim/ are not installed, they have no build backend) are listed here.
-pythonpath = ["infra/checks", "agent", "experiments", "loadgen", "sim"]
+# a component's package (agent/, app/, loadgen/ and sim/ are not installed, they have no build backend) are listed
+# here.
+pythonpath = ["infra/checks", "agent", "app", "experiments", "loadgen", "sim"]
 
 [tool.ruff]
 target-version = "py312"
@@ -50,6 +54,6 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Finds agent_runtime, the experiment scripts, loadgen and sim's calibrator when pre-commit passes only a test file
-# that imports them.
-mypy_path = "agent:experiments:loadgen:sim"
+# Finds agent_runtime, app_backend, the experiment scripts, loadgen and sim's calibrator when pre-commit passes only a
+# test file that imports them.
+mypy_path = "agent:app:experiments:loadgen:sim"
