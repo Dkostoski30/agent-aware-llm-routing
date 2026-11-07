@@ -13,6 +13,46 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-07 · P2.9a · red
+Command: `make test` · `make lint` · `make experiment NAME=validate-sim` (2026-11-06 21:31 to 2026-11-07 00:24; the three chained after a 30-min wait, output in the user's terminal log)
+Result:
+- `make test`: 1,392 Python tests and 22 training tests passed. `make lint`: every hook passed.
+- Four replays of pattern `baseline` at seed 6 on the converted trace (`convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl`), 309 calls each, none failed. The numbers leave out the first 5 runs (35 runs, 278 calls). Each variant started on a fresh deploy of its profile's vLLM release, in pairs: real-1pod 21:31-22:09, sim-1pod 22:15-22:53, real-2pods 23:00-23:39, sim-2pods 23:45-00:24. Files: `experiments/results/validate-sim-128acd3c5a3b{.csv,.meta.json,-<variant>.jsonl}`, `experiments/graphs/validate-sim-128acd3c5a3b.png`, `sim/validation-128acd3c5a3b.csv`.
+- **1 pod: 4 of 7 metrics within 0.15, a miss.**
+  | metric | real | sim | error | |
+  |---|---|---|---|---|
+  | TTFT p50, ms | 375 | 362 | 0.035 | within |
+  | TTFT p95, ms | 6,695 | 2,506 | 0.626 | miss |
+  | call duration p50, ms | 2,318 | 2,849 | 0.229 | miss |
+  | call duration p95, ms | 15,600 | 14,560 | 0.067 | within |
+  | run completion p50, s | 25.8 | 36.8 | 0.430 | miss |
+  | run completion p95, s | 84.5 | 85.4 | 0.011 | within |
+  | prefix-cache hit rate | 0.784 | 0.890 | 0.136 | within |
+- **2 pods: 1 of 7 within.**
+  | metric | real | sim | error | |
+  |---|---|---|---|---|
+  | TTFT p50, ms | 580 | 362 | 0.376 | miss |
+  | TTFT p95, ms | 1,196 | 593 | 0.504 | miss |
+  | call duration p50, ms | 3,591 | 2,848 | 0.207 | miss |
+  | call duration p95, ms | 19,734 | 13,588 | 0.311 | miss |
+  | run completion p50, s | 45.9 | 34.4 | 0.251 | miss |
+  | run completion p95, s | 122.4 | 85.4 | 0.302 | miss |
+  | prefix-cache hit rate | 0.815 | 0.894 | 0.096 | within |
+- Generation, ms per token: real-1pod 123.1, sim-1pod 191.7, real-2pods 239.5, sim-2pods 191.7. Warm-up calls after the first, ms to first token: 306, 374, 446, 376. A real pod's first warm-up call took 3.4 s (1 pod), 20.0 s and 4.2 s (2 pods); a simulated pod's 0.38-0.39 s.
+- Over the real KV limit of 4,384 tokens per pod: real-1pod 72 calls, TTFT p50 2.25 s, p95 16.43 s; sim-1pod 86 calls, p50 0.36 s, p95 7.09 s. Under it: real-1pod 206 calls, 0.31 / 0.59 s; sim-1pod 192, 0.36 / 0.62 s. On 2 pods 9 real and 4 simulated calls were over it.
+- The picker on 2 pods: real moved 42 of 243 later steps (share of picks that switched pod 0.39, picks 182 + 127), sim 1 (0.28, 125 + 184).
+- Clock jumps per variant: 52, 68, 42, 68.
+Notes:
+- **Why 1 pod misses.** Simulated replies take 191.7 ms per token against real's 123.1 tonight, 56% more, which gives the call-duration p50 (+23%) and run-completion p50 (+43%) misses. TTFT p95 is 63% low on sim: a real pod past its KV cache makes calls wait for free blocks (72 calls, p95 16.4 s), while the simulator's 2 request slots wait less. That is the count-based waiting `sim/calibration.md` lists, and a recalibration cannot change it. The hit rate is 0.11 higher on sim, as its 1.9x cache predicts, and stays within.
+- **Two of the four 1-pod passes are errors cancelling.** Call-duration p95 (0.067) and run-completion p95 (0.011) match because simulated calls generate more slowly while real ones wait longer for KV blocks. They are not evidence that the simulator is accurate at the tail.
+- **The host was faster tonight than in the calibration.** Real per-token time was 12-17% below the P2.8a table's later lora 1-pod cells (123.1 against 140-148 ms) and 23% below its 2-pod median (239.5 against 311.4), and below P2.5's 143.5-149. So the host's speed between nights moves by about the tolerance, and a recalibration measures one night's host. Cause not known; `make experiment` does not check the power plan as `make calibrate` does.
+- **On the laptop, 2 real pods are slower than 1** at this load: run median 45.9 s against 25.8 s, generation 239.5 against 123.1 ms per token, as the two pods share the one GPU. P4.5's real 1↔2 validation will see scaling up make runs slower. The simulator, a pod with its own GPU by decision (P2.8b), gives 2 pods the 1-pod speed, so the 2-pod misses are that stated limitation.
+- The picker moved 42 later steps on real 2 pods and 1 on sim. Inferred, not checked: its queue and KV scorers see less load on simulated pods (a 1.9x cache, no KV-token waiting), so experiments on sim may move runs less than real would. For P3.
+- On sim, "over the KV limit" marks a call that would wait for KV blocks on a real pod; the simulator does not wait there (TTFT p50 0.36 s either way).
+- Next, decided 2026-11-07: recalibrate once as a new task P2.8c (delete `sim/calibration-5553d79b34d7-lora-1pod.csv` and its `.meta.json`, `make calibrate`, remap `config/sim.yaml`), then run all four variants again, with a note in `experiments/validate-sim.yaml` so the rerun gets its own hash. A second 1-pod miss is reported with its cause.
+
+---
+
 ### 2026-11-06 · P2.8b · green
 Command: `make test` · `make lint` · `make down` · `make up PROFILE=sim` · `kubectl get deployment vllm -o jsonpath='{.spec.template.spec.containers[0].args}'`
 Result:
