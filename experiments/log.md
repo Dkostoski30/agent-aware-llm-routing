@@ -13,6 +13,27 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-07 · P2.8c · green
+Command: `make down` · `make up` · `rm sim/calibration-5553d79b34d7-lora-1pod.csv sim/calibration-5553d79b34d7-lora-1pod.meta.json` · `make calibrate` (2026-11-07 01:33-03:29) · `make test` · `make lint`
+Result:
+- `make calibrate` redid the deleted file only, under the same hash 5553d79b34d7 and profile sha256 (c5ad930c…): 48 of 48 cells, one pod (vllm-5c9565db76-rmdd7), clock drift −2.5% (P2.8a's file −3.0%), warm-up TTFTs 15,729 and 486 ms. Then the step that puts real back at 2 pods failed: `helm upgrade` refused with `conflict with "kubectl" with subresource "scale" using apps/v1: .spec.replicas`, after the table was written. The first table stays in git (638d336).
+- `make test`: 1,392 Python tests and 22 training tests passed. `make lint`: every hook passed (golangci-lint had no files).
+- Remapped by `sim/calibrator/mapping.py`, rules unchanged; `sim/tests/test_calibration_mapping.py` holds `config/sim.yaml` to the new table.
+  | value | from | P2.8a table | P2.8c table |
+  |---|---|---|---|
+  | prefill_overhead | intercept of the concurrency-1 TTFT line | 343ms (343.4) | 298ms (298.5) |
+  | prefill_time_per_token | slope of that line | 137us (0.1374) | 146us (0.1461) |
+  | inter_token_latency | median per-token p50 at concurrency 1 | 191ms (190.6) | 154ms (154.2) |
+  | time_factor_under_load | per-token at 2 over at 1, never under 1 | 1.0 (0.77) | 1.0 (0.99) |
+  | startup_duration | cold starts, less the line's warm TTFT | 140s (126 + 14.3 − 0.48) | 140s (126 + 14.3 − 0.45) |
+- Per-token p50, ms: concurrency 1, 147-186 (P2.8a 140-198, its first 9 cells 187-198); concurrency 2, 4, 8, medians 152.9, 157.2, 155.7 (146-164 per cell; P2.8a 135-166). The concurrency-1 line misses a cell by up to 95 ms (P2.8a 146). TTFT p50 within 10% of P2.8a's in 32 of 48 cells (−24% to +27%); at concurrency 1 the slow stretch's cells are 15-24% lower, which lowers the line's intercept.
+Notes:
+- **The slow stretch did not come back.** P2.8a's first 9 cells were a one-off; this table is flat across concurrency and in time. So the token gap drops 19% and the load ratio becomes 0.99, close to the 1.0 the mapping kept.
+- **It contradicts P2.9a's explanation.** P2.9a's real 1-pod replay ended at 22:09 and generated at 123.1 ms per token; this table, the same night from 01:33, gives 154.2 by the same formula (time after the first token over the tokens after it). So "the host was faster tonight" does not hold: a replay's calls generate faster than the table's 64-token calls on the same host. Cause not known (the replay's replies are longer and carry the agent's tool calls; not checked). The simulated replies will likely still run ~25% slower than a real replay's, so P2.9's rerun may miss call-duration and run-completion p50 again. That is reported, as decided, not corrected here.
+- **The failed redeploy (reported, outside the card).** `make calibrate` sets the pod count with `kubectl scale`, which then owns `.spec.replicas`; Helm 4 upgrades by server-side apply and refuses to change a field another manager owns. This file left 1 pod and real wants 2. P2.8a's last file ended at 2, the same value, so it did not hit this (inferred). The fix is in `sim/calibrator/calibrate.py` or the Makefile's `vllm-deploy`, needs its own task before the next `make calibrate`. `make experiment` uninstalls the release before it deploys, so P2.9's rerun is not affected. The cluster was left with release `vllm` failed at revision 3 and 1 Ready pod.
+
+---
+
 ### 2026-11-07 · P2.9a · red
 Command: `make test` · `make lint` · `make experiment NAME=validate-sim` (2026-11-06 21:31 to 2026-11-07 00:24; the three chained after a 30-min wait, output in the user's terminal log)
 Result:
