@@ -222,3 +222,20 @@ agent:
     diff_clauses to compare a clause between two contracts. For arithmetic questions without attached files call the
     calculator tool once with the whole expression. Every number in your answer must come from a tool result. When
     you know the result, give the final answer.
+# The app backend: users, sessions and chats in SQLite (D7, P2.10a).
+app:
+  # A login lasts this long from login, not from the last request: one demo day, so nobody is logged out mid-demo,
+  # and a copied cookie stops working by the next day.
+  session_ttl_seconds: 86400
+  # Password hashing cost for hashlib.scrypt. OWASP's Password Storage Cheat Sheet lists N=2^14, r=8, p=5 as equal to
+  # its N=2^17, r=8, p=1 minimum; it needs 16 MiB (128 * r * N bytes), under the 32 MiB OpenSSL allows by default.
+  # Each hash stores the cost it was made with, so a change here applies only to passwords set afterwards.
+  scrypt:
+    n: 16384
+    r: 8
+    p: 5
+  # NIST SP 800-63B-4: at least 15 characters when the password is the only factor, as it is here.
+  min_password_length: 15
+  # The session cookie travels over HTTPS only. Browsers treat http://localhost as secure, so the port-forwarded app
+  # still works; false only to open the app over plain HTTP under another host name.
+  cookie_secure: true

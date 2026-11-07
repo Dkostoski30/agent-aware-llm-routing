@@ -1,0 +1,15 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "App backend: users, sessions, chats, messages and attachments in SQLite (P2.10a, D7)"
+requires-python = "==3.12.*"
+# The agent's pins (versions.md). SQLite is Python's own sqlite3; passwords use hashlib.scrypt (no passlib, no ORM).
+dependencies = [
+    "fastapi==0.143.0",
+    "pyyaml==6.0.3",
+    "uvicorn==0.54.0",
+]
+
+[tool.uv]
+# Not installed as a package, like agent/: pytest and mypy find app_backend through pythonpath / mypy_path.
+package = false
