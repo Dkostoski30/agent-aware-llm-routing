@@ -1,0 +1,15 @@
+real_variant,sim_variant,metric,real,sim,relative_error,tolerance,within
+real-1pod,sim-1pod,ttft_p50_ms,408,315,0.22794117647058823,0.15,False
+real-1pod,sim-1pod,ttft_p95_ms,8627,749,0.9131795525675206,0.15,False
+real-1pod,sim-1pod,duration_p50_ms,2704,2319,0.14238165680473372,0.15,True
+real-1pod,sim-1pod,duration_p95_ms,16755,11746,0.2989555356609967,0.15,False
+real-1pod,sim-1pod,run_completion_p50_ms,29202,28469,0.02510102047804945,0.15,True
+real-1pod,sim-1pod,run_completion_p95_ms,104195,69116,0.3366668266231585,0.15,False
+real-1pod,sim-1pod,hit_rate,0.7636738364193681,0.890930930142498,0.16663801698353223,0.15,False
+real-2pods,sim-2pods,ttft_p50_ms,376,322,0.14361702127659576,0.15,True
+real-2pods,sim-2pods,ttft_p95_ms,1530,568,0.6287581699346405,0.15,False
+real-2pods,sim-2pods,duration_p50_ms,2340,2322,0.007692307692307693,0.15,True
+real-2pods,sim-2pods,duration_p95_ms,13469,10997,0.1835325562402554,0.15,False
+real-2pods,sim-2pods,run_completion_p50_ms,28396,28112,0.010001408649105507,0.15,True
+real-2pods,sim-2pods,run_completion_p95_ms,93970,69206,0.2635309141215281,0.15,False
+real-2pods,sim-2pods,hit_rate,0.8402898096898018,0.888751780404718,0.05767292445544025,0.15,True

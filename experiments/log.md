@@ -13,6 +13,46 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-07 · P2.9 · red
+Command: `make test` · `make lint` · `rm experiments/results/validate-sim-5593507542a4-real-1pod.jsonl` · `make experiment NAME=validate-sim` (2026-11-07 16:07 to 19:05)
+Result:
+- The second run, after P2.8c's recalibration (282c22d), under a note in `experiments/validate-sim.yaml` (hash 5593507542a4). Its first try stopped after real-1pod: the sim install hit `conflict with "kubectl" with subresource "scale" using apps/v1: .spec.replicas`, because helm 4's `uninstall --wait` had returned while the old Deployment was still being deleted. `LiveCluster.deploy` now waits for it (`kubectl wait --for=delete`); the run's real-1pod file was deleted and all four variants ran again, every profile switch going through.
+- 309 calls per variant; the numbers leave out the first 5 runs. real-1pod 35 of 35 runs, 278 calls, 0 failed; sim-1pod the same; real-2pods 34 of 35 runs, 271 calls, 1 failed; sim-2pods 35 of 35, 278 calls, 0 failed. Files: `experiments/results/validate-sim-5593507542a4{.csv,.meta.json,-<variant>.jsonl}`, `experiments/graphs/validate-sim-5593507542a4.png`, `sim/validation-5593507542a4.csv`.
+- **1 pod: 2 of 7 metrics within 0.15, a miss** (first run 4 of 7).
+  | metric | real | sim | error | |
+  |---|---|---|---|---|
+  | TTFT p50, ms | 408 | 315 | 0.228 | miss |
+  | TTFT p95, ms | 8,627 | 749 | 0.913 | miss |
+  | call duration p50, ms | 2,704 | 2,319 | 0.142 | within |
+  | call duration p95, ms | 16,755 | 11,746 | 0.299 | miss |
+  | run completion p50, s | 29.2 | 28.5 | 0.025 | within |
+  | run completion p95, s | 104.2 | 69.1 | 0.337 | miss |
+  | prefix-cache hit rate | 0.764 | 0.891 | 0.167 | miss |
+- **2 pods: 4 of 7 within, a miss** (first run 1 of 7).
+  | metric | real | sim | error | |
+  |---|---|---|---|---|
+  | TTFT p50, ms | 376 | 322 | 0.144 | within |
+  | TTFT p95, ms | 1,530 | 568 | 0.629 | miss |
+  | call duration p50, ms | 2,340 | 2,322 | 0.008 | within |
+  | call duration p95, ms | 13,469 | 10,997 | 0.184 | miss |
+  | run completion p50, s | 28.4 | 28.1 | 0.010 | within |
+  | run completion p95, s | 94.0 | 69.2 | 0.264 | miss |
+  | prefix-cache hit rate | 0.840 | 0.889 | 0.058 | within |
+- Generation, ms per token: real-1pod 140.3, sim-1pod 154.6, real-2pods 155.1, sim-2pods 154.7. Warm-up calls, ms to first token: 339.2, 329.8, 390.4, 330.0; a real pod's first warm-up call took 3.6 s (1 pod), 3.9 and 16.4 s (2 pods).
+- Over the real KV limit of 4,384 tokens per pod: real-1pod 80 calls, TTFT p50 2.65 s, p95 14.01 s; sim-1pod 74 calls, p50 0.31 s, p95 2.06 s. Under it: real-1pod 198 calls, 0.35 / 0.60 s; sim-1pod 204, 0.32 / 0.67 s. On 2 pods 11 real and 3 simulated calls were over it (real p95 9.69 s).
+- The picker on 2 pods: real moved 28 of 235 later steps (share that switched pod 0.30, picks 142 + 159), sim 10 of 243 (0.26, 133 + 176).
+- The failed call: `bfcl-561-22` step 4 on real-2pods, a 3,358-token prompt, recorded with no reply (no duration, TTFT or pod), so its run stopped there. Why is not in the replay's file; real-2pods' largest gap deviation, 1,097 ms, is that variant's alone (the others 1-3 ms). Clock jumps per variant: 70, 68, 70, 69.
+Notes:
+- **The medians now match, the tails do not.** The recalibration moved simulated generation from 191.7 to 154.6 ms per token, 10% above real's 140.3 at 1 pod and equal to real's 155.1 at 2. Call-duration and run-completion p50 are within at both counts, TTFT p50 at 2 pods. Every p95 misses at both counts, by 18-91%, with sim low.
+- **The tail misses are the KV waiting, which no recalibration changes.** At 1 pod 29% of real calls (80 of 278) were over the KV limit, and on a real pod they wait for free blocks: TTFT p95 14.0 s over the limit, against 2.1 s on sim, whose 2 request slots wait less. Under the limit the two agree (p50 0.35 against 0.32 s). That also lifts real's TTFT p50 over all calls (0.408 against 0.315 s) and makes the slow runs slower (run p95 104 against 69 s). On 2 pods only 11 calls were over the limit, so its tails miss by less. This is the count-based waiting `sim/calibration.md` lists. In the first run the slower simulated generation hid it at the 1-pod p95s (two passes by errors cancelling, P2.9a); with generation close, the tail error shows.
+- **The hit rate misses at 1 pod by 0.017 over the tolerance** (0.891 against 0.764), the 1.9x simulated cache (512 blocks against 274) evicting later, as stated in P2.7. At 2 pods, with less pressure on each cache, it is within.
+- **The host moved again between nights, both ways.** Real 1-pod generation was 123.1 ms per token in P2.9a and 140.3 tonight, 14% apart under the same file and load; P2.8c's table on P2.9a's night gave 154.2. So both the night and the kind of call move per-token time, by about the tolerance each.
+- **P2.9a's "2 real pods are slower than 1" did not hold tonight.** Real 2-pod generation was 155.1 ms per token (P2.9a 239.5, P2.8a's 2-pod table 311.4) and the run median 28.4 s against 29.2 on 1 pod (P2.9a 45.9 against 25.8). How much two pods sharing the GPU slow each other varies 2x between nights, cause not known. P4.5's real 1↔2 validation should run more than once.
+- **What this means for P4/P5 (not decided here).** A simulated pod gives median call and run times within 15% of a real one at 1 and 2 pods, and tails 18-34% low on call duration and run completion, 63-91% low on TTFT. Autoscaling results on sim that use p95 latency will look better than real pods would. The PLAN risk row's answer is to report the error openly; whether Gate 2's "simulator validated" holds on medians alone is the user's call.
+- Reported, not changed: `make calibrate`'s final redeploy fails the same way after a 1-pod file (P2.8c); it needs its own task.
+
+---
+
 ### 2026-11-07 · P2.8c · green
 Command: `make down` · `make up` · `rm sim/calibration-5553d79b34d7-lora-1pod.csv sim/calibration-5553d79b34d7-lora-1pod.meta.json` · `make calibrate` (2026-11-07 01:33-03:29) · `make test` · `make lint`
 Result:
