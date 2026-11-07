@@ -9,9 +9,11 @@
 | `cold-start-5553d79b34d7-{lora,plain}.csv` | One row per pod started: created → Ready, Ready → first answer, the first call's TTFT, warm-up calls |
 | `*.meta.json` | The profile's sha256, the clock's drift over the file, the warm-up TTFTs |
 
-The results and their oddities are in `experiments/log.md` (2026-11-06 · P2.8a). `config/sim.yaml`'s simulator section
-comes from `calibration-5553d79b34d7-lora-1pod.csv` and `cold-start-5553d79b34d7-lora.csv` through
-`calibrator/mapping.py`; `tests/test_calibration_mapping.py` fails if the profile and the table differ.
+P2.8c measured `calibration-5553d79b34d7-lora-1pod.csv` again on 2026-11-07, after P2.9's first run missed at 1 pod;
+the first table stays in git (638d336). The results and their oddities are in `experiments/log.md` (2026-11-06 · P2.8a,
+2026-11-07 · P2.8c). `config/sim.yaml`'s simulator section comes from `calibration-5553d79b34d7-lora-1pod.csv` and
+`cold-start-5553d79b34d7-lora.csv` through `calibrator/mapping.py`; `tests/test_calibration_mapping.py` fails if the
+profile and the table differ.
 
 ## The simulator's model
 
@@ -29,8 +31,7 @@ its queue. A pod is Ready `startup_duration` after its container starts.
 ## Which measurements (decided 2026-11-06)
 
 - **The adapter's pods, not the plain model's.** Real serves the adapter, so P2.9 compares a simulated pod with what
-  real runs. The cost: the lora 1-pod file has an unexplained slow stretch (below), kept in rather than measured
-  again.
+  real runs. P2.8a's lora 1-pod file had an unexplained slow stretch; P2.8c measured it again (below).
 - **One pod alone, not both at once.** A simulated pod stands for a pod with its own GPU, as in a real cluster. Two
   real pods share the laptop's one GPU: with both busy the adapter's per-token time doubles (150 → 311 ms) and the
   plain model's rises ~30% (62 → 81 ms). That is the laptop's limitation, and it shows in the 1↔2 real validation (D5).
@@ -39,13 +40,13 @@ its queue. A pod is Ready `startup_duration` after its container starts.
 
 | Value | From | Table gives | Profile |
 |---|---|---|---|
-| `prefill_overhead` | Intercept of the least-squares line through the TTFT p50 of the 12 concurrency-1 cells against their uncached tokens (prompt − cached_tokens p50), all cache modes together | 343.4 ms | `343ms` |
-| `prefill_time_per_token` | Slope of the same line | 0.1374 ms | `137us` |
-| `inter_token_latency` | Median per-token p50 of the same 12 cells | 190.6 ms | `191ms` |
-| `time_factor_under_load` | Median per-token p50 at concurrency `max_num_seqs` over that at 1, never under 1 | 146.1 / 190.6 = 0.77 | `1.0` |
+| `prefill_overhead` | Intercept of the least-squares line through the TTFT p50 of the 12 concurrency-1 cells against their uncached tokens (prompt − cached_tokens p50), all cache modes together | 298.5 ms | `298ms` |
+| `prefill_time_per_token` | Slope of the same line | 0.1461 ms | `146us` |
+| `inter_token_latency` | Median per-token p50 of the same 12 cells | 154.2 ms | `154ms` |
+| `time_factor_under_load` | Median per-token p50 at concurrency `max_num_seqs` over that at 1, never under 1 | 152.9 / 154.2 = 0.99 | `1.0` |
 | `max_num_seqs` | Not from the table: real vLLM's 4,384 KV tokens over the 2,195-token median prompt of the converted trace P5 replays (P2.4) | | `2` |
 | `kv_cache_blocks` | Not from the table: `max_num_seqs` × 256 blocks, so running prompts always fit (P2.7) | | `512` |
-| `startup_duration` | Median created → Ready of the 5 pods started alone, plus their median first TTFT less a warm pod's TTFT (the line at the 1,024-token warm-up prompt, 484 ms) | 126 + 14.3 − 0.48 s | `140s` |
+| `startup_duration` | Median created → Ready of the 5 pods started alone, plus their median first TTFT less a warm pod's TTFT (the line at the 1,024-token warm-up prompt, 448 ms) | 126 + 14.3 − 0.45 s | `140s` |
 
 Concurrency 1 for the line and the token gap, because the simulator puts its load factor on top. Values are rounded to
 whole ms, µs per prompt token, whole s and two decimals: finer than the cells differ by.
@@ -54,12 +55,14 @@ whole ms, µs per prompt token, whole s and two decimals: finer than the cells d
 
 Each of these is a stated limitation; P2.9 measures how far a simulated pod ends up from a real one.
 
-- **The slow stretch is in the values.** On the lora 1-pod file the first 9 cells (concurrency 1 up to 2,048 tokens) ran
-  at 187-198 ms per token, then 140-148 from cell 11 on; P2.5 measured 143.5-149 on lora too. The concurrency-1 cells
-  are where the line and the token gap come from, so simulated replies run ~30% slower per token than a real pod's later
-  cells, and the overhead reads high (the line misses a cell by up to 146 ms). The same stretch makes the load ratio 0.77.
-- **The load factor.** Kept at 1.0, as the ratio from the slow stretch would make a pod faster under load. Elsewhere in
-  the table the per-token time grows 2-3% from concurrency 1 to 2 (lora's later cells 1.03, plain 1.02), close to 1.0.
+- **The table's speed against a replay's.** P2.8a's lora 1-pod file ran its first 9 cells (concurrency 1 up to 2,048
+  tokens) at 187-198 ms per token and the rest at 135-166, unexplained; mapped from it, simulated replies took 191.7 ms
+  per token in P2.9's first run. P2.8c's file has no such stretch: 147-186 ms at concurrency 1, 146-164 above it. But
+  P2.9's real 1-pod replay, the same night just before, generated at 123.1 ms per token, by the same formula (time
+  after the first token over the tokens after it), and P2.5's replays at 143.5-149. Why a replay's calls generate faster
+  than the table's 64-token calls is not known, so simulated replies can still run slower than a real replay's.
+- **The load factor.** Kept at 1.0: the per-token time barely moves with concurrency (152.9 at 2 against 154.2 at 1,
+  1.02 at 4, 1.01 at 8; plain 1.02 at 2).
   TTFT under load grows by an added amount, not a factor: on plain at concurrency 2 a fully cached 256-token prompt
   takes 160 ms against 122 alone, about one decode step. The simulator gives the alone value.
 - **Waiting for KV tokens, not request slots.** A real pod runs as many calls as fit 4,384 tokens: with 1,024-token
@@ -82,7 +85,7 @@ Each of these is a stated limitation; P2.9 measures how far a simulated pod ends
 
 ## Not corrected: the clock
 
-The VM's monotonic clock ran 3.0-4.4% slow against Windows' over each file, so every TTFT and per-token time reads ~3-4%
-low. A simulated pod sleeps on the same VM clock that took these times, so it waits the same real time as the measured
-pod worked, and the replayer, on that clock too, reads the same numbers from both. Correcting would make simulated pods
-3-4% slower than real ones as the replayer sees them.
+The VM's monotonic clock ran 2.5-4.4% slow against Windows' over each file, so every TTFT and per-token time reads
+2.5-4.4% low. A simulated pod sleeps on the same VM clock that took these times, so it waits the same real time as the
+measured pod worked, and the replayer, on that clock too, reads the same numbers from both. Correcting would make
+simulated pods 2.5-4.4% slower than real ones as the replayer sees them.

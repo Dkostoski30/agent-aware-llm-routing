@@ -22,17 +22,17 @@ replicas: 2
 # express is in sim/calibration.md.
 simulator:
   # Added once to a call's time to first token: the intercept of the least-squares line through the TTFT p50 of the
-  # table's 12 concurrency-1 cells (all prompt lengths and cache modes) against their uncached tokens. The cells' first
-  # 9 ran ~30% slow for a reason P2.8a could not find, and they are in the line (experiments/log.md).
-  prefill_overhead: 343ms
-  # Per uncached prompt token, which is how a prefix-cache hit saves time (D4): the slope of the same line, 0.137 ms.
-  prefill_time_per_token: 137us
-  # Per output token: the median per-token p50 of the same 12 cells, 190.6 ms. The slow stretch above sets it: the
-  # table's later cells and P2.5 measured 140-149 ms, so simulated replies run ~30% slower than real ones.
-  inter_token_latency: 191ms
+  # table's 12 concurrency-1 cells (all prompt lengths and cache modes) against their uncached tokens; the line misses a
+  # cell by up to 95 ms. The table was measured again in P2.8c, after P2.9's first run missed (experiments/log.md).
+  prefill_overhead: 298ms
+  # Per uncached prompt token, which is how a prefix-cache hit saves time (D4): the slope of the same line, 0.146 ms.
+  prefill_time_per_token: 146us
+  # Per output token: the median per-token p50 of the same 12 cells, 154.2 ms (147-186). P2.8a's table gave 190.6 from
+  # a slow stretch that did not come back; P2.9's first real replay generated at 123.1 ms (sim/calibration.md).
+  inter_token_latency: 154ms
   # 1.0 is no slowdown: the simulator scales every timing above linearly up to this factor at max_num_seqs running. The
-  # table's median per-token p50 at concurrency 2 over that at 1 is 146.1 / 190.6 = 0.77, the slow stretch again, and a
-  # pod is not faster under load, so the mapping keeps 1.0; the adapter's later cells give 1.03, the plain model 1.02.
+  # table's median per-token p50 at concurrency 2 over that at 1 is 152.9 / 154.2 = 0.99, and a pod is not faster
+  # under load, so the mapping keeps 1.0; concurrency 4 and 8 give 1.02 and 1.01.
   time_factor_under_load: 1.0
   # Requests a pod runs at once; the rest wait in its queue. Real vLLM limits by KV tokens instead: 274 blocks, 4,384
   # tokens, and the converted trace P5 replays has a median prompt of 2,195 tokens (P2.4), so about 2 fit (decided
@@ -46,7 +46,7 @@ simulator:
   # vLLM's block size, so cached_tokens moves in the same steps as on a real pod.
   block_size: 16
   # A pod becomes Ready this long after it starts (D4): the median created-to-Ready of the 5 pods started alone, 126 s,
-  # as autoscaling adds one, plus their first call's median TTFT of 14.3 s less a warm pod's 0.48 s (the line above at
+  # as autoscaling adds one, plus their first call's median TTFT of 14.3 s less a warm pod's 0.45 s (the line above at
   # the 1,024-token warm-up prompt). The simulator has no slow first call, so its pods turn Ready when a real pod first
   # answers at a warm pod's speed (decided 2026-11-06). Two pods starting at once on one GPU, which the simulator cannot
   # express, took 124-143 s.
