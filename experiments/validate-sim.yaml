@@ -2,6 +2,7 @@
 # make experiment NAME=validate-sim, with the cluster up on either profile (make up or make up PROFILE=sim), about
 # 3.3 h. Each variant deploys its profile's vLLM release when the profile changes, so the cluster ends on sim at its
 # own 2 replicas. Results carry this file's hash (D11); after a recalibration, note it below so the rerun gets its own.
+# Second run, after P2.8c's recalibration (282c22d): the first, hash 128acd3c5a3b, missed at 1 and 2 pods (P2.9a).
 # The converted trace (P2.4), the one config/sim.yaml's max_num_seqs was set for (its 2,195-token median prompt).
 trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
 # P2.5's and P5's load: 40 runs at 0.02 runs/s, the same in config/real.yaml and config/sim.yaml (checked before the

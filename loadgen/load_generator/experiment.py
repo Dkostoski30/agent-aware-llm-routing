@@ -490,8 +490,11 @@ class LiveCluster:
 
     def deploy(self, profile: str) -> None:
         """The vLLM release only: the gateway, picker and monitoring stay, and set_routing points
-        the picker's probe at the new profile's model. Foreground, so the old pods are gone before
-        it returns: they carry the label the picker selects by, and a real one holds the GPU."""
+        the picker's probe at the new profile's model. The old Deployment must be gone before the
+        install: helm 4's uninstall --wait returned while it was still being deleted, and the
+        install then applied over it and failed on kubectl scale's .spec.replicas (P2.9's rerun).
+        Foreground, so it goes only after its pods: they carry the label the picker selects by, and
+        a real one holds the GPU. kubectl wait --for=delete returns at once when it is gone."""
         subprocess.run(
             [
                 "helm",
@@ -506,6 +509,7 @@ class LiveCluster:
             ],
             check=True,
         )
+        kubectl("wait", VLLM_DEPLOYMENT, "--for=delete", f"--timeout={UNINSTALL_TIMEOUT}")
         target = ["sim-deploy"] if profile == SIM_PROFILE else ["vllm-deploy", f"PROFILE={profile}"]
         subprocess.run(["make", *target], cwd=REPO_ROOT, check=True)
         self.current = profile

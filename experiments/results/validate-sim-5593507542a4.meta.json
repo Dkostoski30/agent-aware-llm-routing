@@ -1,0 +1,129 @@
+{
+  "experiment": "validate-sim",
+  "hash": "5593507542a4",
+  "profile": null,
+  "profile_sha256": null,
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "real-1pod": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "real",
+      "replicas": 1,
+      "profile_sha256": "c5ad930cd98cfb69cb2f06274f96762972448c9aa7f2a95171ac723130b372d6",
+      "warmup_ttft_ms": {
+        "vllm-7c49966cbf-4zxlk": [
+          3599,
+          359,
+          355,
+          337,
+          306
+        ]
+      },
+      "started": 1794064079.3457456,
+      "ended": 1794066449.8514502,
+      "clock_jumps": 70,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7c49966cbf-4zxlk": 309
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 1
+    },
+    "sim-1pod": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "sim",
+      "replicas": 1,
+      "profile_sha256": "9bf85a5e6716d4dbe86f887e6fb6d8c7318f8faec1e322353eb1abe7aa30310f",
+      "warmup_ttft_ms": {
+        "vllm-5d4b644b6c-s59cg": [
+          332,
+          330,
+          330,
+          329,
+          330
+        ]
+      },
+      "started": 1794066818.9348686,
+      "ended": 1794069171.8050723,
+      "clock_jumps": 68,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-5d4b644b6c-s59cg": 309
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 1
+    },
+    "real-2pods": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "real",
+      "replicas": 2,
+      "profile_sha256": "c5ad930cd98cfb69cb2f06274f96762972448c9aa7f2a95171ac723130b372d6",
+      "warmup_ttft_ms": {
+        "vllm-5f89bdc4cf-4mnc9": [
+          3891,
+          425,
+          351,
+          447,
+          373
+        ],
+        "vllm-5f89bdc4cf-pr6qx": [
+          16369,
+          436,
+          321,
+          396,
+          374
+        ]
+      },
+      "started": 1794069580.963241,
+      "ended": 1794071959.5462203,
+      "clock_jumps": 70,
+      "calls": 302,
+      "failed_calls": 1,
+      "calls_per_pod": {
+        "vllm-5f89bdc4cf-pr6qx": 142,
+        "vllm-5f89bdc4cf-4mnc9": 159
+      },
+      "pod_switch_share": 0.3,
+      "max_gap_deviation_ms": 1097
+    },
+    "sim-2pods": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "sim",
+      "replicas": 2,
+      "profile_sha256": "9bf85a5e6716d4dbe86f887e6fb6d8c7318f8faec1e322353eb1abe7aa30310f",
+      "warmup_ttft_ms": {
+        "vllm-76bb5dbf75-pk2sb": [
+          335,
+          330,
+          330,
+          330,
+          330
+        ],
+        "vllm-76bb5dbf75-wmmhb": [
+          331,
+          330,
+          330,
+          330,
+          330
+        ]
+      },
+      "started": 1794072372.2388892,
+      "ended": 1794074744.6566222,
+      "clock_jumps": 69,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-76bb5dbf75-wmmhb": 133,
+        "vllm-76bb5dbf75-pk2sb": 176
+      },
+      "pod_switch_share": 0.262987012987013,
+      "max_gap_deviation_ms": 3
+    }
+  }
+}
