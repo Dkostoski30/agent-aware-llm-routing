@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -152,6 +152,22 @@ agent-check:
 agent-forward:
 	kubectl port-forward svc/agent 8080:8080
 
+# The app backend's API on http://localhost:8081 until Ctrl+C; 8081 since make agent-forward holds 8080 (P2.10b).
+app-forward:
+	kubectl port-forward svc/app 8081:8080
+
+# The image is already in k3s and the claim already bound, so the restarted pod is Ready in seconds; 180 s is
+# infra/deploy-app.sh's rollout timeout.
+APP_RESTART_TIMEOUT := 180s
+
+# Wipes the app backend's users, chats and attachments (P2.10b), the only command that does: removes the SQLite file
+# (and a journal a crash may have left) on the claim app-data, then restarts the pod, which creates the schema in a new
+# file. A request between the two finds no tables and fails; the restart fixes that too. make down keeps the file.
+reset-app:
+	kubectl exec deployment/app -- rm -f /data/app.db /data/app.db-journal
+	kubectl rollout restart deployment/app
+	kubectl rollout status deployment/app --timeout=$(APP_RESTART_TIMEOUT)
+
 # The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
 # forwarding; it proxies /api to make agent-forward (ui/proxy.conf.json). profile.json feeds the top bar's chip, so
 # PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
@@ -165,7 +181,8 @@ ui:
 # The whole cluster from scripts (P1.0); PROFILE defaults to real. Docker vLLM containers are stopped first, since
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 # PROFILE=sim deploys simulated pods and no model; it has no agent either, since nothing there can answer a tool call,
-# so make smoke is not expected to pass on it (P2.7). install-k3s.sh still sets up the GPU, which those pods don't use.
+# so make smoke is not expected to pass on it (P2.7), and no app backend, which only serves the agent's clients
+# (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use.
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
@@ -177,8 +194,10 @@ up:
 	fi
 	bash infra/install-gateway.sh
 	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-agent.sh $(or $(PROFILE),real); fi
+	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-app.sh $(or $(PROFILE),real); fi
 
-# Uninstalls what make up installs and stops k3s; keeps the k3s install, its images and the model cache (P1.0).
+# Uninstalls what make up installs and stops k3s; keeps the k3s install, its images, the model cache (P1.0) and the
+# app's data (P2.10b).
 down:
 	bash infra/down.sh
 
