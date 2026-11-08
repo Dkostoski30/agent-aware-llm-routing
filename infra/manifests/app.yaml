@@ -1,0 +1,80 @@
+# The app backend (D7, P2.10b): users, sessions, chats, messages and attachments in one SQLite file on a volume.
+# infra/down.sh deletes the Deployment and the Service by name but never the claim, so the data survives make down;
+# make reset-app is the only thing that removes it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-data
+  namespace: default
+spec:
+  # k3s's default class: a directory on the node under /var/lib/rancher/k3s/storage, kept while the claim exists.
+  storageClassName: local-path
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      # local-path does not enforce the size; a claim must name one, and 1 GiB is far above a demo's users and chats.
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  namespace: default
+spec:
+  # One writer for one SQLite file (D7).
+  replicas: 1
+  # Recreate: the old pod is gone before the new one starts, so two pods never have the file open at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app
+      annotations:
+        thesis/config-hash: set-by-deploy-app
+    spec:
+      containers:
+        - name: app
+          image: set-by-deploy-app
+          imagePullPolicy: Never
+          env:
+            - name: THESIS_CONFIG
+              value: /etc/thesis/profile.yaml
+            - name: THESIS_APP_DB
+              value: /data/app.db
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/thesis
+              readOnly: true
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: config
+          configMap:
+            name: app-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: app-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  namespace: default
+spec:
+  selector:
+    app.kubernetes.io/name: app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

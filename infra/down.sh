@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Tears down what make up builds (P1.0): uninstalls its Helm releases, then stops k3s and every container it runs,
 # which frees the GPU and the RAM. Kept on purpose: the k3s install, the images in k3s's containerd (the vLLM image
-# is ~9 GB; pulling or importing it again is slow and crashed k3s once, P0.7) and the HF model cache. make up
-# installs every release again from the scripts. The Gateway API and GAIE CRDs, applied with kubectl, stay; make up
-# applies them again unchanged. agentgateway's CRDs are templates of the agentgateway-crds release, so they go with it.
+# is ~9 GB; pulling or importing it again is slow and crashed k3s once, P0.7), the HF model cache and the app's claim
+# app-data with its users and chats (P2.10b). make up installs every release again from the scripts. The Gateway API
+# and GAIE CRDs, applied with kubectl, stay; make up applies them again unchanged. agentgateway's CRDs are templates of
+# the agentgateway-crds release, so they go with it.
 # Idempotent: with k3s already stopped only the stop step runs, and it finds nothing to stop.
 set -euo pipefail
 
@@ -25,8 +26,12 @@ uninstall_release() {
 }
 
 if systemctl is-active --quiet k3s; then
-  # Reverse order of make up: the agent runtime and Redis first (infra/deploy-agent.sh). Then the Gateway, while its
-  # controller still runs to remove the proxy it created.
+  # Reverse order of make up: the app backend first (infra/deploy-app.sh), by name and not with -f app.yaml, so its
+  # claim app-data and the users and chats on it stay (P2.10b); make reset-app is what removes them.
+  kubectl delete deployment/app service/app configmap/app-config --ignore-not-found --wait \
+    --timeout "$UNINSTALL_TIMEOUT"
+  # Then the agent runtime and Redis (infra/deploy-agent.sh). Then the Gateway, while its controller still runs to
+  # remove the proxy it created.
   kubectl delete -f "$REPO_ROOT/infra/manifests/agent.yaml" -f "$REPO_ROOT/infra/manifests/redis.yaml" \
     --ignore-not-found --wait --timeout "$UNINSTALL_TIMEOUT"
   kubectl delete configmap agent-config --ignore-not-found

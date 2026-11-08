@@ -13,6 +13,19 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-08 · P2.10b · green
+Command: `make test` · `make lint` · `make down` · `make up` · `make app-forward` · curl register / login on `localhost:8081` · `kubectl delete pod -l app.kubernetes.io/name=app` · `make reset-app`
+Result:
+- `make test` passed (training 22 of 22), `make lint` green, on the tree with P2.10a merged (35e1fa4).
+- `make up` (real) found `thesis/app:c286d44790b3` already in k3s from an earlier deploy, created the ConfigMap, Deployment and Service, and left the claim `app-data` (Bound, local-path, 1Gi) `unchanged`. `make down` deleted the app's Deployment, Service and ConfigMap and not the claim.
+- `a@b.c` was registered before `make down` (the claim was 14 min old at `make up`). After `make down`, `make up` and a deleted pod: register 409 (the user is still there), login 200 with `set-cookie: session=…; HttpOnly; Max-Age=86400; Path=/; SameSite=strict; Secure`.
+- `make reset-app`: removed the file and rolled out a new pod. Then login 401, register 201.
+Notes:
+- Every pod restart drops `make app-forward`, so the first curl after one prints `000` (no connection) until the forward is started again; this happened twice, once after the pod delete and once after `make reset-app`.
+- The app does not use the GPU; on PROFILE=sim it is not deployed (as the agent is not).
+
+---
+
 ### 2026-11-07 · P2.9 · red
 Command: `make test` · `make lint` · `rm experiments/results/validate-sim-5593507542a4-real-1pod.jsonl` · `make experiment NAME=validate-sim` (2026-11-07 16:07 to 19:05)
 Result:
