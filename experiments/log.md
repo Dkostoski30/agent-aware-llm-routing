@@ -13,6 +13,17 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-08 · P2.12 · green
+Command: `kubectl scale deployment/vllm --replicas=1` · `make vllm-deploy PROFILE=real` (before and after the fix) · `make test` · `make lint`
+Result:
+- Before: `Error: UPGRADE FAILED: conflict occurred while applying object default/vllm apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with "kubectl" with subresource "scale" using apps/v1: .spec.replicas`, the failure that ended P2.8c's `make calibrate`.
+- After adding `--force-conflicts` to `helm upgrade` in `vllm-deploy` and `sim-deploy`: `Release "vllm" has been upgraded`, revision 3, rollout finished with 2 pods Running (the kept one 23 min old, the new one 2 min).
+- `make test` 1431 + 22 passed (the root count includes P2.10a's app tests), `make lint` green.
+Notes:
+- `make sim-deploy` got the same flag and was not run; it needs a sim cluster.
+
+---
+
 ### 2026-11-08 · P2.10b · green
 Command: `make test` · `make lint` · `make down` · `make up` · `make app-forward` · curl register / login on `localhost:8081` · `kubectl delete pod -l app.kubernetes.io/name=app` · `make reset-app`
 Result:
