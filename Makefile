@@ -80,7 +80,9 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # its name and path must end with the first 12 digits of its sha256, since an edit of the name alone once served the
 # old weights under the new name (P2.1b, P2.11), and the weights at its path must have that sha256. Whether the image
 # is there is read from the node's status, which names it by digest, without sudo: make calibrate redeploys hours into
-# a run, after sudo has stopped remembering the password (P2.8).
+# a run, after sudo has stopped remembering the password (P2.8). --force-conflicts: kubectl scale (make calibrate,
+# make experiment) owns .spec.replicas afterwards, and helm 4's server-side apply refuses to set it back without it;
+# with it, a deploy always gives the profile's replicas (P2.12).
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
@@ -113,7 +115,7 @@ vllm-deploy:
 		sudo k3s crictl pull "$$image"; \
 	fi; \
 	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
-		helm upgrade --install vllm infra/charts/vllm --values - \
+		helm upgrade --install vllm infra/charts/vllm --values - --force-conflicts \
 			--set hfCacheHostPath=$$HOME/.cache/huggingface --set-string loraHostPath=$$lora_path; \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
@@ -122,10 +124,11 @@ vllm-deploy:
 # Simulated pods in place of the vLLM ones, values rendered from config/sim.yaml (P2.7). The release has the vllm chart's
 # name, so make down removes either, and a cluster on another profile needs make down first: the two charts own the same
 # objects. Each pod is Ready after simulator.startup_duration; VLLM_DEPLOY_TIMEOUT covers that and the first image pull.
+# --force-conflicts as in vllm-deploy: make experiment scales sim pods too (P2.12).
 sim-deploy:
 	@set -eu; \
 	yq -e '{"replicas": .replicas, "model": .model, "simulator": .simulator, "monitoring": .monitoring}' config/sim.yaml | \
-		helm upgrade --install vllm infra/charts/sim --values -; \
+		helm upgrade --install vllm infra/charts/sim --values - --force-conflicts; \
 	echo "sim-deploy: waiting for the simulated cold start"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
 	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
