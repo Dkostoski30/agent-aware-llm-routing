@@ -1,0 +1,79 @@
+{
+  "experiment": "baseline-reversed",
+  "hash": "694f06470e98",
+  "profile": "real",
+  "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-6697798f7b-wmv89": [
+          17653,
+          494,
+          392,
+          419,
+          457
+        ],
+        "vllm-6697798f7b-z9h4d": [
+          3991,
+          426,
+          367,
+          535,
+          463
+        ]
+      },
+      "started": 1794159389.7733462,
+      "ended": 1794161638.3608856,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6697798f7b-wmv89": 177,
+        "vllm-6697798f7b-z9h4d": 132
+      },
+      "pod_switch_share": 0.3344155844155844,
+      "max_gap_deviation_ms": 2
+    },
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-785dc46674-jd6qg": [
+          15670,
+          386,
+          323,
+          247,
+          320
+        ],
+        "vllm-785dc46674-rtcwm": [
+          3700,
+          296,
+          371,
+          261,
+          336
+        ]
+      },
+      "started": 1794161904.2069423,
+      "ended": 1794164156.559918,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-785dc46674-jd6qg": 164,
+        "vllm-785dc46674-rtcwm": 145
+      },
+      "pod_switch_share": 0.7662337662337663,
+      "max_gap_deviation_ms": 2
+    }
+  }
+}

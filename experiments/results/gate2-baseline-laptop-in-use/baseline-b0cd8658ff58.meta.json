@@ -1,0 +1,79 @@
+{
+  "experiment": "baseline",
+  "hash": "b0cd8658ff58",
+  "profile": "real",
+  "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-5fc74d8bfd-bh2ch": [
+          3835,
+          552,
+          352,
+          280,
+          359
+        ],
+        "vllm-5fc74d8bfd-sms2z": [
+          16775,
+          369,
+          353,
+          282,
+          331
+        ]
+      },
+      "started": 1794133468.0077784,
+      "ended": 1794135721.850314,
+      "clock_jumps": 0,
+      "calls": 236,
+      "failed_calls": 11,
+      "calls_per_pod": {
+        "vllm-5fc74d8bfd-sms2z": 110,
+        "vllm-5fc74d8bfd-bh2ch": 115
+      },
+      "pod_switch_share": 0.6919642857142857,
+      "max_gap_deviation_ms": 4
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-595595749f-28v9q": [
+          4475,
+          376,
+          331,
+          464,
+          389
+        ],
+        "vllm-595595749f-9429x": [
+          18646,
+          350,
+          431,
+          346,
+          288
+        ]
+      },
+      "started": 1794136075.6465552,
+      "ended": 1794138330.4631438,
+      "clock_jumps": 0,
+      "calls": 183,
+      "failed_calls": 20,
+      "calls_per_pod": {
+        "vllm-595595749f-9429x": 58,
+        "vllm-595595749f-28v9q": 105
+      },
+      "pod_switch_share": 0.25308641975308643,
+      "max_gap_deviation_ms": 2
+    }
+  }
+}

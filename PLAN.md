@@ -162,7 +162,7 @@ Order: P0.1 → P0.0 → P0.2 → **P0.6** → P0.3 → P0.4 → P0.5 → P0.7. 
 
 Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2026-11-02), then P2.2a → P2.2b → P2.3 → P2.4 → P2.5 and P2.6 after P2.2a; P2.7 → P2.8 → P2.9 once P2.3 exists (P2.9's first run missed, so P2.9a → P2.8c → P2.9's second run, added 2026-11-07); P2.10a/b (split, cards 33–34) is the first to slip into Phase 3's week, since it is not on Gate 2. P2.12 (added 2026-11-08) comes last, before the Gate 2 check.
 
-**Gate 2:** baseline experiment regenerates from one command; simulator validated.
+**Gate 2:** baseline experiment regenerates from one command; simulator validated. Green 2026-11-08 (`experiments/log.md`): simulator validated with a stated limit, call-duration and run-completion medians within 15% of real pods at 1 and 2 pods, tails 18-91% optimistic under GPU-memory pressure (P2.9).
 
 ### Phase 3: Task affinity, overload guard, remaining work (9–15.11)
 
@@ -204,9 +204,11 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 | ID | Task | Done when |
 |---|---|---|
 | P5.1 | E1 routing: round-robin vs default vs plugin + ablation (each rule off) | 3 repetitions, CSV + graphs, config hash saved |
-| P5.2 | E2 autoscaling: CPU HPA vs KEDA on queue vs remaining work, on bursty traces (simulator at scale + real 1↔2) | Completion time, throughput, time to capacity, idle pod-minutes, interrupted runs |
+| P5.2 | E2 autoscaling: CPU HPA vs KEDA on queue vs remaining work, on bursty traces (simulator at scale + real 1↔2) | Completion time, throughput, time to capacity, idle pod-minutes, interrupted runs; simulated p95 figures labelled optimistic and shown next to the real 1↔2 numbers (Gate 2, P2.9) |
 | P5.3 | E3 failure: pod killed mid-run | Completion rate and recovery cost |
 | P5.4 | Demo rehearsal | Full demo runs twice in a row without intervention |
+
+**Real-pod comparisons (P5.1, and P5.2's real 1↔2):** each one runs in both variant orders and is repeated, with a GPU log beside every run that `make experiment` writes itself, and reports first-token and generation time apart. On 2026-11-08 one baseline run was 20-29% slower for a reason not found, and the variant run second generated faster in all four baseline chains, so one order overstated default's gain, 9.4% against 6.6% over both (`experiments/log.md`, Gate 2).
 
 **Gate 5:** every CSV and graph in the thesis regenerates from `make experiment`.
 

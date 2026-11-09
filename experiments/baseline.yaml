@@ -1,5 +1,6 @@
 # P2.5: round-robin against the default picker on the same replay (docs/task-cards/28-P2.5-baseline-experiment.md). Run
 # with make experiment NAME=baseline after make up PROFILE=real, about 1.5-1.7 h; results carry this file's hash (D11).
+# Run again for Gate 2 on 2026-11-08 (after P2.8c, P2.10 and P2.12); P2.5's run, hash 2069d38644d6, stays as it was.
 # The cluster's profile: its pattern, shared prefixes, model and deadline.
 profile: real
 # The long runs (P2.4): the recorded trace's 2-3 steps at 0.7 calls in flight leave little for a picker to do (P2.3).

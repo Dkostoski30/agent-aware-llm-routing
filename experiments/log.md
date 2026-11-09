@@ -13,6 +13,53 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-08 · Gate 2 · green
+Command: `wsl --shutdown` · `make down` · `make up` · `vmstat -t 10` beside the run · `make experiment NAME=baseline` (round-robin 13:33-14:10, default 14:15-14:52, hash b0cd8658ff58) · `make experiment-compare CSVS=experiments/results/baseline-b0cd8658ff58.csv STALL_SECONDS=5`, laptop idle. Then the same fresh start, `vmstat -t 10` and `nvidia-smi -l 5` beside it, `make experiment NAME=baseline-reversed` (default 18:36-19:13, round-robin 19:18-19:55, hash 694f06470e98) · `make experiment-compare` on both CSVs, laptop idle
+Result:
+- **The baseline regenerates from one command, in both orders.** All four variants 35 of 35 runs, 278 calls in the numbers (309 replayed), 0 failed; CSV, meta and graph written.
+  | | 13:33 round-robin (first) | 13:33 default (second) | 18:36 default (first) | 18:36 round-robin (second) | P2.5 round-robin | P2.5 default |
+  |---|---|---|---|---|---|---|
+  | total run time, s | 1,512.2 | 1,370.2 | 1,125.4 | 1,158.5 | 1,255.0 and 1,174.2 | 1,096.0 and 1,076.7 |
+  | median run, s | 37.28 | 34.55 | 27.68 | 29.32 | 27.89 and 28.38 | 27.15 and 27.53 |
+  | total TTFT, s | 393.7 | 342.6 | 182.5 | 252.6 | 289.0 and 245.4 | 154.4 and 137.3 |
+  | total generation, s | 1,118.0 | 1,027.1 | 942.4 | 905.4 | 965.4 and 928.2 | 941.1 and 938.8 |
+  | generation, ms per token | 142.8 | 144.4 | 141.2 | 139.6 | 147.7 and 143.5 | 146.0 and 149.0 |
+  | prefix-cache hit rate | 0.727 | 0.794 | 0.815 | 0.737 | 0.719 and 0.727 | 0.836 and 0.816 |
+  | later steps moved, of 243 | 161 | 43 | 32 | 161 | 161 and 164 | 27 and 31 |
+  | calls over the KV limit | 31 | 15 | 14 | 24 | 32 and 28 | 7 and 12 |
+  | clock jumps | 0 | 0 | 0 | 0 | 67 and 70 | 69 and 70 |
+- **Default is ahead in both orders, by much less than the first order said.** Default took 142.0 s (9.4%) less total run time than round-robin at 13:33 and 33.1 s (2.9%) less at 18:36. Over both orders it is 87.5 s (6.6%) less; P2.5's two orders gave 10.6%. Default was faster in 20 of 35 runs, per-run median difference -0.50 s. Without the 2 runs that favour default most the gain is 0.7%, and without the 5 most it turns to 2.1% against default, so most of it is a few runs, as in P2.5.
+- **The first-token part always favours default; the generation part follows the order.** A picker cannot change the tokens generated, so a generation difference between variants is the host or the place in the order.
+  | default minus round-robin, s | 11-03, round-robin first | 11-03, default first | 11-08 13:33, round-robin first | 11-08 18:36, default first |
+  |---|---|---|---|---|
+  | total run time | -159.0 | -97.5 | -142.0 | -33.1 |
+  | of which TTFT | -134.6 | -108.1 | -51.1 | -70.1 |
+  | of which generation | -24.3 | +10.6 | -90.9 | +37.0 |
+
+  The variant that ran second generated faster in all four chains (24.3, 10.6, 90.9 and 37.0 s). Four chains are too few to call that a rule, and an earlier P2.5 attempt went the other way (second 14.5% slower, in `baseline-reversed.yaml`'s header).
+- **Simulator (decided by the user, 2026-11-08):** counts as validated with a stated limit. P2.9's call-duration and run-completion medians are within 15% of real pods at 1 and 2 pods (TTFT p50 at 1 pod misses, 22.8%); its p95s read 18-91% low, because a real pod waits for KV blocks. P5.2 labels simulated p95 figures optimistic and shows them next to the real 1↔2 numbers. PLAN.md's Gate 2 line and P5.2 row say so.
+- `vmstat`: almost no swapping in either variant (median 2 KB/s in, 0 out; one sample over 1 MB/s; 361-624 MiB swapped, free memory never under 91 MiB). File: `experiments/results/baseline-vmstat-2026-11-08.txt`. The 18:36 run: the same (median 1-2 KB/s in, 0 out; at most 574 MiB swapped, free memory never under 96 MiB, CPU 93% idle at the median). File: `experiments/results/baseline-reversed-vmstat-2026-11-08.txt`.
+- GPU at 18:36, sampled every 5 s: when not idle, clock median 1,980-1,987 MHz, 32-33 W, 54 °C median and 69 °C at most, the same as 2026-11-03 (1,980-1,991 MHz, 31-34 W, 55-58 °C, sampled every 30 s). The power-cap bit is set in 4 of 1,073 samples. File: `experiments/results/baseline-reversed-gpu-2026-11-08.csv`. Armoury Crate was in Performance mode, the same as for P2.5 (the user's report).
+Notes:
+- **The 13:33 run was 20-29% slower in total than P2.5's (2026-11-03); the 18:36 run was not.** At 13:33 total run time is up 20.5-28.8% on round-robin and 25.0-27.3% on default, with medians 7-9 s higher, while the median ms per token is the same. Total generation is up 9-20% and total TTFT 36-150%. At 18:36, on the same code and the same day, default's total run time is 2.7-4.5% above P2.5's and round-robin's 1.3-7.7% below, with generation at P2.5's level, so the code did not cause the slowdown.
+- **Where the 13:33 slowdown sits, and what is not known.** Calls running alone were as fast as ever at 13:33 (132-137 ms per token). Calls overlapping the other pod took a median 257.5 ms per token on round-robin and 182.7 on default, against 152.7-165.2 at 18:36 and 156.3-163.9 on 2026-11-03. These are from a one-off script over the jsonl files, not in the repo. Why GPU sharing between the pods got worse at 13:33 is not known: that run had no GPU log, and the 18:36 log shows a healthy GPU in a run that was not slow. Swap and CPU are ruled out.
+- **So comparing variants within one run is not enough.** Absolute times are not comparable between days, and a bad stretch can hit one variant of one run: the 9.4% from the 13:33 run alone overstated default's gain. P5 runs each comparison in both orders, repeated, with a GPU log beside it, and reports first-token and generation time apart (PLAN.md, Phase 5).
+- The red try before this one differed in two ways at once (laptop in use, VM full and swapping), so this run does not tell which of them caused the 120 s timeouts.
+
+---
+
+### 2026-11-08 · Gate 2, first baseline try · red
+Command: `make experiment NAME=baseline` (2026-11-08 11:24 to 12:45, hash b0cd8658ff58, after a note line in `experiments/baseline.yaml` gave it a new hash); a first attempt stopped at its Ready check (`[] are Ready, the profile has 2 replicas`) while the pods were still restarting from an interrupted run.
+Result:
+- round-robin: 26 of 35 runs finished, 212 calls, 9 failed; run time median 52.62 s; generation 146.6 ms per token. default: 17 of 35 runs finished, 157 calls, 18 failed; median 52.36 s; 150.2 ms per token. P2.5's run of the same load: 35 of 35, no call failed, medians 27-28 s.
+- Every failure is a `TimeoutError` (`agent.llm_timeout_seconds` 120); a run stops at its first failed call. They come at the same times in both variants, about 175-300 s and 890-1320 s into the replay, where its load peaks.
+- vLLM's own 10 s stats in those stretches: 1 request running at about 1 token/s on each pod, against about 7 at 146 ms per token.
+Notes:
+- The laptop was in use during the run (the user, 2026-11-08). The WSL VM is at its 10 GB cap (`.wslconfig`): 1.4 GB available and swapping 1-2 MB/s in and out with the cluster idle after the run. Which of the two slowed vLLM is not known.
+- Files moved to `experiments/results/gate2-baseline-laptop-in-use/`, as P2.5's first run was. Decided with the user: run again after `wsl --shutdown` and `make up`, with the laptop idle and `vmstat` logged beside it.
+
+---
+
 ### 2026-11-08 · P2.12 · green
 Command: `kubectl scale deployment/vllm --replicas=1` · `make vllm-deploy PROFILE=real` (before and after the fix) · `make test` · `make lint`
 Result:
