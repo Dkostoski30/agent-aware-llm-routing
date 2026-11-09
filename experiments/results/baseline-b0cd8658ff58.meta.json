@@ -1,0 +1,79 @@
+{
+  "experiment": "baseline",
+  "hash": "b0cd8658ff58",
+  "profile": "real",
+  "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-76d99b478b-blw2r": [
+          3915,
+          337,
+          303,
+          311,
+          334
+        ],
+        "vllm-76d99b478b-c4w9d": [
+          15466,
+          323,
+          361,
+          349,
+          376
+        ]
+      },
+      "started": 1794141196.4086342,
+      "ended": 1794143445.8699002,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-76d99b478b-blw2r": 143,
+        "vllm-76d99b478b-c4w9d": 166
+      },
+      "pod_switch_share": 0.7467532467532467,
+      "max_gap_deviation_ms": 2
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "2f09f157e680abe8e7d23ca482763552a809c78fb452e0a627ce4ab25360d84e",
+      "warmup_ttft_ms": {
+        "vllm-5569d6bcfc-85jz8": [
+          16182,
+          360,
+          328,
+          326,
+          303
+        ],
+        "vllm-5569d6bcfc-sn5hl": [
+          3311,
+          329,
+          412,
+          414,
+          344
+        ]
+      },
+      "started": 1794143714.8704193,
+      "ended": 1794145964.854877,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-5569d6bcfc-85jz8": 164,
+        "vllm-5569d6bcfc-sn5hl": 145
+      },
+      "pod_switch_share": 0.30844155844155846,
+      "max_gap_deviation_ms": 2
+    }
+  }
+}

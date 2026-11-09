@@ -2,6 +2,7 @@
 # baseline's default variant, always second, generated 14.5% slower, and so did warm-up calls that skip the picker, so this
 # file tells a place in the order from a picker. Run right after baseline.yaml, it makes round-robin, default, default,
 # round-robin, which cancels a steady drift such as heat. A test holds everything else equal to baseline.yaml.
+# Run again for Gate 2 on 2026-11-08, after baseline b0cd8658ff58; P2.5's run, hash 899a3bf28f10, stays as it was.
 # The cluster's profile: its pattern, shared prefixes, model and deadline.
 profile: real
 # The long runs (P2.4): the recorded trace's 2-3 steps at 0.7 calls in flight leave little for a picker to do (P2.3).
