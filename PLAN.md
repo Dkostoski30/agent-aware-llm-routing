@@ -42,8 +42,8 @@ Setup: Windows + WSL2, RTX 3050 4GB, Ryzen 7, 16GB RAM, €0, code written with 
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | Calls carry headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`; the runtime sends an end-of-run signal. `expected-steps` comes from recorded runs per task type; `max-steps` stays only as a safety cap. | Agents often finish long before `max-steps`; progress and remaining work based on it would be wrong. |
-| D2 | A shared **run tracker** module (used by both the agent runtime and the replayer) keeps run state and exports remaining work Σ(expected-steps − step) over active runs as a Prometheus metric. | Autoscaling no longer depends on the plugin, so it's built in parallel with routing. |
+| D1 | Calls carry headers `x-run-id`, `x-step`, `x-expected-steps`, `x-parallel-group`; the runtime sends an end-of-run signal (to the plugin, `POST /runs/{id}/end`, decided 2026-11-09, P3.3). `expected-steps` comes from recorded runs per task type; `max-steps` stays only as a safety cap. | Agents often finish long before `max-steps`; progress and remaining work based on it would be wrong. |
+| D2 | A shared **run tracker** module (used by both the agent runtime and the replayer) keeps run state and exports remaining work Σ(expected-steps − step) over active runs as a Prometheus metric; a run past its expected steps still counts 1, so each run adds max(expected-steps − step, 1) (decided 2026-11-09, P3.8). | Autoscaling no longer depends on the plugin, so it's built in parallel with routing. |
 | D3 | Progress priority: the plugin (or runtime) sets a per-request priority and vLLM's priority scheduling enforces it, if the P4.1 spike confirms it works through the gateway. | Simplest correct enforcement point; the queue lives in vLLM. |
 | D4 | The simulator models cold start (measured model load time) and cached vs uncached prefill. | Without it, autoscaling and affinity results look unrealistically good. |
 | D5 | Autoscaling strategies are validated on real vLLM at 1↔2 pods; the simulator extends them to larger scale. | CPU-based HPA on simulated pods is meaningless; real pods give a ground truth. |
@@ -168,19 +168,21 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 
 | ID | Track | Task | Done when |
 |---|---|---|---|
-| P3.1 | Routing | Spike: read the Endpoint Picker plugin interface; build the picker from source unchanged, import the image into k3s (`k3s ctr images import` or local registry) | Self-built image behaves exactly like upstream on the baseline replay |
-| P3.2 | Routing | Plugin skeleton registered, no-op scoring, unit test harness, one feature flag per routing rule read from the profile (D11) | Tests run; picker loads the plugin; behavior unchanged |
-| P3.3 | Routing | Task affinity: `run-id → pod` map with TTL, cleared on end-of-run; first step picked by load + prefix, later steps pinned | Table-driven tests pass; replay shows steps 2..n on the same pod; cache hit rate above baseline |
-| P3.4 | Routing | Pod disappears → affected runs remapped | Test with a removed pod passes; no request fails in a replay with a pod deleted |
-| P3.5 | Routing | Overload guard: spill when the pinned pod's queue passes a threshold; remap only if sustained (hysteresis) | Tests cover spike vs sustained overload; no remap on a short spike |
-| P3.6 | Routing | Parallel calls: same `parallel-group` stays on the pod if it has room, otherwise spills | Tests pass; burst replay shows spill only under overload |
-| P3.7 | Routing | Burst replay vs default picker | p95 latency not worse than default under overload; result in CSV |
-| P3.8 | Autoscaling | Run tracker (D2) in runtime and replayer exports remaining work | Test: metric equals Σ(expected-steps − step) for a known set of runs; ended runs drop out; updating a run's expected-steps after its first step (D13) changes the metric |
-| P3.9 | Autoscaling | KEDA ScaledObject on remaining work (simulated pool) | Burst replay: scale-up starts before the queue passes the threshold |
-| P3.10 | Autoscaling | Baselines: HPA on CPU, KEDA on queue depth | Both run on the same replay; results in CSV |
-| P3.11 | UI | Angular: infrastructure panel (pods, queues, remaining work) | Panel numbers match Grafana |
-| P3.12 | App | Chats, messages, attachments API; one message → one agent-runtime call with files in the request (`schemas/run-request`, D12, D13); `run_id` stored on the assistant message; steps fetched from the agent runtime by `run_id` | pytest with mocked runtime passes; run-request contract tests pass in app and agent; a real message through every layer returns an answer and its run_id; another user's chat returns 404; `make smoke` goes through the app backend |
-| P3.13 | UI | Angular: login/register, chat list, open chat with file attach (the composer's attach exists since P2.6a and posts to the agent; here it goes through the app backend); step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons in the cluster panel beside the chat, shown or hidden by a toggle (D14) | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history |
+| P3.1 | Routing | Spike: read the Endpoint Picker plugin interface; build the picker from source unchanged, import the image into k3s (`k3s ctr images import` or local registry) | On sim, the self-built image's hit rate, moved steps and pod switches lie within the spread of two upstream runs, or no further outside it than that spread's width (card 36, decided 2026-11-09) |
+| P3.2 | Routing | Plugin skeleton registered, a no-op filter (a filter is a hard rule, a scorer can be outvoted; decided 2026-11-09, card 37), unit test harness, one feature flag per routing rule read from the profile (D11) | Tests run; picker loads the plugin; behavior unchanged |
+| P3.3 | Routing | Task affinity: `run-id → pod` map with TTL, cleared on end-of-run (`POST /runs/{id}/end`, D1); first step picked by load + prefix, later steps pinned | Table-driven tests pass; replay on real pods, one order, shows steps 2..n on the same pod; cache hit rate above the default variant's, read against default's four-run range 0.794-0.836 (card 38) |
+| P3.4 | Routing | Pod disappears → affected runs remapped | Test with a removed pod passes; in a replay with a pod deleted, no call sent after the pod left the pool fails and the run's later steps land on another pod; calls running on it are counted, retry is P4.4 (narrowed 2026-11-09, card 39) |
+| P3.5 | Routing | Overload guard: spill when the pinned pod's queue passes a threshold; remap only if sustained (hysteresis) | Tests cover spike vs sustained overload; no remap on a short spike; replay on sim (card 40) |
+| P3.6 | Routing | Parallel calls: same `parallel-group` stays on the pod if it has room, otherwise spills | Tests pass; burst replay on sim shows spill only under overload (card 41) |
+| P3.7 | Routing | Burst replay vs default picker | p95 latency not worse than default under overload, on real pods in both orders with a GPU log (Phase 5's rule, decided 2026-11-09, card 42); result in CSV |
+| P3.8 | Autoscaling | Run tracker (D2) in runtime and replayer exports remaining work | Test: metric equals Σ max(expected-steps − step, 1) for a known set of runs, one of them past its expected steps; ended runs drop out; updating a run's expected-steps after its first step (D13) changes the metric |
+| P3.9 | Autoscaling | KEDA ScaledObject on remaining work (simulated pool). Split 2026-11-09: P3.9a KEDA pinned in `make up` (card 44), P3.9b the ScaledObject and experiment variants (card 45) | Burst replay: scale-up starts before the queue passes the threshold |
+| P3.10 | Autoscaling | Baselines: HPA on CPU on real 1↔2 pods only, since D5 finds it meaningless on sim; KEDA on queue depth on the simulator (decided 2026-11-09, card 46) | Both run on the same replay shape; results in CSV; whether CPU scaled at all is recorded |
+| P3.11 | UI | Angular: infrastructure panel (pods, queues, remaining work), from the app backend's `GET /cluster` (card 47) | Panel numbers match Grafana |
+| P3.12 | App | Chats, messages, attachments API; one message → one agent-runtime call with the chat's newest files, up to `agent.max_files` (decided 2026-11-09), in the request (`schemas/run-request`, D12, D13); `run_id` stored on the assistant message; steps fetched from the agent runtime by `run_id` | pytest with mocked runtime passes; run-request contract tests pass in app and agent; a real message through every layer returns an answer and its run_id; another user's chat returns 404; `make smoke` goes through the app backend. Split 2026-11-09: P3.12a the API on a mocked runtime (card 48), P3.12b through every layer (card 49) |
+| P3.13 | UI | Angular: login/register, chat list, open chat with file attach (the composer's attach exists since P2.6a and posts to the agent; here it goes through the app backend); step view (P1.4 + P2.6 components) expandable under each answer; P3.11 panel and P4.6 buttons in the cluster panel beside the chat, shown or hidden by a toggle (D14) | Register, create chat, attach CSV, ask, see answer with steps; reload keeps history. Split 2026-11-09: P3.13a login (card 50), P3.13b chats (card 51), P3.13c steps and panel (card 52) |
+
+Order (2026-11-09): routing P3.1 → P3.2 → P3.3 → P3.4 → P3.5 → P3.6 → P3.7; autoscaling P3.8 → P3.9a → P3.9b → P3.10; app and UI P3.12a → P3.12b → P3.13a → P3.13b → P3.11 → P3.13c. The tracks are independent until P3.11 and P3.13c. P3.8, P3.12a and P3.13a need no cluster, so they can be written while a simulated replay runs; nothing else runs during a real-pod replay (P2.5). If the week runs over, these slip into Phase 4's week, in this order: P3.13, P3.11, P3.10. None is on Gate 3. P3.12 stays, since P4.8 needs the chat path; the freeze on 22.11 does not move.
 
 **Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work.
 
@@ -203,8 +205,8 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 
 | ID | Task | Done when |
 |---|---|---|
-| P5.1 | E1 routing: round-robin vs default vs plugin + ablation (each rule off) | 3 repetitions, CSV + graphs, config hash saved |
-| P5.2 | E2 autoscaling: CPU HPA vs KEDA on queue vs remaining work, on bursty traces (simulator at scale + real 1↔2) | Completion time, throughput, time to capacity, idle pod-minutes, interrupted runs; simulated p95 figures labelled optimistic and shown next to the real 1↔2 numbers (Gate 2, P2.9) |
+| P5.1 | E1 routing: round-robin vs default vs upstream's `session-affinity-filter` on `x-run-id` (decided 2026-11-09, card 38) vs plugin + ablation (each rule off) | 3 repetitions, CSV + graphs, config hash saved |
+| P5.2 | E2 autoscaling: CPU HPA vs KEDA on queue vs remaining work, on bursty traces; KEDA's two on the simulator at scale and real 1↔2, CPU HPA on real 1↔2 only (D5, decided 2026-11-09) | Completion time, throughput, time to capacity, idle pod-minutes, interrupted runs; simulated p95 figures labelled optimistic and shown next to the real 1↔2 numbers (Gate 2, P2.9) |
 | P5.3 | E3 failure: pod killed mid-run | Completion rate and recovery cost |
 | P5.4 | Demo rehearsal | Full demo runs twice in a row without intervention |
 
