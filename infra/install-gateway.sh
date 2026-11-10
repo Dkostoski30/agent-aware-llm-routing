@@ -8,8 +8,8 @@ set -euo pipefail
 
 # The newest releases at least two weeks old on 2026-10-27 (versions.md, Container and cluster). Manifests are
 # sha256-checked and charts pinned by digest, so a re-pushed tag can't change what make up installs. The charts'
-# images come from the chart, as for the monitoring stack (P1.1); only the EPP image is pinned by digest on top
-# (infra/helm/router-values.yaml).
+# images come from the chart, as for the monitoring stack (P1.1), except the EPP's: built from gateway/ (P3.1), so make up
+# runs infra/picker-image.sh first.
 GATEWAY_API_VERSION=v1.6.3
 GATEWAY_API_SHA256=356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5
 GAIE_VERSION=v1.6.2
@@ -60,10 +60,13 @@ helm upgrade --install agentgateway "$AGENTGATEWAY_CHART" \
   --values "$REPO_ROOT/infra/helm/agentgateway-values.yaml" \
   --wait --timeout "$INSTALL_TIMEOUT"
 
-# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp).
+# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp). The image's tag as
+# infra/set-routing.sh passes it; captured first, since a failure inside <(...) would not stop the script.
+picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
 helm upgrade --install vllm-pool "$ROUTER_CHART" \
   --namespace "$POOL_NAMESPACE" \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
+  --values <(echo "$picker_values") \
   --wait --timeout "$INSTALL_TIMEOUT"
 
 kubectl apply -f "$REPO_ROOT/infra/manifests/inference-gateway.yaml"
