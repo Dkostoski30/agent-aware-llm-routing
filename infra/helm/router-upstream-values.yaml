@@ -1,0 +1,13 @@
+# Upstream's Endpoint Picker image, on top of infra/helm/router-values.yaml: the image make up installed until P3.1, which
+# compares the image built from gateway/ against it (experiments/self-built-check.yaml), and P5.1's upstream variants.
+# A values file after the tag infra/set-routing.sh passes, so this one wins.
+router:
+  epp:
+    image:
+      registry: ghcr.io/llm-d
+      repository: llm-d-router-endpoint-picker
+      # Pinned by digest (versions.md). Until P3.1 router-values.yaml held this tag.
+      tag: v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf
+      # The chart's default Always asks the registry on every restart. A digest cannot change, so a network blip during a
+      # long experiment would only fail a restart for nothing.
+      pullPolicy: IfNotPresent

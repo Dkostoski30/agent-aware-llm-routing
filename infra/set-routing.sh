@@ -2,6 +2,9 @@
 # Puts the Endpoint Picker on a routing variant (P2.5) and restarts it, which empties its prefix index even when the
 # variant did not change. Waits until a call passes through the gateway.
 # Usage: infra/set-routing.sh <profile> [values-file]. With no values file: the default picker, as make up installs it.
+# The picker's image is the build of gateway/ as it is now (infra/picker-image.sh), unless the values file names another,
+# as infra/helm/router-upstream-values.yaml does. After a change to gateway/, make picker-image comes first: this script
+# asks for no sudo, so it never builds, and a tag missing from k3s fails the rollout.
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -21,9 +24,13 @@ PROBE_TIMEOUT_SECONDS=120
 profile=${1:?usage: infra/set-routing.sh <profile> [values-file]}
 values=${2:-}
 
+# A values file and not --set: --set overrides every values file, so the variant's own image would never apply.
+# Captured first, since a failure inside <(...) would not stop the script.
+picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
 helm upgrade --install vllm-pool "$ROUTER_CHART" \
   --namespace default \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
+  --values <(echo "$picker_values") \
   ${values:+--values "$values"} \
   --wait --timeout "$ROLLOUT_TIMEOUT"
 kubectl rollout restart deployment/vllm-pool-epp

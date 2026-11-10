@@ -13,6 +13,30 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-10 · P3.1 · green
+Command: `make down` · `make up PROFILE=sim` · `bash infra/set-routing.sh sim infra/helm/router-upstream-values.yaml`, then `bash infra/set-routing.sh sim` · `make experiment NAME=self-built-check` (upstream 17:32-18:09, self-built 18:13-18:50, upstream-again 18:54-19:32, hash e141b17ac44c). Before the cluster: `go build`, `go test ./...`, `golangci-lint run`, `docker build`, and `--help` of both images diffed
+Result:
+- **The picker built from `gateway/` picks as upstream's image does, on every number card 36 names.** 35 of 35 runs in each variant, 278 calls in the numbers (309 replayed), 0 failed.
+  | | upstream | self-built | upstream-again | upstream spread | self-built inside it |
+  |---|---|---|---|---|---|
+  | prefix-cache hit rate | 0.892 | 0.892 | 0.891 | 0.891-0.892 | yes |
+  | later steps moved, of 243 | 2 | 2 | 2 | 2 | yes |
+  | share of picks that switched pod | 0.279 | 0.282 | 0.295 | 0.279-0.295 | yes |
+  | median run, s | 28.07 | 28.07 | 28.06 | | |
+  | calls over the KV limit | 4 | 4 | 1 | | |
+  | clock jumps | 69 | 22 | 35 | | |
+- Each variant ran the image it names, by `helm history vllm-pool`: revision 4 upstream's digest (17:31), 5 `thesis/picker:34d311a905f1` (18:11), 6 upstream's (18:53), 7 `thesis/picker` again when the experiment put the default back (19:32). The switch check before it: revisions 2 and 3 (17:17, 17:18), both directions.
+- The image itself: its `--help` text is upstream's to the byte but for the timestamp of the start-up log line, which carries the same `commit-sha a5cbe600…` and `build-ref v0.11.0`; same user (65532), entrypoint, ports and layer count (14); 103 MB, upstream's 104 MB. All 110 module versions in `gateway/go.mod` are those of llm-d-router v0.11.0's `go.mod`.
+- Cost: the first `go build` took 119 s, one compile process at most 1.4 GB of memory; the first `docker build` 336 s. `make test` (1431 passed, `go test` compiles the module, no test files yet) and `make lint` (golangci-lint 0 issues) pass on Claude's run.
+Notes:
+- **What this check does not cover.** On sim the default picker moved 2 of 243 later steps, against 27-43 on real pods (Gate 2), and its hit rate is 0.89 against 0.79-0.84 there. So it shows the two builds agree where the prefix scorer decides; moves driven by queues and KV use under load barely happen here. A difference that only shows under that load would not show in this check.
+- The picks per pod differ between the three runs (184/125, 172/137, 166/143) while the summary numbers agree; pod names change with each restart, so the split is not comparable pod by pod.
+- 22-69 clock jumps per variant (Gate 2's runs had none, P2.5's 67-70); the largest gap deviation was 1-2 ms, so the replay kept its timing. Cause not looked into.
+- Found while planning (card 36): `--set` overrides every values file, so the tag goes in a values file before the variant's, else the upstream variants would have run our image; `set-routing.sh` only reads the tag and never asks for sudo; `values: null` in an experiment file now means the self-built picker, `baseline*.yaml` included.
+- Two stops on the way, neither in a result: a `set-routing.sh` stopped while it waited (2026-11-10 00:38) left the `vllm-pool` release `pending-upgrade`, and Helm refused every later upgrade ("another operation is in progress") until `make down` removed it; a first `make experiment` stopped at its Ready check (`[] are Ready, the profile has 2 replicas`) while the sim pods were still in their 140 s cold start after a `kubectl rollout restart` at 17:26:17 (what ran it was not seen; only `infra/restart-vllm.sh` does).
+
+---
+
 ### 2026-11-08 · Gate 2 · green
 Command: `wsl --shutdown` · `make down` · `make up` · `vmstat -t 10` beside the run · `make experiment NAME=baseline` (round-robin 13:33-14:10, default 14:15-14:52, hash b0cd8658ff58) · `make experiment-compare CSVS=experiments/results/baseline-b0cd8658ff58.csv STALL_SECONDS=5`, laptop idle. Then the same fresh start, `vmstat -t 10` and `nvidia-smi -l 5` beside it, `make experiment NAME=baseline-reversed` (default 18:36-19:13, round-robin 19:18-19:55, hash 694f06470e98) · `make experiment-compare` on both CSVs, laptop idle
 Result:

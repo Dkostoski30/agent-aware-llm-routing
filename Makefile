@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -142,6 +142,12 @@ service-check:
 gateway-check:
 	bash infra/checks/gateway_check.sh
 
+# The Endpoint Picker's image built from gateway/ into k3s, tagged with a hash of gateway/; skipped if k3s has that tag
+# (P3.1). Run it after a change to gateway/, then infra/set-routing.sh, which deploys the build but never makes it. The
+# compile needs a few GB of the VM's memory, so not next to real vLLM pods: make up runs it before they start.
+picker-image:
+	bash infra/picker-image.sh
+
 # Redis and the agent runtime, image built from the working tree, config from config/$(PROFILE).yaml (P1.3b).
 agent-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make agent-deploy PROFILE=real|sim|demo"; exit 2; fi
@@ -189,6 +195,7 @@ ui:
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
+	bash infra/picker-image.sh
 	bash infra/install-monitoring.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" = sim ]; then \
 		$(MAKE) sim-deploy; \

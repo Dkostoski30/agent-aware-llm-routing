@@ -72,6 +72,16 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 | redis (redis-py) | 8.1.0 | agent, P1.3a-2 (run history in Redis, D7; 2026-07-30) |
 | matplotlib | 3.11.2 | loadgen, P2.5 (experiment graphs; 2026-09-11), never in the agent image, which installs `agent/requirements.txt`. Pulls in numpy 2.5.4, pillow 13.0.0 and others, pinned by uv.lock |
 
+## Go modules
+
+Pinned in `gateway/go.mod` and `gateway/go.sum`. Modules they pull in are pinned by `go.sum` at the versions
+llm-d-router's own `go.mod` lists: all 110 matched it when P3.1 added the module (2026-11-10).
+
+| Module | Version | Why |
+|---|---|---|
+| github.com/llm-d/llm-d-router | v0.11.0 (commit `a5cbe60`), the Endpoint Picker release the chart installs | The picker built from source (P3.1): `gateway/cmd/picker` runs its `cmd/epp/runner`, as upstream's `main` does |
+| sigs.k8s.io/controller-runtime | v0.24.1, llm-d-router v0.11.0's | The signal handler upstream's `main` uses |
+
 ## Training packages
 
 Pinned in `training/pyproject.toml` and `training/uv.lock` (P1.7). `training/` is its own uv project, not a member of
@@ -129,7 +139,9 @@ these are the newest versions available on 2026-10-25, without the two-week rule
 | Gateway API CRDs (standard channel) | v1.6.3 (2026-10-06, the newest release at least two weeks old on 2026-10-27), `standard-install.yaml` sha256 `356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5`. Pinned in `infra/install-gateway.sh` |
 | Gateway (agentgateway, Helm charts `agentgateway-crds` and `agentgateway`) | v1.6.0 (2026-10-02, the newest release at least two weeks old on 2026-10-27; built and conformance-tested against GAIE v1.6.2). kgateway dropped InferencePool in v2.3.0 and Envoy Gateway has no native support (spike, `experiments/log.md`). Chart digests: `agentgateway-crds` `sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a`, `agentgateway` `sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28`. The controller and proxy images come from the chart (tag v1.6.0), as for the monitoring stack. Pinned in `infra/install-gateway.sh` |
 | Gateway API Inference Extension (InferencePool CRD) | v1.6.2 (2026-09-17, the newest release at least two weeks old on 2026-10-27), `v1-manifests.yaml` sha256 `f410dfca474608c02903087b47f1ac081706dfb6dfe7f83d00a7cc7e00c4ad0d`, InferencePool `inference.networking.k8s.io/v1`. Pinned in `infra/install-gateway.sh` |
-| Endpoint Picker (llm-d-router, Helm chart `llm-d-router-gateway`) | v0.11.0 (2026-09-27; v1.0.0 of 2026-10-16 was 11 days old), chart digest `sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0`, image `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf`. Built on GAIE v1.5.0; its InferencePool fields match the v1.6.2 CRD. Pinned in `infra/router-chart.sh` and `infra/helm/router-values.yaml` |
+| Endpoint Picker (llm-d-router, Helm chart `llm-d-router-gateway`) | v0.11.0 (2026-09-27; v1.0.0 of 2026-10-16 was 11 days old), chart digest `sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0`, upstream's image `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf`. Built on GAIE v1.5.0; its InferencePool fields match the v1.6.2 CRD. Chart pinned in `infra/router-chart.sh`. Since P3.1 the picker runs `thesis/picker:<hash of gateway/>`, built from the same release (`gateway/`, Go modules above) by `infra/picker-image.sh` (103 MB, upstream's 104 MB); upstream's image stays pinned in `infra/helm/router-upstream-values.yaml` |
+| Picker build image (`golang`) | 1.26.8, the one upstream's `Dockerfile.epp` names at v0.11.0, digest `sha256:eb36c1664dd974cde625f736e02c204383deebe03977365caaec5bf49f794348` (index, read 2026-11-09). Pinned in `gateway/Dockerfile` (P3.1) |
+| Picker runtime image (`gcr.io/distroless/static`) | `nonroot`, upstream's runtime image, digest `sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329` (index, read 2026-11-09; the tag moves, so upstream's v0.11.0 may sit on an older one: CA certificates, tzdata and a passwd file, no shell). Pinned in `gateway/Dockerfile` (P3.1) |
 | KEDA | |
 | kube-prometheus-stack (Helm chart) | 92.3.0 (2026-10-10, the newest release at least two weeks old on 2026-10-26): Prometheus Operator v0.94.1, Prometheus v3.15.0, Grafana 13.2.3, kube-state-metrics v2.20.0, k8s-sidecar 2.14.1. Pinned in `infra/install-monitoring.sh` |
 | Redis (image `redis`) | 8.10.2-alpine (2026-09-17, the newest release at least two weeks old on 2026-10-27; 8.10.3 was a day old), digest `sha256:9f8d2d789b9a1d1e3f283f979aa9cbf393373806472e1ccd460e2f9c869b833b`, no persistence (D7). Pinned in `infra/manifests/redis.yaml` (P1.3b) |
