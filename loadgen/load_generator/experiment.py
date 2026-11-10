@@ -10,6 +10,10 @@ A variant may name its own profile and replica count (P2.9): the vLLM release is
 profile's whenever it changes, with no make down, since make up asks for sudo, and the pods are
 scaled before the restart. The deployed profile is scaled back to its own count at the end.
 
+A variant may instead turn routing rules on (P3.2): routing: {plugin: true, affinity: true} is laid
+over its profile's routing section by infra/routing-values.sh, and the picker runs
+thesis-plugins.yaml.
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -18,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -96,6 +101,13 @@ class Variant:
     profile: str
     # None is the profile's own count.
     replicas: int | None
+    # Rules laid over the profile's routing section; None is the profile's own. Never with values.
+    routing: Mapping[str, bool] | None
+
+    @property
+    def default(self) -> bool:
+        """The picker as make up installs it for the profile."""
+        return self.values is None and self.routing is None
 
 
 @dataclass(frozen=True)
@@ -142,7 +154,8 @@ class Cluster(Protocol):
 
     def restart_pods(self) -> None: ...
 
-    def set_routing(self, values: Path | None) -> None: ...
+    # Both None is the default picker; at most one is given.
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None: ...
 
     def epp_config_file(self) -> str: ...
 
@@ -169,9 +182,46 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
     replicas = section.get("replicas")
     if replicas is not None and replicas < 1:
         raise ExperimentError(f"variant {section['name']}: replicas {replicas}, at least 1")
+    routing = section.get("routing")
+    if routing is not None:
+        if values is not None:
+            raise ExperimentError(
+                f"variant {section['name']}: a values file and routing rules, give one"
+            )
+        if (
+            not isinstance(routing, dict)
+            or not routing
+            or not all(isinstance(on, bool) for on in routing.values())
+        ):
+            raise ExperimentError(
+                f"variant {section['name']}: routing must map rules to true or false, got {routing}"
+            )
     return Variant(
-        section["name"], values, section["epp_config"], variant_profile(spec, section), replicas
+        section["name"],
+        values,
+        section["epp_config"],
+        variant_profile(spec, section),
+        replicas,
+        routing,
     )
+
+
+def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Every rule a variant sets is one its profile has, and no rule is on while the plugin is off,
+    where it would do nothing and the variant would read as its result. infra/routing-values.sh
+    refuses both too, but only when the variant's switch runs, which may be hours into the run."""
+    for variant in experiment.variants:
+        known = profiles[variant.profile]["routing"]
+        unknown = sorted(set(variant.routing or {}) - set(known))
+        if unknown:
+            raise ExperimentError(
+                f"variant {variant.name}: no rule {', '.join(unknown)} in profile "
+                f"{variant.profile}, has {', '.join(known)}"
+            )
+        rules = {**known, **(variant.routing or {})}
+        on = [rule for rule, value in rules.items() if rule != "plugin" and value]
+        if on and not rules["plugin"]:
+            raise ExperimentError(f"variant {variant.name}: {', '.join(on)} on, but plugin is off")
 
 
 def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -> None:
@@ -276,6 +326,8 @@ def _variant_meta(
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
+        # The file's hash covers it too; here it is beside the result it explains.
+        "routing": variant.routing,
         "profile": variant.profile,
         "replicas": variant.replicas,
         "profile_sha256": profile_sha256,
@@ -359,9 +411,9 @@ def run_experiment(
                 cluster.scale(variant.replicas)
                 scaled = True
             cluster.restart_pods()
-            off_default = off_default or variant.values is not None
-            cluster.set_routing(variant.values)
-            off_default = variant.values is not None
+            off_default = off_default or not variant.default
+            cluster.set_routing(variant.values, variant.routing)
+            off_default = not variant.default
             lines, variant_meta = _run_variant(
                 experiment, variant, out, cluster, clock, profile_sha256[variant.profile]
             )
@@ -393,7 +445,7 @@ def run_experiment(
             finished(rows, meta)
     finally:
         if off_default:
-            cluster.set_routing(None)
+            cluster.set_routing(None, None)
         if scaled:
             cluster.scale(None)
     return rows, meta
@@ -533,12 +585,19 @@ class LiveCluster:
     def restart_pods(self) -> None:
         subprocess.run(["bash", str(REPO_ROOT / "infra" / "restart-vllm.sh")], check=True)
 
-    def set_routing(self, values: Path | None) -> None:
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None:
+        """set-routing.sh takes one file: Helm values, or rules under a top-level routing key."""
         if self.current is None:
             raise ExperimentError("no profile is deployed yet")
         script = str(REPO_ROOT / "infra" / "set-routing.sh")
-        extra = [] if values is None else [str(values)]
-        subprocess.run(["bash", script, self.current, *extra], check=True)
+        if routing is None:
+            extra = [] if values is None else [str(values)]
+            subprocess.run(["bash", script, self.current, *extra], check=True)
+            return
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as rules:
+            yaml.safe_dump({"routing": dict(routing)}, rules)
+            rules.flush()
+            subprocess.run(["bash", script, self.current, rules.name], check=True)
 
     def epp_config_file(self) -> str:
         return served_config_file(
@@ -668,6 +727,7 @@ def main() -> None:
     first = next(iter(profiles.values()))
     patterns = load_replay_config(first["replay"]).patterns
     experiment = load_experiment(args.experiment, patterns)
+    check_routing(experiment, profiles)
     out = outputs(experiment, REPO_ROOT)
     refuse_leftovers(experiment, out)
 

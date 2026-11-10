@@ -20,8 +20,10 @@ import yaml
 from load_generator.experiment import (
     Experiment,
     ExperimentError,
+    LiveCluster,
     Warmup,
     check_journal_readable,
+    check_routing,
     check_same_replay,
     count_clock_jumps,
     finish,
@@ -141,9 +143,13 @@ class FakeCluster:
         self.fail_restart_number = fail_restart_number
         self.fail_switch_number = fail_switch_number
         self.values: Path | None = None
-        self.running_config = running_config or (
-            lambda values: "default-plugins.yaml" if values is None else "round-robin.yaml"
-        )
+        self.routing: Mapping[str, bool] | None = None
+        self.running_config = running_config or self._config_of
+
+    def _config_of(self, values: Path | None) -> str:
+        if self.routing is not None:
+            return "thesis-plugins.yaml"
+        return "default-plugins.yaml" if values is None else "round-robin.yaml"
 
     def check_ready(self) -> None:
         self.asked.append("check")
@@ -159,13 +165,17 @@ class FakeCluster:
         if self.asked.count("restart") == self.fail_restart_number:
             raise RuntimeError("the restart broke")
 
-    def set_routing(self, values: Path | None) -> None:
-        name = f"routing {values.name if values else 'default'}"
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None:
+        if routing is not None:
+            name = "routing " + ",".join(f"{rule}={on}" for rule, on in sorted(routing.items()))
+        else:
+            name = f"routing {values.name if values else 'default'}"
         self.asked.append(name)
         switches = sum(step.startswith("routing") for step in self.asked)
         if switches == self.fail_switch_number:
             raise RuntimeError("the switch broke")
         self.values = values
+        self.routing = routing
 
     def epp_config_file(self) -> str:
         self.asked.append("config")
@@ -253,6 +263,128 @@ def test_a_values_file_that_is_not_there_is_refused(tmp_path: Path) -> None:
     variant = {"name": "gone", "values": "gone.yaml", "epp_config": "x.yaml"}
     with pytest.raises(ExperimentError, match=r"gone\.yaml"):
         loaded(tmp_path, variants=[variant])
+
+
+ROUTER_VARIANT = {
+    "name": "run-router",
+    "values": None,
+    "routing": {"plugin": True, "affinity": True},
+    "epp_config": "thesis-plugins.yaml",
+}
+DEFAULT_VARIANT = {"name": "default", "values": None, "epp_config": "default-plugins.yaml"}
+
+
+def test_a_variant_may_turn_routing_rules_on(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    default, router = experiment.variants
+    assert default.routing is None
+    assert router.routing == {"plugin": True, "affinity": True}
+    assert router.values is None
+    assert router.epp_config == "thesis-plugins.yaml"
+
+
+def test_a_variant_with_a_values_file_and_routing_is_refused(tmp_path: Path) -> None:
+    """A routing variant needs the picker built from gateway/ on thesis-plugins.yaml, and a values
+    file swaps the image or the config file, so the two never mean one thing together."""
+    variant = {**ROUTER_VARIANT, "values": "round-robin-values.yaml"}
+    with pytest.raises(ExperimentError, match="run-router"):
+        loaded(tmp_path, variants=[variant])
+
+
+@pytest.mark.parametrize("routing", [{"affinity": "yes"}, {"affinity": None}, {}, ["affinity"]])
+def test_routing_that_is_not_rules_set_to_true_or_false_is_refused(
+    tmp_path: Path, routing: Any
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": routing}
+    with pytest.raises(ExperimentError, match="run-router"):
+        loaded(tmp_path, variants=[variant])
+
+
+def test_routing_rules_the_profile_has_are_accepted(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+def test_a_routing_rule_the_profile_lacks_is_refused(tmp_path: Path) -> None:
+    """A typo would otherwise fail only when the variant's switch runs, maybe hours in."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "afinity": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="afinity"):
+        check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [({}, {"affinity": True}), ({"affinity": True}, {"priority": False})],
+)
+def test_a_rule_on_while_the_plugin_is_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """It would do nothing, and the variant would read as the rule's result. infra/routing-values.sh
+    refuses it too, but only at the variant's switch."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="plugin is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_main_refuses_a_routing_rule_the_profile_lacks_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "afinity": True}}
+    path = experiment_file(tmp_path, variants=[variant])
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="afinity"):
+        main()
+
+
+def test_a_routing_variant_switches_the_picker_and_the_default_comes_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    _rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), cluster, ticking_clock()
+    )
+    switches = [step for step in cluster.asked if step.startswith("routing")]
+    assert switches == [
+        "routing default",
+        "routing affinity=True,plugin=True",
+        "routing default",
+    ]
+    assert meta["variants"]["run-router"]["routing"] == {"plugin": True, "affinity": True}
+    assert meta["variants"]["default"]["routing"] is None
+
+
+def test_the_live_cluster_hands_set_routing_a_file_of_the_variants_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    handed: list[tuple[list[str], Any]] = []
+
+    def run(args: list[str], check: bool) -> None:
+        assert check
+        handed.append((args, yaml.safe_load(Path(args[-1]).read_text())))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    LiveCluster(experiment, {}).set_routing(None, {"plugin": True, "affinity": True})
+    ((args, content),) = handed
+    assert args[:3] == ["bash", str(REPO_ROOT / "infra" / "set-routing.sh"), "real"]
+    assert content == {"routing": {"plugin": True, "affinity": True}}
 
 
 def test_a_trace_that_is_not_there_is_refused(tmp_path: Path) -> None:
