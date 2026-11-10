@@ -4,6 +4,7 @@
 # Since GAIE v1.6.0 the full Endpoint Picker lives in llm-d-router; GAIE keeps the InferencePool API (spike
 # 2026-10-27, experiments/log.md).
 # Idempotent: kubectl apply and helm upgrade --install converge to the same state on every run.
+# Usage: install-gateway.sh PROFILE. The picker runs the profile's routing section (infra/routing-values.sh, P3.2).
 set -euo pipefail
 
 # The newest releases at least two weeks old on 2026-10-27 (versions.md, Container and cluster). Manifests are
@@ -29,11 +30,15 @@ CRD_TIMEOUT=60s
 # a slow connection, a cached install is Ready in seconds.
 INSTALL_TIMEOUT=300s
 
+profile=${1:?usage: infra/install-gateway.sh PROFILE   (real | real-plain | sim | demo)}
+
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=infra/router-chart.sh
 source "$REPO_ROOT/infra/router-chart.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+# Before anything is installed, so a profile that is not there or a routing section refused stops the script at once.
+routing_values=$(bash "$REPO_ROOT/infra/routing-values.sh" "$profile")
 
 # apply_crds <url> <sha256>: applies a release's CRD manifest once its checksum matches (as infra/bootstrap.sh does).
 apply_crds() {
@@ -60,13 +65,14 @@ helm upgrade --install agentgateway "$AGENTGATEWAY_CHART" \
   --values "$REPO_ROOT/infra/helm/agentgateway-values.yaml" \
   --wait --timeout "$INSTALL_TIMEOUT"
 
-# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp). The image's tag as
-# infra/set-routing.sh passes it; captured first, since a failure inside <(...) would not stop the script.
+# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp). The image's tag and the profile's
+# routing as infra/set-routing.sh passes them; captured first, since a failure inside <(...) would not stop the script.
 picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
 helm upgrade --install vllm-pool "$ROUTER_CHART" \
   --namespace "$POOL_NAMESPACE" \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
   --values <(echo "$picker_values") \
+  --values <(echo "$routing_values") \
   --wait --timeout "$INSTALL_TIMEOUT"
 
 kubectl apply -f "$REPO_ROOT/infra/manifests/inference-gateway.yaml"

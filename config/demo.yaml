@@ -25,6 +25,10 @@ pod:
   readiness_initial_delay_seconds: 150
 # Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
 routing:
+  # The thesis's plugin (P3.2). Off: the picker runs the chart's default-plugins.yaml, the default variant of Gate 2's
+  # experiment files. On: infra/routing-values.sh writes thesis-plugins.yaml, the default's scorers behind
+  # thesis-run-router, which reads the rules below. Off in every profile until Phase 4's demo needs it.
+  plugin: false
   # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).
   affinity: false
   # Moves a run off its pod only under sustained overload (P3.5).

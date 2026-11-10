@@ -1,5 +1,5 @@
 // Package main is the Endpoint Picker: llm-d-router v0.11.0's runner, as upstream's cmd/epp/main.go starts it (P3.1).
-// Built here, so later tasks can register their plugins before Run, without a fork.
+// Built here, so the thesis's plugin registers before Run, without a fork (P3.2).
 package main
 
 import (
@@ -8,6 +8,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/llm-d/llm-d-router/cmd/epp/runner"
+
+	"github.com/Dkostoski30/agent-aware-llm-routing/gateway/runrouter"
 )
 
 func main() {
@@ -17,6 +19,8 @@ func main() {
 // run returns the exit code. The runner has logged the error itself.
 func run() int {
 	ctx := ctrl.SetupSignalHandler()
+	// Before Run: the runner reads its config, and with it the plugin table, at start.
+	runrouter.Register()
 	if err := runner.NewRunner().Run(ctx); err != nil {
 		return 1
 	}

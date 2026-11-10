@@ -3,7 +3,9 @@ module github.com/Dkostoski30/agent-aware-llm-routing/gateway
 go 1.26.6
 
 require (
+	github.com/go-logr/logr v1.4.4
 	github.com/llm-d/llm-d-router v0.11.0
+	k8s.io/apimachinery v0.36.4
 	sigs.k8s.io/controller-runtime v0.24.1
 )
 
@@ -27,7 +29,6 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
-	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.23.1 // indirect
@@ -103,7 +104,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/api v0.36.4 // indirect
 	k8s.io/apiextensions-apiserver v0.36.4 // indirect
-	k8s.io/apimachinery v0.36.4 // indirect
 	k8s.io/apiserver v0.36.4 // indirect
 	k8s.io/client-go v0.36.4 // indirect
 	k8s.io/component-base v0.36.4 // indirect

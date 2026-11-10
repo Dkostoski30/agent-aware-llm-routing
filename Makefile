@@ -202,7 +202,7 @@ up:
 	else \
 		bash infra/download-model.sh $(or $(PROFILE),real) && $(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real); \
 	fi
-	bash infra/install-gateway.sh
+	bash infra/install-gateway.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-agent.sh $(or $(PROFILE),real); fi
 	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-app.sh $(or $(PROFILE),real); fi
 
