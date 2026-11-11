@@ -30,11 +30,13 @@ from load_generator.experiment import (
     load_experiment,
     main,
     outputs,
+    plugin_on,
     pods_to_warm,
     refuse_leftovers,
     report_lines,
     run_experiment,
     served_config_file,
+    short_of_cache,
     warm_pod,
     warmed_ttft_ms,
     write_results,
@@ -48,6 +50,7 @@ from load_generator.plan import (
     warmup_run,
 )
 from load_generator.record import experiment_hash
+from load_generator.results import CallRow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROUND_ROBIN_VALUES = REPO_ROOT / "infra" / "helm" / "router-round-robin-values.yaml"
@@ -144,6 +147,8 @@ class FakeCluster:
         self.fail_switch_number = fail_switch_number
         self.values: Path | None = None
         self.routing: Mapping[str, bool] | None = None
+        # The routing each replay was handed, in order.
+        self.replayed_routing: list[Mapping[str, bool] | None] = []
         self.running_config = running_config or self._config_of
 
     def _config_of(self, values: Path | None) -> str:
@@ -185,8 +190,9 @@ class FakeCluster:
         self.asked.append("warm")
         return {"pod-a": [9000, 100], "pod-b": [8000, 90]}
 
-    def replay(self, out: Path) -> list[dict[str, Any]]:
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
         self.asked.append(f"replay {out.name}")
+        self.replayed_routing.append(routing)
         if self.fail_replay_of and self.fail_replay_of in out.name:
             raise RuntimeError("the replay broke")
         variant = out.stem.rsplit("-", 1)[-1]
@@ -368,6 +374,71 @@ def test_a_routing_variant_switches_the_picker_and_the_default_comes_back(
     ]
     assert meta["variants"]["run-router"]["routing"] == {"plugin": True, "affinity": True}
     assert meta["variants"]["default"]["routing"] is None
+
+
+def test_a_variant_may_not_set_the_profiles_ttl(tmp_path: Path) -> None:
+    """Variants differ in rules only; infra/routing-values.sh refuses it too, but at the switch."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "run_ttl_seconds": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="run_ttl_seconds"):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_ttl_is_not_a_rule_that_is_on(tmp_path: Path) -> None:
+    """A TTL of 300 is truthy, and must not read as a rule on while the plugin is off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["run_ttl_seconds"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_plugin", "variant_routing", "on"),
+    [
+        (False, None, False),
+        (False, {"plugin": True, "affinity": True}, True),
+        (True, None, True),
+        (True, {"plugin": False}, False),
+        (False, {"affinity": False}, False),
+    ],
+)
+def test_the_plugin_runs_by_the_variants_rules_over_its_profiles(
+    profile_plugin: bool, variant_routing: dict[str, bool] | None, on: bool
+) -> None:
+    profile_routing = {"plugin": profile_plugin, "affinity": False, "run_ttl_seconds": 300}
+    assert plugin_on(profile_routing, variant_routing) is on
+
+
+def test_each_replay_is_handed_its_variants_routing(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.replayed_routing == [None, {"plugin": True, "affinity": True}]
+
+
+@pytest.mark.parametrize(
+    ("routing", "end_runs"),
+    [(None, False), ({"plugin": True, "affinity": True}, True)],
+    ids=["the profile's picker, plugin off", "a variant with the plugin on"],
+)
+def test_the_live_cluster_ends_runs_only_when_the_running_picker_has_the_plugin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    routing: dict[str, bool] | None,
+    end_runs: bool,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    handed: list[bool] = []
+
+    def replay_to_file(*args: Any) -> list[dict[str, Any]]:
+        handed.append(args[-1])
+        return []
+
+    monkeypatch.setattr("load_generator.experiment.replay_to_file", replay_to_file)
+    LiveCluster(experiment, {"real": real}).replay(tmp_path / "out.jsonl", routing)
+    assert handed == [end_runs]
 
 
 def test_the_live_cluster_hands_set_routing_a_file_of_the_variants_rules(
@@ -636,9 +707,9 @@ def test_the_stamp_is_of_the_profile_at_the_start_not_after_the_long_run(
     profile.write_text("as loaded\n")
 
     class EditedDuringTheRun(FakeCluster):
-        def replay(self, out: Path) -> list[dict[str, Any]]:
+        def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
             profile.write_text("edited later\n")
-            return super().replay(out)
+            return super().replay(out, routing)
 
     experiment = loaded(tmp_path)
     out = outputs(experiment, tmp_path)
@@ -883,6 +954,72 @@ def test_the_report_gives_each_variants_numbers_and_the_kv_split(tmp_path: Path)
     assert "largest gap deviation 1 ms" in report
     assert "under the KV limit, all: 1 calls, TTFT p50 0.01 s" in report
     assert "over the KV limit, moved: 0 calls" in report
+
+
+def call_row(run: str, step: int, prompt: int, cached: int | None, moved: bool | None) -> CallRow:
+    return CallRow(
+        variant="affinity",
+        run=run,
+        task_type="csv",
+        step=step,
+        pod="pod-a",
+        ttft_ms=10,
+        duration_ms=100,
+        gap_before_ms=1,
+        prompt_tokens=prompt,
+        completion_tokens=5,
+        cached_tokens=cached,
+        moved=moved,
+        tokens_on_pod=prompt + 5,
+        over_kv_limit=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("later", "short", "checked"),
+    [
+        # 24 less than the previous prompt of 100: the replay's 9 template tokens and a block's 15.
+        (call_row("r", 2, 150, 76, False), 0, 1),
+        (call_row("r", 2, 150, 75, False), 1, 1),
+        (call_row("r", 2, 150, 100, False), 0, 1),
+        # A moved step finds nothing of its run on its new pod: that is the cost of moving.
+        (call_row("r", 2, 150, 0, True), 0, 0),
+        # A reply with no cached count says nothing.
+        (call_row("r", 2, 150, None, False), 0, 0),
+    ],
+    ids=["exactly 24 short", "25 short", "all cached", "moved", "no cached count"],
+)
+def test_a_stayed_step_is_short_of_cache_below_its_previous_prompt_less_24(
+    later: CallRow, short: int, checked: int
+) -> None:
+    rows = [call_row("r", 1, 100, 0, None), later]
+    assert short_of_cache(rows) == (short, checked)
+
+
+def test_short_of_cache_reads_each_runs_own_previous_step() -> None:
+    rows = [
+        call_row("r1", 1, 100, 0, None),
+        call_row("r2", 1, 400, 0, None),
+        call_row("r1", 2, 150, 80, False),
+        call_row("r2", 2, 450, 80, False),
+        call_row("r1", 3, 200, 130, False),
+    ]
+    assert short_of_cache(rows) == (1, 3)
+
+
+def test_the_report_counts_the_stayed_steps_short_of_cache(tmp_path: Path) -> None:
+    lines = [
+        {**line, "run_id": "a-2", "step": step, "prompt_tokens": prompt, "cached_tokens": cached}
+        for step, prompt, cached in ((1, 50, 0), (2, 100, 10))
+        for line in replay_lines()[1:]
+    ]
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(
+        experiment, out, FakeCluster(replays={"default": lines}), ticking_clock()
+    )
+    report = "\n".join(report_lines(rows, meta))
+    assert "stayed later steps short of their previous prompt in cache: 1 of 1" in report
 
 
 def test_warmed_time_leaves_out_each_pods_first_call() -> None:

@@ -13,6 +13,23 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-11 · P3.3 · red (hit rate not above default's)
+Command: `make down` · `make up` (real, 2 pods) · `make experiment NAME=affinity` (default 01:03-01:41, affinity 01:47-02:25, hash 247bb2ccf91c) · `make experiment-compare CSVS=experiments/results/affinity-247bb2ccf91c.csv STALL_SECONDS=5` · `make test` (Python, `go test` of `gateway/runrouter`, 22 training) and `make lint` (all hooks passed), on the user's run
+Result:
+- 309 calls per variant, 0 failed; the numbers leave out the first 5 runs: 35 of 35 runs and 278 calls in each. Files: `experiments/results/affinity-247bb2ccf91c{.csv,.meta.json,-default.jsonl,-affinity.jsonl}`, `experiments/graphs/affinity-247bb2ccf91c.png`.
+- **Pins hold: affinity moved 0 of 243 later steps**, default 44.
+- **Hit rate not above default's: affinity 0.807, default 0.821**, both inside default's four-run range 0.794-0.836, so no detectable gain overall.
+- **Run by run, affinity raised the hit rate where default had moved the run.** Of the 15 runs default moved a step in, affinity was higher in 12, default in 2, the same in 1. Of the other 20, where affinity changed no pick, 3 higher, 3 lower, 14 the same: the spread with no routing change. Over all 35: affinity higher in 15, default in 5, the same in 15. For example tau2_airline-764-7 0.224 to 0.709, bfcl-522-11 0.707 to 0.888, gaia_dev-310-8 0.347 to 0.658.
+- **Under the KV limit, affinity left 64,698 prompt tokens uncached against default's 91,505** (`make experiment-compare`'s split, there since P2.5), 29% fewer; over it, 23 calls against 16, which is where the overall rate went.
+- **The two it lowered are one collision**, bfcl-561-22 (0.686 to 0.263) and bfcl-565-21 (0.745 to 0.528): prompts of about 3.4k tokens each, both pinned to vllm-57d6548d4f-2rwqc at once, 10-11k tokens on a pod that holds 4,384. All 20 of affinity's stayed later steps short of their previous prompt in cache (`report_lines`' new line: 20 of 243; default 2 of 199) are theirs, over the KV limit, on that pod; over-limit calls 23 against default's 16. Default had moved one of the two away.
+- Default's 44 moved steps found 56% of their prompt cached against 95% for its 199 stayed ones: 45k of about 609k prompt tokens were all affinity could win back on this trace, at most about 0.07 of hit rate (summed from the CSV's moved column by hand, in no report).
+Notes:
+- The per-run reading was chosen after the overall number was seen (card 38, decided with the user); grouping by the runs default moved follows from where a pin changes a pick, not from the outcome, but it is one replay of one seed. `make experiment-compare` gained the per-run hit rate for it (`experiment_compare.py`, added to the card's files).
+- What P3.3 alone shows: a pin with no overload rule keeps a run's cache wherever its pod has room, and loses it to eviction when two long runs share a pod over its KV limit. P3.5's guard as worded watches the queue; this collision is cache pressure, and whether the queue grew too is not in the CSV. A point for P3.5's planning.
+- No latency claim (card 38): affinity's run times were 16.1% shorter, but its generation was 142.8 ms per token against default's 170.6, so the host ran faster in the second variant, as on 2026-11-08.
+- The picker's log was not read: the laptop restarted at 08:26, after the experiment had finished at 02:25, and the pods with it. 0 of 243 moved is the filter's evidence.
+- Card 38's tolerance, a stayed step at least its previous prompt less 24 cached: every stayed step under the KV limit met it, in both variants.
+
 ### 2026-11-10 · P3.2 · green
 Command: `make down` · `make up PROFILE=sim` · `bash infra/set-routing.sh sim /tmp/p3.2-routing.yaml` (the file: `routing: {plugin: true}`) · `kubectl logs deployment/vllm-pool-epp | grep thesis-run-router` · `make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady-fan-out PROFILE=sim OUT=experiments/results/replays/p3.2-plugin-on-2.jsonl` · `kubectl logs … | grep '"Run call picked"' | grep -vc set-routing-probe` · `bash infra/set-routing.sh sim` and the grep again. `make test` (1468 Python, `go test` of `gateway/runrouter`, 22 training), `make lint` (all hooks passed), on the user's run after both reviews
 Result:

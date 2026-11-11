@@ -769,6 +769,86 @@ def test_no_failures_counts_zero() -> None:
     assert failed_calls(replay(plan_of(), FakeGateway())) == 0
 
 
+# The end of a run (P3.3, D1).
+
+
+@dataclass
+class FakePicker:
+    """Records each end of run and when it came; answers with fail's answer instead if given."""
+
+    ends: list[tuple[str, str, float]] = field(default_factory=list)
+    fail: httpx.Response | Exception | None = None
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.ends.append((request.method, request.url.path, asyncio.get_running_loop().time()))
+        if isinstance(self.fail, Exception):
+            raise self.fail
+        return self.fail if self.fail is not None else httpx.Response(204)
+
+
+def replay_ending(
+    plan: list[PlannedRun], gateway: FakeGateway, picker: FakePicker
+) -> list[dict[str, Any]]:
+    """replay with the end of each run sent to picker."""
+
+    async def go() -> list[dict[str, Any]]:
+        async with (
+            client_of(gateway) as client,
+            httpx.AsyncClient(
+                base_url="http://picker:9010", transport=httpx.MockTransport(picker)
+            ) as picker_client,
+        ):
+            return await replay_runs(
+                client, MODEL, plan, DEADLINE_SECONDS, ignore_run, picker_client
+            )
+
+    return run_virtual(go())
+
+
+def test_each_run_ends_once_after_its_last_reply() -> None:
+    plan = plan_of(runs=[trace_run("run-a"), trace_run("run-b")], count=2)
+    picker = FakePicker()
+    gateway = FakeGateway()
+    lines = replay_ending(plan, gateway, picker)
+    assert sorted(path for _, path, _ in picker.ends) == sorted(
+        f"/runs/{run.run_id}/end" for run in plan
+    )
+    assert {method for method, _, _ in picker.ends} == {"POST"}
+    for run in plan:
+        (at,) = [at for _, path, at in picker.ends if path == f"/runs/{run.run_id}/end"]
+        last = max(seen.at for seen in gateway.seen if seen.headers["x-run-id"] == run.run_id)
+        # The last call was sent at last and took ttft plus body_seconds.
+        assert at >= last + gateway.ttft + gateway.body_seconds
+    assert failed_calls(lines) == 0
+
+
+def test_a_run_that_stopped_on_a_failed_call_ends_too() -> None:
+    plan = plan_of(runs=[trace_run("run-a")])
+    picker = FakePicker()
+    gateway = FakeGateway(fail=lambda seen: httpx.Response(500))
+    lines = replay_ending(plan, gateway, picker)
+    assert failed_calls(lines) == 1
+    assert [path for _, path, _ in picker.ends] == [f"/runs/{plan[0].run_id}/end"]
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [httpx.Response(503), httpx.ConnectError("picker down"), httpx.ReadTimeout("picker slow")],
+    ids=["503", "connection refused", "timeout"],
+)
+def test_an_end_of_run_the_picker_misses_changes_no_line(
+    fail: httpx.Response | Exception, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A lost end is left to the pin's TTL: the replay's lines must not depend on it."""
+    plan = plan_of(runs=[trace_run("run-a"), trace_run("run-b")], count=2)
+    without = replay(plan, FakeGateway())
+    lines = replay_ending(plan, FakeGateway(), FakePicker(fail=fail))
+    strip = [{k: v for k, v in line.items() if k != "ts_start"} for line in lines]
+    assert strip == [{k: v for k, v in line.items() if k != "ts_start"} for line in without]
+    out = capsys.readouterr().out
+    assert all(f"{run.run_id}: end of run not delivered" in out for run in plan)
+
+
 # The token check.
 
 
@@ -858,17 +938,25 @@ gateway_clients: list[dict[str, Any]] = []
 
 
 def fake_cluster(
-    monkeypatch: pytest.MonkeyPatch, out: Path, gateway: Callable[..., Any], trace: Path
+    monkeypatch: pytest.MonkeyPatch,
+    out: Path,
+    gateway: Callable[..., Any],
+    trace: Path,
+    picker: Callable[..., Any] | None = None,
+    picker_port: str = "9010",
 ) -> list[str]:
-    """main with kubectl answering a service's IP, the gateway and the tokenizer each on its own
-    fake by port, and virtual time: pattern steady comes from config/real.yaml, so its 20 runs are
-    all the trace's one run repeated. Returns the kubectl commands; the arguments of the gateway's
-    clients go to gateway_clients."""
+    """main with kubectl answering a service's IP and the picker's end-of-run port (picker_port, ""
+    for a Service without it), the gateway, the picker and the tokenizer each on its own fake by
+    port, and virtual time: pattern steady comes from config/real.yaml, so its 20 runs are all the
+    trace's one run repeated. Returns the kubectl commands; the arguments of the gateway's clients
+    go to gateway_clients."""
     asked: list[str] = []
     gateway_clients.clear()
 
     def kubectl(*args: str) -> str:
         asked.append(" ".join(args))
+        if any("end-of-run" in arg for arg in args):
+            return picker_port
         return "10.0.0.1"
 
     real_client = httpx.AsyncClient
@@ -878,6 +966,8 @@ def fake_cluster(
         if is_gateway:
             gateway_clients.append(kwargs)
         handler = gateway if is_gateway else tokenizer_of(word_count)
+        if kwargs["base_url"].endswith(f":{picker_port}") and picker is not None:
+            handler = picker
         return real_client(
             base_url=kwargs["base_url"],
             timeout=kwargs["timeout"],
@@ -927,6 +1017,52 @@ def test_main_writes_the_lines_and_exits_0(monkeypatch: pytest.MonkeyPatch, tmp_
     assert all(line["task_type"] == "csv" for line in lines)
     assert any("inference-gateway" in command for command in asked)
     assert any(" vllm " in command for command in asked)
+
+
+def test_main_with_the_plugin_off_sends_no_end_of_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    picker = FakePicker()
+    asked = fake_cluster(
+        monkeypatch, tmp_path / "out.jsonl", FakeGateway(), trace_file(tmp_path), picker
+    )
+    main()
+    assert picker.ends == []
+    assert not any("vllm-pool-epp" in command for command in asked)
+
+
+def use_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path) -> None:
+    """The tiny profile with the plugin on."""
+    use_tiny_profile(monkeypatch, tmp_path, out)
+    path = tmp_path / "config" / "tiny.yaml"
+    profile = yaml.safe_load(path.read_text())
+    profile["routing"]["plugin"] = True
+    path.write_text(yaml.safe_dump(profile))
+
+
+def test_main_with_the_plugin_on_ends_every_run_at_the_pickers_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "out.jsonl"
+    picker = FakePicker()
+    asked = fake_cluster(monkeypatch, out, FakeGateway(), trace_file(tmp_path), picker)
+    use_plugin(monkeypatch, tmp_path, out)
+    main()
+    assert sorted(path for _, path, _ in picker.ends) == ["/runs/run-a-1/end", "/runs/run-a-2/end"]
+    assert any("vllm-pool-epp" in command for command in asked)
+
+
+def test_main_with_the_plugin_on_refuses_a_picker_with_no_end_of_run_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The profile says plugin on, the picker runs without it: no pin would ever be cleared."""
+    out = tmp_path / "out.jsonl"
+    gateway = FakeGateway()
+    fake_cluster(monkeypatch, out, gateway, trace_file(tmp_path), FakePicker(), picker_port="")
+    use_plugin(monkeypatch, tmp_path, out)
+    with pytest.raises(ReplayError, match="end-of-run"):
+        main()
+    assert gateway.seen == []
 
 
 def test_main_sets_no_connection_limit_so_no_call_waits_in_the_client(
@@ -998,6 +1134,7 @@ def use_tiny_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path)
     profile = {
         "model": {"name": "the-base-model", "lora": {"name": "the-adapter"}},
         "agent": {"llm_timeout_seconds": TINY_DEADLINE},
+        "routing": {"plugin": False},
         "replay": {
             "seed": TINY_SEED,
             "gap_tolerance_ms": 50,

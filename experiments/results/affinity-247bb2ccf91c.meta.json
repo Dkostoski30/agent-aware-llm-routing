@@ -1,0 +1,84 @@
+{
+  "experiment": "affinity",
+  "hash": "247bb2ccf91c",
+  "profile": "real",
+  "profile_sha256": "9426a0dde5a4b9fce426f2c124fbbb777dd86124421dba3cf0820c563d081f26",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "9426a0dde5a4b9fce426f2c124fbbb777dd86124421dba3cf0820c563d081f26",
+      "warmup_ttft_ms": {
+        "vllm-6bfd6985b4-jwnqr": [
+          5120,
+          562,
+          417,
+          428,
+          373
+        ],
+        "vllm-6bfd6985b4-wp7px": [
+          17974,
+          398,
+          282,
+          318,
+          371
+        ]
+      },
+      "started": 1794355415.6428125,
+      "ended": 1794357667.1519265,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6bfd6985b4-jwnqr": 183,
+        "vllm-6bfd6985b4-wp7px": 126
+      },
+      "pod_switch_share": 0.37662337662337664,
+      "max_gap_deviation_ms": 21
+    },
+    "affinity": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true
+      },
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "9426a0dde5a4b9fce426f2c124fbbb777dd86124421dba3cf0820c563d081f26",
+      "warmup_ttft_ms": {
+        "vllm-57d6548d4f-2rwqc": [
+          17994,
+          347,
+          303,
+          324,
+          394
+        ],
+        "vllm-57d6548d4f-hbkp2": [
+          3367,
+          327,
+          280,
+          320,
+          322
+        ]
+      },
+      "started": 1794358067.683593,
+      "ended": 1794360319.5635474,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-57d6548d4f-2rwqc": 146,
+        "vllm-57d6548d4f-hbkp2": 163
+      },
+      "pod_switch_share": 0.2824675324675325,
+      "max_gap_deviation_ms": 2
+    }
+  }
+}

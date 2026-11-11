@@ -31,6 +31,8 @@ RULES_OFF = {
     "priority": False,
     "warmup": False,
 }
+# A profile's routing section: the rules and the pin TTL (P3.3).
+ROUTING_OFF = {**RULES_OFF, "run_ttl_seconds": 300}
 
 
 def repo(tmp_path: Path, routing: Any = None) -> Path:
@@ -42,7 +44,7 @@ def repo(tmp_path: Path, routing: Any = None) -> Path:
     (tmp_path / "gateway").mkdir()
     (tmp_path / "gateway" / "go.mod").write_text("module example\n")
     (tmp_path / "config").mkdir()
-    profile = {"model": {"name": "m"}, "routing": RULES_OFF if routing is None else routing}
+    profile = {"model": {"name": "m"}, "routing": ROUTING_OFF if routing is None else routing}
     (tmp_path / "config" / "p.yaml").write_text(yaml.safe_dump(profile))
     return tmp_path
 
@@ -88,6 +90,8 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
         "parallelSpill": False,
         "priority": False,
         "warmup": False,
+        "runTTLSeconds": 300,
+        "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
         "scheme": "http",
@@ -111,6 +115,36 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
     ]
 
 
+def test_plugin_on_opens_the_end_of_run_port_on_the_pickers_container_and_service(
+    tmp_path: Path,
+) -> None:
+    root = repo(tmp_path)
+    rules = rules_file(tmp_path, {"routing": {"plugin": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    router = yaml.safe_load(done.stdout)["router"]
+    assert router["epp"]["extraContainerPorts"] == [
+        {"name": "end-of-run", "containerPort": 9010, "protocol": "TCP"}
+    ]
+    assert router["extraServicePorts"] == [
+        {"name": "end-of-run", "port": 9010, "targetPort": 9010, "protocol": "TCP"}
+    ]
+
+
+def test_the_profiles_ttl_reaches_the_plugin(tmp_path: Path) -> None:
+    root = repo(tmp_path, {**ROUTING_OFF, "run_ttl_seconds": 45})
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "affinity": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert router["parameters"]["runTTLSeconds"] == 45
+    assert router["parameters"]["affinity"] is True
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)
@@ -126,12 +160,21 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
         (None, {"routing": {"plugin": "yes"}}, "true or false"),
         # A rule on with the plugin off would do nothing, without a word.
         (None, {"routing": {"affinity": True}}, "plugin is off"),
-        ({**RULES_OFF, "affinity": True}, None, "plugin is off"),
+        ({**ROUTING_OFF, "affinity": True}, None, "plugin is off"),
         # A profile without a rule would hand the plugin null, which it refuses only at start.
-        ({key: on for key, on in RULES_OFF.items() if key != "warmup"}, None, "routing.warmup"),
-        ({key: on for key, on in RULES_OFF.items() if key != "plugin"}, None, "routing.plugin"),
+        ({key: on for key, on in ROUTING_OFF.items() if key != "warmup"}, None, "routing.warmup"),
+        ({key: on for key, on in ROUTING_OFF.items() if key != "plugin"}, None, "routing.plugin"),
+        (RULES_OFF, None, "routing.run_ttl_seconds"),
         # A typo in the profile would let the same typo in a variant through.
-        ({**RULES_OFF, "afinity": False}, None, "routing.afinity"),
+        ({**ROUTING_OFF, "afinity": False}, None, "routing.afinity"),
+        # The plugin refuses a TTL that is not a positive whole number of seconds only at start.
+        ({**ROUTING_OFF, "run_ttl_seconds": 0}, None, "run_ttl_seconds"),
+        ({**ROUTING_OFF, "run_ttl_seconds": -5}, None, "run_ttl_seconds"),
+        ({**ROUTING_OFF, "run_ttl_seconds": 1.5}, None, "run_ttl_seconds"),
+        ({**ROUTING_OFF, "run_ttl_seconds": "300"}, None, "run_ttl_seconds"),
+        ({**ROUTING_OFF, "run_ttl_seconds": True}, None, "run_ttl_seconds"),
+        # Variants differ in rules only; the TTL is the profile's.
+        (None, {"routing": {"plugin": True, "run_ttl_seconds": 60}}, "the profile's"),
         (True, None, "map"),
         (None, {"routing": True}, "map"),
         (None, {"routing": ["plugin"]}, "map"),

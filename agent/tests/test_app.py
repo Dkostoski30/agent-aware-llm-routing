@@ -9,6 +9,7 @@ each poll sees. Every event a test gets is validated against schemas/run-events.
 """
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -36,7 +37,7 @@ TERMS_FILE = {
 }
 
 
-def make_config() -> AgentConfig:
+def make_config(end_of_run: bool = False) -> AgentConfig:
     return AgentConfig(
         model_name="test-model",
         tool_choice="auto",
@@ -56,6 +57,7 @@ def make_config() -> AgentConfig:
         max_diff_changes=20,
         diff_context_words=3,
         events_poll_seconds=0.01,
+        end_of_run=end_of_run,
     )
 
 
@@ -101,18 +103,43 @@ class MemoryStore:
 
 
 class Service:
-    """The app with a scripted LLM (or one failure for every call) and a MemoryStore."""
+    """The app with a scripted LLM (or one failure for every call), a MemoryStore and a picker that
+    records each end of run with the run's status saved at that moment (P3.3). picker_failure is the
+    picker's answer to every end of run, or the exception its connection raises."""
 
-    def __init__(self, replies: list[dict[str, Any]], failure: httpx.Response | None = None):
+    def __init__(
+        self,
+        replies: list[dict[str, Any]],
+        failure: httpx.Response | None = None,
+        end_of_run: bool = False,
+        picker_failure: httpx.Response | httpx.HTTPError | None = None,
+    ):
         self.replies = list(replies)
         self.failure = failure
+        self.picker_failure = picker_failure
         self.requests: list[httpx.Request] = []
+        # (method, path, the saved status of the run when the picker heard of its end)
+        self.ends: list[tuple[str, str, str | None]] = []
         self.store = MemoryStore()
         http = httpx.AsyncClient(
             transport=httpx.MockTransport(self.handle), base_url="http://gateway"
         )
+        picker = httpx.AsyncClient(
+            transport=httpx.MockTransport(self.handle_end), base_url="http://picker"
+        )
         schema = json.loads(RUN_REQUEST_SCHEMA.read_text())
-        self.client = TestClient(create_app(make_config(), self.store, http, schema))
+        self.client = TestClient(
+            create_app(make_config(end_of_run), self.store, http, picker, schema)
+        )
+
+    def handle_end(self, request: httpx.Request) -> httpx.Response:
+        saved = self.store.saves[-1][0].status if self.store.saves else None
+        self.ends.append((request.method, request.url.path, saved))
+        if isinstance(self.picker_failure, httpx.HTTPError):
+            raise self.picker_failure
+        if self.picker_failure is not None:
+            return self.picker_failure
+        return httpx.Response(204)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -307,6 +334,49 @@ def test_failed_run_is_saved_with_its_error() -> None:
     assert "500" in record.error
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["error"]) == ("failed", record.error)
+
+
+def test_the_picker_hears_of_the_end_of_a_run_after_its_final_save() -> None:
+    """D1, P3.3: the end of run clears the run's pin, so it comes once the run is over."""
+    service = Service([calc("7*8"), text("56")], end_of_run=True)
+    run_id = service.start({"task": TASK})
+    assert service.ends == [("POST", f"/runs/{run_id}/end", "done")]
+
+
+def test_a_failed_run_ends_too() -> None:
+    service = Service(
+        [], failure=httpx.Response(500, json={"error": "scripted failure"}), end_of_run=True
+    )
+    run_id = service.start({"task": TASK})
+    assert service.ends == [("POST", f"/runs/{run_id}/end", "failed")]
+
+
+def test_with_the_plugin_off_no_end_of_run_is_sent() -> None:
+    service = Service([text("59")])
+    service.start({"task": TASK})
+    assert service.ends == []
+
+
+@pytest.mark.parametrize(
+    "picker_failure",
+    [
+        httpx.Response(503),
+        httpx.ConnectError("picker down"),
+        httpx.ReadTimeout("picker slow"),
+    ],
+)
+def test_an_end_of_run_the_picker_misses_leaves_the_run_as_saved(
+    picker_failure: httpx.Response | httpx.HTTPError, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A lost end of run is left to the pin's TTL: the run's answer must not depend on it."""
+    caplog.set_level(logging.WARNING, logger="agent_runtime")
+    service = Service([text("59")], end_of_run=True, picker_failure=picker_failure)
+    run_id = service.start({"task": TASK})
+    run = service.client.get(f"/runs/{run_id}").json()
+    assert (run["status"], run["answer"]) == ("done", "59")
+    (warning,) = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert getattr(warning, "run-id") == run_id
+    assert "end of run" in warning.getMessage()
 
 
 def test_running_run_shows_the_steps_so_far() -> None:

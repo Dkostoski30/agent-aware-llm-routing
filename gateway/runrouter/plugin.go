@@ -1,14 +1,20 @@
 // Package runrouter is the thesis's routing plugin for llm-d-router v0.11.0's Endpoint Picker (P3.2). It is a filter:
 // returning only the pinned pod is a hard rule, while a scorer's weight can be outvoted by the queue and KV scorers;
 // returning every pod hands the choice back to the default scorers (docs/task-cards/37-P3.2-plugin-skeleton.md).
-// Until P3.3 it changes nothing: the filter returns its input and PreRequest only logs the pick.
+// With affinity on (P3.3), steps 2..n of a run go to the pod its last call went to; the first step is the default
+// scorers' pick, by load and prefix.
 package runrouter
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"time"
 
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -23,6 +29,15 @@ const (
 	// The headers every LLM call carries (schemas/, D1).
 	headerRunID = "x-run-id"
 	headerStep  = "x-step"
+	// Why a call of a run went where it went, in PreRequest's log line: no live pin, so the default scorers chose;
+	// or the run's pinned pod.
+	reasonFirst  = "first"
+	reasonPinned = "pinned"
+	// The end of a run (D1): the agent runtime and the replayer send it once a run stops.
+	endOfRunPattern = "POST /runs/{id}/end"
+	// How long the end-of-run server waits for a request's headers. The callers send a bodiless POST within the
+	// cluster, so 10 s only stops a client that opened a connection and sent nothing from holding it forever.
+	readHeaderTimeout = 10 * time.Second
 )
 
 var (
@@ -36,22 +51,73 @@ func Register() {
 	fwkplugin.Register(Type, fwkplugin.StabilityBeta, Factory)
 }
 
-// RunRouter holds the routing flags; the rules that read them come in P3.3-P4.2.
+// RunRouter holds the routing flags and the runs' pins.
 type RunRouter struct {
 	typedName fwkplugin.TypedName
 	flags     Flags
+	pins      *pins
+	// The factory's logger, for the end-of-run server, whose requests carry none.
+	logger logr.Logger
 }
 
-// Factory builds the plugin from its config parameters, refusing any it cannot read (parseFlags).
+func newRunRouter(typedName fwkplugin.TypedName, flags Flags, ttl time.Duration, now func() time.Time,
+	logger logr.Logger) *RunRouter {
+	return &RunRouter{typedName: typedName, flags: flags, pins: newPins(ttl, now), logger: logger}
+}
+
+// Factory builds the plugin from its config parameters, refusing any it cannot read (parseParameters), and serves
+// the end of a run on its port until the picker stops. The port is opened here, so a port the picker cannot have fails
+// it at start instead of losing every end of run to the TTL.
 func Factory(name string, parameters *json.Decoder, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
-	flags, err := parseFlags(parameters)
+	params, err := parseParameters(parameters)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s: %w", Type, err)
 	}
-	log.FromContext(handle.Context()).Info("Plugin loaded", "type", Type, "name", name,
+	ctx := handle.Context()
+	logger := log.FromContext(ctx)
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", params.EndOfRunPort))
+	if err != nil {
+		return nil, fmt.Errorf("plugin %s: end-of-run port: %w", Type, err)
+	}
+	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: name}, params.Flags, params.RunTTL, time.Now, logger)
+	go router.serve(ctx, listener)
+	flags := params.Flags
+	logger.Info("Plugin loaded", "type", Type, "name", name,
 		"affinity", flags.Affinity, "overloadGuard", flags.OverloadGuard, "parallelSpill", flags.ParallelSpill,
-		"priority", flags.Priority, "warmup", flags.Warmup)
-	return &RunRouter{typedName: fwkplugin.TypedName{Type: Type, Name: name}, flags: flags}, nil
+		"priority", flags.Priority, "warmup", flags.Warmup,
+		"runTTLSeconds", int(params.RunTTL/time.Second), "endOfRunPort", params.EndOfRunPort)
+	return router, nil
+}
+
+// serve answers the end of runs on listener until ctx ends. Close, not Shutdown: the picker is stopping, and an end
+// of run cut off here is left to the TTL, as a lost one is.
+func (r *RunRouter) serve(ctx context.Context, listener net.Listener) {
+	server := &http.Server{Handler: r.handler(), ReadHeaderTimeout: readHeaderTimeout}
+	go func() {
+		<-ctx.Done()
+		if err := server.Close(); err != nil {
+			r.logger.Error(err, "End-of-run server did not close")
+		}
+	}()
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
+		r.logger.Error(err, "End-of-run server stopped")
+	}
+}
+
+// handler serves POST /runs/{id}/end.
+func (r *RunRouter) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(endOfRunPattern, r.endRun)
+	return mux
+}
+
+// endRun removes the run's pin and answers 204 whether it had one or not: a run that never had a pin, or whose pin
+// expired, has ended all the same.
+func (r *RunRouter) endRun(w http.ResponseWriter, request *http.Request) {
+	runID := request.PathValue("id")
+	pinned := r.pins.end(runID)
+	r.logger.V(logging.VERBOSE).Info("Run ended", "run-id", runID, "pinned", pinned)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // TypedName returns the plugin's type and the name the config gave it.
@@ -59,23 +125,48 @@ func (r *RunRouter) TypedName() fwkplugin.TypedName {
 	return r.typedName
 }
 
-// Filter returns every candidate, in order: no rule is implemented yet.
-func (r *RunRouter) Filter(_ context.Context, _ *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+// Filter returns only the run's pinned pod when affinity is on and that pod is a candidate; otherwise every candidate,
+// in order, and the default scorers choose. A pin on a pod that is no longer a candidate passes every candidate, and
+// PreRequest moves the pin to the pod chosen instead.
+func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
+	runID := request.Headers[headerRunID]
+	if !r.flags.Affinity || runID == "" {
+		return endpoints
+	}
+	pod := r.pins.pod(runID)
+	if pod == "" {
+		return endpoints
+	}
+	for _, endpoint := range endpoints {
+		if endpoint.GetMetadata().ID.String() == pod {
+			return []scheduling.Endpoint{endpoint}
+		}
+	}
 	return endpoints
 }
 
-// PreRequest records nothing yet. It logs the picked pod of a call that belongs to a run, under run-id (D12), at the
-// level of upstream's "Request handled" line (logging.VERBOSE), so the log shows the plugin is on the request path.
+// PreRequest pins the run to the chosen pod and renews its TTL when affinity is on, and logs the pick of a call that
+// belongs to a run, under run-id (D12), at the level of upstream's "Request handled" line (logging.VERBOSE). With
+// affinity on the line has a reason: pinned when the run's live pin was this pod, first otherwise. The pin is read and
+// written under one lock, so a call of the same run in between cannot make the reason wrong.
 func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, result *scheduling.SchedulingResult) error {
-	runID, ok := request.Headers[headerRunID]
-	if !ok {
+	runID := request.Headers[headerRunID]
+	if runID == "" {
 		return nil
 	}
 	primary, ok := result.ProfileResults[result.PrimaryProfileName]
 	if !ok || primary == nil || len(primary.TargetEndpoints) == 0 {
 		return nil
 	}
-	log.FromContext(ctx).V(logging.VERBOSE).Info("Run call picked", "run-id", runID,
-		"step", request.Headers[headerStep], "pod", primary.TargetEndpoints[0].GetMetadata().ID.Name)
+	target := primary.TargetEndpoints[0].GetMetadata().ID
+	fields := []any{"run-id", runID, "step", request.Headers[headerStep], "pod", target.Name}
+	if r.flags.Affinity {
+		reason := reasonFirst
+		if r.pins.record(runID, target.String()) == target.String() {
+			reason = reasonPinned
+		}
+		fields = append(fields, "reason", reason)
+	}
+	log.FromContext(ctx).V(logging.VERBOSE).Info("Run call picked", fields...)
 	return nil
 }

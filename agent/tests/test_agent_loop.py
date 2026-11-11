@@ -67,6 +67,7 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_diff_changes=20,
         diff_context_words=3,
         events_poll_seconds=0.01,
+        end_of_run=False,
     )
 
 

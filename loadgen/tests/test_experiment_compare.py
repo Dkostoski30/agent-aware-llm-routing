@@ -4,10 +4,14 @@ from pathlib import Path
 
 import pytest
 from load_generator.experiment_compare import (
+    HitRateCounts,
+    hit_rate_counts,
     main,
+    moved_runs,
     paired_differences,
     report_lines,
     run_differences_summary,
+    run_hit_rates,
     without_largest,
 )
 from load_generator.results import (
@@ -171,6 +175,43 @@ def test_leaving_out_the_largest_goes_with_the_totals_direction() -> None:
     assert without_largest(second, first, 1) == (950, 900)
 
 
+def test_each_runs_hit_rate_is_over_its_calls_with_a_count() -> None:
+    rates = run_hit_rates(
+        [
+            row("a", "r-1", prompt_tokens=100, cached_tokens=40),
+            row("a", "r-1", step=2, prompt_tokens=300, cached_tokens=260),
+            row("a", "r-1", step=3, prompt_tokens=500, cached_tokens=None),
+            row("a", "r-2", cached_tokens=None),
+        ]
+    )
+    assert rates == {"r-1": 0.75, "r-2": None}
+
+
+def test_a_run_counts_as_moved_by_any_later_step_that_moved() -> None:
+    rows = [
+        row("a", "r-1", moved=None),
+        row("a", "r-1", step=2, moved=False),
+        row("a", "r-1", step=3, moved=True),
+        row("a", "r-2", moved=None),
+        row("a", "r-2", step=2, moved=False),
+    ]
+    assert moved_runs(rows) == {"r-1"}
+
+
+def test_hit_rates_are_paired_over_the_named_runs_with_a_count_on_both_sides() -> None:
+    first = {"r-1": 0.9, "r-2": 0.5, "r-3": 0.7, "r-4": 0.8, "r-5": None}
+    second = {"r-1": 0.6, "r-2": 0.8, "r-3": 0.7, "r-4": 0.1, "r-5": 0.4}
+    assert hit_rate_counts(first, second, ["r-1", "r-2", "r-3", "r-5"]) == HitRateCounts(
+        first_higher=1, second_higher=1, same=1, without_count=1
+    )
+
+
+def test_hit_rates_differing_at_all_are_not_the_same() -> None:
+    """No tolerance: a run nothing changed for gives an equal count, so equal rates."""
+    counts = hit_rate_counts({"r-1": 0.8836}, {"r-1": 0.8834}, ["r-1"])
+    assert counts == HitRateCounts(first_higher=1, second_higher=0, same=0, without_count=0)
+
+
 def write_chain(path: Path, order: tuple[str, str], slow: int) -> Path:
     write_csv(
         path,
@@ -259,6 +300,51 @@ def test_calls_with_no_cached_count_are_said(tmp_path: Path) -> None:
     write_csv(csv, [row("a", "r-1", cached_tokens=None), row("b", "r-1")])
     report = "\n".join(report_lines([csv], stall_ms=5000))
     assert "uncached tokens 0, and 1 calls with no count" in report
+
+
+def hit_rate_rows(variant: str, cached: dict[str, int], moved: set[str]) -> list[CallRow]:
+    """Each run as two steps of 100 prompt tokens, the first with nothing cached."""
+    return [
+        call
+        for run, tokens in cached.items()
+        for call in (
+            row(variant, run, cached_tokens=0),
+            row(variant, run, step=2, cached_tokens=tokens, moved=run in moved),
+        )
+    ]
+
+
+def test_the_report_pairs_each_runs_hit_rate_and_again_over_the_runs_each_side_moved(
+    tmp_path: Path,
+) -> None:
+    """b moves r-1 and r-2; a is higher on r-1 and r-3, b on r-2, and r-4 is the same."""
+    csv = tmp_path / "one.csv"
+    write_csv(
+        csv,
+        hit_rate_rows("a", {"r-1": 90, "r-2": 50, "r-3": 80, "r-4": 70}, moved=set())
+        + hit_rate_rows("b", {"r-1": 20, "r-2": 60, "r-3": 60, "r-4": 70}, moved={"r-1", "r-2"}),
+    )
+    report = report_lines([csv], stall_ms=5000)
+    assert "  hit rate per run: a higher in 2 of 4 runs, b in 1, the same in 1" in report
+    assert "    of the 0 runs a moved a step in: a higher in 0, b in 0, the same in 0" in report
+    assert "    of the 2 runs b moved a step in: a higher in 1, b in 1, the same in 0" in report
+
+
+def test_the_report_says_the_runs_whose_hit_rate_it_could_not_pair(tmp_path: Path) -> None:
+    csv = tmp_path / "one.csv"
+    write_csv(
+        csv,
+        [
+            *hit_rate_rows("a", {"r-1": 90}, moved=set()),
+            row("a", "r-2", cached_tokens=None),
+            *hit_rate_rows("b", {"r-1": 20, "r-2": 60}, moved=set()),
+        ],
+    )
+    report = report_lines([csv], stall_ms=5000)
+    assert (
+        "  hit rate per run: a higher in 1 of 1 runs, b in 0, the same in 0; "
+        "1 runs with no count on a side left out"
+    ) in report
 
 
 def test_a_variant_with_no_finished_run_still_gets_a_report(tmp_path: Path) -> None:

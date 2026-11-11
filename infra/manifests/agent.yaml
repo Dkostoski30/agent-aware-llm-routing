@@ -33,6 +33,10 @@ spec:
             # The Gateway every LLM call goes through (infra/manifests/inference-gateway.yaml), port 80.
             - name: GATEWAY_URL
               value: http://inference-gateway.default.svc.cluster.local
+            # The picker's end-of-run port (P3.3), the one infra/routing-values.sh opens on its Service when
+            # routing.plugin is on; the runtime sends nothing there with it off.
+            - name: PICKER_URL
+              value: http://vllm-pool-epp.default.svc.cluster.local:9010
             - name: REDIS_URL
               value: redis://redis.default.svc.cluster.local:6379/0
           ports:

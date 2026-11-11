@@ -39,6 +39,10 @@ routing:
   priority: false
   # Sends new runs to the newest pod right after scale-up (P4.2).
   warmup: false
+  # How long a run's pin outlives its last call when its end of run never arrives (P3.3, D1): the safety net for a
+  # lost signal, not the way a pin normally goes. A first guess, longer than the longest call (agent.llm_timeout_seconds
+  # 120) plus the gap after it (2 ms at most in the converted trace, a tool's time in a recorded one).
+  run_ttl_seconds: 300
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

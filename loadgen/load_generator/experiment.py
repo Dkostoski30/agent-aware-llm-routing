@@ -12,7 +12,7 @@ scaled before the restart. The deployed profile is scaled back to its own count 
 
 A variant may instead turn routing rules on (P3.2): routing: {plugin: true, affinity: true} is laid
 over its profile's routing section by infra/routing-values.sh, and the picker runs
-thesis-plugins.yaml.
+thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the picker (P3.3).
 
 Usage: python -m load_generator.experiment EXPERIMENT
 """
@@ -76,6 +76,13 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
+# The profile's routing key that is no rule: a variant sets rules only (infra/routing-values.sh).
+RUN_TTL_KEY = "run_ttl_seconds"
+# A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
+# tokens: the 9 a replay's chat template adds after it, and up to 15 of a partly filled 16-token
+# block (P2.4, experiments/log.md). Derived, not tuned: a step short by more lost part of its run's
+# history on its own pod, a capacity effect the hit rate alone would hide.
+CACHE_SHORTFALL_TOKENS = 24
 
 
 class ExperimentError(Exception):
@@ -161,7 +168,8 @@ class Cluster(Protocol):
 
     def warm_pods(self) -> dict[str, list[int]]: ...
 
-    def replay(self, out: Path) -> list[dict[str, Any]]: ...
+    # routing is the variant's rules, None the profile's own.
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]: ...
 
     def clock_jumps(self, since: float, until: float) -> int: ...
 
@@ -211,7 +219,12 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
     where it would do nothing and the variant would read as its result. infra/routing-values.sh
     refuses both too, but only when the variant's switch runs, which may be hours into the run."""
     for variant in experiment.variants:
-        known = profiles[variant.profile]["routing"]
+        routing = profiles[variant.profile]["routing"]
+        known = {rule: on for rule, on in routing.items() if rule != RUN_TTL_KEY}
+        if RUN_TTL_KEY in (variant.routing or {}):
+            raise ExperimentError(
+                f"variant {variant.name}: {RUN_TTL_KEY} is the profile's, a variant sets only rules"
+            )
         unknown = sorted(set(variant.routing or {}) - set(known))
         if unknown:
             raise ExperimentError(
@@ -222,6 +235,15 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
         on = [rule for rule, value in rules.items() if rule != "plugin" and value]
         if on and not rules["plugin"]:
             raise ExperimentError(f"variant {variant.name}: {', '.join(on)} on, but plugin is off")
+
+
+def plugin_on(
+    profile_routing: Mapping[str, Any], variant_routing: Mapping[str, bool] | None
+) -> bool:
+    """Whether the picker runs the plugin for a variant: its rules laid over its profile's, as
+    infra/routing-values.sh lays them."""
+    on: bool = {**profile_routing, **(variant_routing or {})}["plugin"]
+    return on
 
 
 def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -> None:
@@ -359,7 +381,7 @@ def _run_variant(
         )
     warmup_ttft = cluster.warm_pods()
     started = clock()
-    lines = cluster.replay(out.replay(variant.name))
+    lines = cluster.replay(out.replay(variant.name), variant.routing)
     ended = clock()
     meta = _variant_meta(
         variant,
@@ -631,13 +653,14 @@ class LiveCluster:
             print(f"experiment: warmed {name}, ms to first token {times[name]}", flush=True)
         return times
 
-    def replay(self, out: Path) -> list[dict[str, Any]]:
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
         return replay_to_file(
             self.profile,
             self.experiment.trace,
             self.experiment.pattern_name,
             self.experiment.seed,
             out,
+            plugin_on(self.profile["routing"], routing),
         )
 
     def clock_jumps(self, since: float, until: float) -> int:
@@ -657,6 +680,28 @@ def warmed_ttft_ms(warmup_ttft: Mapping[str, Sequence[int]]) -> float | None:
 
 def _number_text(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
+
+
+def short_of_cache(rows: Sequence[CallRow]) -> tuple[int, int]:
+    """Of a variant's later steps that stayed on their pod and have a cached count, how many found
+    less than their run's previous prompt less CACHE_SHORTFALL_TOKENS cached, and how many there
+    are. The calls of a fanned-out step send one prompt, so the step's first row has it."""
+    previous: dict[tuple[str, int], int] = {}
+    for row in rows:
+        previous.setdefault((row.run, row.step), row.prompt_tokens)
+    checked = [
+        row
+        for row in rows
+        if row.moved is False
+        and row.cached_tokens is not None
+        and (row.run, row.step - 1) in previous
+    ]
+    short = sum(
+        row.cached_tokens is not None
+        and row.cached_tokens < previous[(row.run, row.step - 1)] - CACHE_SHORTFALL_TOKENS
+        for row in checked
+    )
+    return short, len(checked)
 
 
 def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
@@ -686,6 +731,10 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
         report.append(
             f"  speed, mostly the host's: generation {generation} ms per token, warm-up calls "
             f"{warmed} ms to first token"
+        )
+        short, checked = short_of_cache(calls)
+        report.append(
+            f"  stayed later steps short of their previous prompt in cache: {short} of {checked}"
         )
         for limit, over in (("under", False), ("over", True)):
             for label, moved in (("all", None), ("stayed", False), ("moved", True)):
