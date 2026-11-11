@@ -21,6 +21,7 @@ import (
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
@@ -30,10 +31,14 @@ const allOffRules = `"affinity": false, "overloadGuard": false, "parallelSpill":
 // The overload limits infra/routing-values.sh writes from every profile (testLimits).
 const overloadJSON = `"overloadQueueThreshold": 1, "overloadSustainedSeconds": 10`
 
+// The parallel threshold infra/routing-values.sh writes from every profile (testParallelThreshold).
+const parallelJSON = `"parallelQueueThreshold": 2`
+
 // parametersJSON is the plugin's config as infra/routing-values.sh writes it: the rules, the profile's
-// routing.run_ttl_seconds and overload limits, and the end-of-run port.
+// routing.run_ttl_seconds, overload limits and parallel threshold, and the end-of-run port.
 func parametersJSON(rules string, port int) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, "endOfRunPort": %d}`, rules, overloadJSON, port)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "endOfRunPort": %d}`, rules, overloadJSON, parallelJSON,
+		port)
 }
 
 // freePort is a port nothing listens on, for a factory that opens the end-of-run server. Each test takes its own, so
@@ -76,8 +81,8 @@ func capture() (context.Context, *[]map[string]any) {
 
 // newRouter builds the plugin without the factory, so no port is opened, on a clock the test moves.
 func newRouter(flags Flags, clock *fakeClock) *RunRouter {
-	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, testLimits, clock.now,
-		logr.Discard())
+	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, testLimits,
+		testParallelThreshold, clock.now, logr.Discard())
 }
 
 func endpoint(name string) scheduling.Endpoint {
@@ -370,7 +375,7 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 		lines = append(lines, line)
 	}, funcr.Options{Verbosity: 3})
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, Flags{Affinity: true}, testTTL,
-		testLimits, newFakeClock().now, logger)
+		testLimits, testParallelThreshold, newFakeClock().now, logger)
 	if err := router.PreRequest(context.Background(), request(map[string]string{headerRunID: "run-1"}),
 		resultOn("pod-a")); err != nil {
 		t.Fatal(err)
@@ -385,7 +390,7 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	port := freePort(t)
 	raw := fmt.Sprintf(`{"affinity": true, "overloadGuard": false, "parallelSpill": true, "priority": false,
 		"warmup": true, "runTTLSeconds": 120, "overloadQueueThreshold": 3, "overloadSustainedSeconds": 20,
-		"endOfRunPort": %d}`, port)
+		"parallelQueueThreshold": 4, "endOfRunPort": %d}`, port)
 	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
 	if err != nil {
 		t.Fatal(err)
@@ -400,6 +405,9 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	}
 	if want := (Limits{QueueThreshold: 3, Sustained: 20 * time.Second}); router.overload.limits != want {
 		t.Fatalf("overload limits %+v, want %+v", router.overload.limits, want)
+	}
+	if router.parallel.threshold != 4 {
+		t.Fatalf("parallel threshold %d, want 4", router.parallel.threshold)
 	}
 }
 
@@ -500,6 +508,17 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"no port", fmt.Sprintf(`{%s, "runTTLSeconds": 300}`, allOffRules), "endOfRunPort"},
 		{"port zero", parametersJSON(allOffRules, 0), "endOfRunPort"},
 		{"a port past 65535", parametersJSON(allOffRules, 65536), "endOfRunPort"},
+		{"no parallel threshold", fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON), "parallelQueueThreshold"},
+		{"a negative parallel threshold", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, "parallelQueueThreshold": -1, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON), "parallelQueueThreshold"},
+		{"a parallel threshold that is not a whole number", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, "parallelQueueThreshold": 2.5, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON), "parallelQueueThreshold"},
+		{"null for the parallel threshold", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, "parallelQueueThreshold": null, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON), "parallelQueueThreshold"},
 		{"no queue threshold", overloadParameters(`"overloadSustainedSeconds": 10`), "overloadQueueThreshold"},
 		{"a negative queue threshold", overloadParameters(`"overloadQueueThreshold": -1, "overloadSustainedSeconds": 10`),
 			"overloadQueueThreshold"},
@@ -532,7 +551,7 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 
 // overloadParameters is a config with every other parameter valid and the given overload limits.
 func overloadParameters(limits string) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, "endOfRunPort": 9010}`, allOffRules, limits)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "endOfRunPort": 9010}`, allOffRules, limits, parallelJSON)
 }
 
 func TestFactoryLogsItsParametersOnce(t *testing.T) {
@@ -549,8 +568,8 @@ func TestFactoryLogsItsParametersOnce(t *testing.T) {
 	line := (*lines)[0]
 	if line["type"] != Type || line["affinity"] != false || line["warmup"] != false ||
 		line["runTTLSeconds"] != float64(300) || line["overloadQueueThreshold"] != float64(1) ||
-		line["overloadSustainedSeconds"] != float64(10) {
-		t.Fatalf("line %v lacks the type, the flags, the TTL or the overload limits", line)
+		line["overloadSustainedSeconds"] != float64(10) || line["parallelQueueThreshold"] != float64(2) {
+		t.Fatalf("line %v lacks the type, the flags, the TTL, the overload limits or the parallel threshold", line)
 	}
 }
 
@@ -818,5 +837,213 @@ func TestRegisterPutsTheDecisionsCounterOnThePickersRegistry(t *testing.T) {
 	err := ctrlmetrics.Registry.Register(decisions)
 	if !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
 		t.Fatalf("registering the counter again returned %v, want AlreadyRegisteredError: Register put it there", err)
+	}
+}
+
+// groupEvent is one call of run-1 through the filter and PreRequest, or the end of one sent before, with the parallel
+// rule in play.
+type groupEvent struct {
+	// The fake clock moves this far first.
+	advance time.Duration
+	// The call's x-parallel-group; "" is a call of no group.
+	group string
+	pods  []queued
+	// What the filter must return.
+	want []string
+	// The scorers' choice among want, which PreRequest gets.
+	pick string
+	// The reason PreRequest must log; the pod the line must name as from ("" means none); the pinned pod's queue and
+	// the group's calls in flight on it, on a parallel line or a guard's.
+	reason   string
+	from     string
+	queue    int
+	inFlight int
+	// The pod run-1 is pinned to after the call.
+	pinAfter string
+	// Instead of a call: ResponseBody for the call at index ends (0-based), at the end of its stream or not, and with
+	// how the stream ended.
+	end         bool
+	ends        int
+	endOfStream bool
+	cause       requestcontrol.TerminationCause
+}
+
+func TestParallelSpillKeepsAGroupOnItsPodWhileItHasRoom(t *testing.T) {
+	calm := []queued{{"pod-a", 0}, {"pod-b", 0}}
+	busy := []queued{{"pod-a", 2}, {"pod-b", 0}}
+	// The run's first step, which pins it to pod-a.
+	first := groupEvent{pods: calm, want: []string{"pod-a", "pod-b"}, pick: "pod-a", reason: reasonFirst,
+		pinAfter: "pod-a"}
+	stay := groupEvent{group: "step-2", pods: busy, want: []string{"pod-a"}, pick: "pod-a", reason: reasonParallelStay,
+		queue: 2, pinAfter: "pod-a"}
+	spill := groupEvent{group: "step-2", pods: busy, want: []string{"pod-b"}, pick: "pod-b",
+		reason: reasonParallelSpill, from: "pod-a", queue: 2, inFlight: 1, pinAfter: "pod-a"}
+	parallelOn := Flags{Affinity: true, ParallelSpill: true}
+	cases := []struct {
+		name   string
+		flags  Flags
+		events []groupEvent
+	}{
+		{"the group stays while there is room, the call that finds it full spills, and the pin stays", parallelOn,
+			[]groupEvent{
+				first,
+				stay,
+				spill,
+				{pods: calm, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned, pinAfter: "pod-a"},
+			}},
+		{"a call's end frees its room", parallelOn, []groupEvent{
+			first,
+			stay,
+			{end: true, ends: 1, endOfStream: true, cause: requestcontrol.TerminationCauseNatural},
+			stay,
+		}},
+		{"a call that failed frees its room", parallelOn, []groupEvent{
+			first,
+			stay,
+			{end: true, ends: 1, endOfStream: true, cause: requestcontrol.TerminationCauseError},
+			stay,
+		}},
+		{"a chunk before the end of the stream holds the room", parallelOn, []groupEvent{
+			first,
+			stay,
+			{end: true, ends: 1, endOfStream: false},
+			spill,
+		}},
+		{"a spill renews the pin's TTL", parallelOn, []groupEvent{
+			first,
+			stay,
+			{advance: testTTL - time.Second, group: "step-2", pods: busy, want: []string{"pod-b"}, pick: "pod-b",
+				reason: reasonParallelSpill, from: "pod-a", queue: 2, inFlight: 1, pinAfter: "pod-a"},
+			{advance: testTTL - time.Second, pods: calm, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+		}},
+		{"the overload guard decides first", Flags{Affinity: true, OverloadGuard: true, ParallelSpill: true},
+			[]groupEvent{
+				first,
+				{group: "step-2", pods: busy, want: []string{"pod-b"}, pick: "pod-b", reason: reasonSpill,
+					from: "pod-a", queue: 2, pinAfter: "pod-a"},
+			}},
+		{"a call the guard leaves on its pod goes to the parallel rule",
+			Flags{Affinity: true, OverloadGuard: true, ParallelSpill: true}, []groupEvent{
+				first,
+				{group: "step-2", pods: []queued{{"pod-a", 1}, {"pod-b", 0}}, want: []string{"pod-a"}, pick: "pod-a",
+					reason: reasonParallelStay, queue: 1, pinAfter: "pod-a"},
+			}},
+		{"with every pod over the guard's threshold the guard stays, and the parallel rule spills a full pod's call",
+			Flags{Affinity: true, OverloadGuard: true, ParallelSpill: true}, []groupEvent{
+				first,
+				{group: "step-2", pods: []queued{{"pod-a", 2}, {"pod-b", 2}}, want: []string{"pod-a"}, pick: "pod-a",
+					reason: reasonParallelStay, queue: 2, pinAfter: "pod-a"},
+				{group: "step-2", pods: []queued{{"pod-a", 2}, {"pod-b", 2}}, want: []string{"pod-b"}, pick: "pod-b",
+					reason: reasonParallelSpill, from: "pod-a", queue: 2, inFlight: 1, pinAfter: "pod-a"},
+			}},
+		{"parallel spill off leaves a group to the other rules", Flags{Affinity: true}, []groupEvent{
+			first,
+			{group: "step-2", pods: busy, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+			{group: "step-2", pods: busy, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+		}},
+		{"a group with no live pin gets no rule", parallelOn, []groupEvent{
+			{group: "step-2", pods: busy, want: []string{"pod-a", "pod-b"}, pick: "pod-a", reason: reasonFirst,
+				pinAfter: "pod-a"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := newFakeClock()
+			router := newRouter(tc.flags, clock)
+			calls := make([]*scheduling.InferenceRequest, len(tc.events))
+			for i, e := range tc.events {
+				clock.advance(e.advance)
+				if e.end {
+					router.ResponseBody(context.Background(), calls[e.ends],
+						&requestcontrol.Response{EndOfStream: e.endOfStream, TerminationCause: e.cause}, nil)
+					continue
+				}
+				headers := map[string]string{headerRunID: "run-1", headerStep: fmt.Sprint(i + 1)}
+				if e.group != "" {
+					headers[headerParallelGroup] = e.group
+				}
+				calls[i] = request(headers)
+				got := router.Filter(context.Background(), calls[i], endpointsWithQueues(e.pods))
+				if strings.Join(names(got), ",") != strings.Join(e.want, ",") {
+					t.Fatalf("event %d: filter returned %v, want %v", i, names(got), e.want)
+				}
+				ctx, lines := capture()
+				if err := router.PreRequest(ctx, calls[i], resultOn(e.pick)); err != nil {
+					t.Fatalf("event %d: %v", i, err)
+				}
+				if len(*lines) != 1 {
+					t.Fatalf("event %d: got %d lines, want 1: %v", i, len(*lines), *lines)
+				}
+				line := (*lines)[0]
+				if line["run-id"] != "run-1" || line["pod"] != e.pick || line["reason"] != e.reason {
+					t.Fatalf("event %d: line %v, want pod %s, reason %s", i, line, e.pick, e.reason)
+				}
+				from, hasFrom := line["from"]
+				if (e.from == "" && hasFrom) || (e.from != "" && from != e.from) {
+					t.Fatalf("event %d: line %v, want from %q", i, line, e.from)
+				}
+				parallel := e.reason == reasonParallelStay || e.reason == reasonParallelSpill
+				moved := parallel || e.reason == reasonSpill || e.reason == reasonRemap
+				if queue, ok := line["queue"]; ok != moved || (moved && queue != float64(e.queue)) {
+					t.Fatalf("event %d: line %v, want queue %d on a parallel or guard line only", i, line, e.queue)
+				}
+				if inFlight, ok := line["inFlight"]; ok != parallel || (parallel && inFlight != float64(e.inFlight)) {
+					t.Fatalf("event %d: line %v, want inFlight %d on a parallel line only", i, line, e.inFlight)
+				}
+				if group, ok := line["group"]; ok != parallel || (parallel && group != e.group) {
+					t.Fatalf("event %d: line %v, want group %q on a parallel line only", i, line, e.group)
+				}
+				if pod := router.pins.pod("run-1"); pod != e.pinAfter {
+					t.Fatalf("event %d: run pinned to %q, want %q", i, pod, e.pinAfter)
+				}
+			}
+		})
+	}
+}
+
+func TestResponseBodyOfACallTheParallelRuleNeverCountedChangesNothing(t *testing.T) {
+	router := newRouter(Flags{Affinity: true, ParallelSpill: true}, newFakeClock())
+	end := &requestcontrol.Response{EndOfStream: true, TerminationCause: requestcontrol.TerminationCauseNatural}
+	router.ResponseBody(context.Background(), nil, end, nil)
+	router.ResponseBody(context.Background(), request(map[string]string{headerRunID: "run-1"}), end, nil)
+	if len(router.parallel.counts) != 0 {
+		t.Fatalf("counts %v, want none", router.parallel.counts)
+	}
+}
+
+func TestEveryParallelDecisionIsCounted(t *testing.T) {
+	reasons := []string{reasonParallelStay, reasonParallelSpill}
+	before := map[string]float64{}
+	for _, reason := range reasons {
+		before[reason] = decisionCount(t, reason)
+	}
+	router := newRouter(Flags{Affinity: true, ParallelSpill: true}, newFakeClock())
+	busy := []queued{{"pod-a", 2}, {"pod-b", 0}}
+	steps := []struct {
+		group string
+		pick  string
+	}{
+		{"", "pod-a"},
+		{"step-2", "pod-a"},
+		{"step-2", "pod-b"},
+	}
+	for i, step := range steps {
+		headers := map[string]string{headerRunID: "run-1", headerStep: fmt.Sprint(i + 1)}
+		if step.group != "" {
+			headers[headerParallelGroup] = step.group
+		}
+		call := request(headers)
+		router.Filter(context.Background(), call, endpointsWithQueues(busy))
+		if err := router.PreRequest(context.Background(), call, resultOn(step.pick)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, reason := range reasons {
+		if got := decisionCount(t, reason) - before[reason]; got != 1 {
+			t.Fatalf("%s counted %v times, want 1", reason, got)
+		}
 	}
 }

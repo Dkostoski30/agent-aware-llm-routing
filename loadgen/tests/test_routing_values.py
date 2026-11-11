@@ -31,12 +31,14 @@ RULES_OFF = {
     "priority": False,
     "warmup": False,
 }
-# A profile's routing section: the rules, the pin TTL (P3.3) and the overload limits (P3.5).
+# A profile's routing section: the rules, the pin TTL (P3.3), the overload limits (P3.5) and the
+# parallel threshold (P3.6).
 ROUTING_OFF = {
     **RULES_OFF,
     "run_ttl_seconds": 300,
     "overload_queue_threshold": 1,
     "overload_sustained_seconds": 10,
+    "parallel_queue_threshold": 2,
 }
 
 
@@ -100,6 +102,7 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
         "runTTLSeconds": 300,
         "overloadQueueThreshold": 1,
         "overloadSustainedSeconds": 10,
+        "parallelQueueThreshold": 2,
         "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
@@ -191,6 +194,24 @@ def test_the_profiles_overload_limits_reach_the_plugin_as_integers(tmp_path: Pat
     assert router["parameters"]["overloadSustainedSeconds"] == 20
 
 
+def test_the_profiles_parallel_threshold_reaches_the_plugin_as_an_integer(tmp_path: Path) -> None:
+    """As the overload limits: 3.0 must reach the plugin as 3."""
+    root = repo(tmp_path, {**ROUTING_OFF, "parallel_queue_threshold": 3.0})
+    rules = rules_file(
+        tmp_path, {"routing": {"plugin": True, "affinity": True, "parallel_spill": True}}
+    )
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert router["parameters"]["parallelSpill"] is True
+    assert type(router["parameters"]["parallelQueueThreshold"]) is int
+    assert router["parameters"]["parallelQueueThreshold"] == 3
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)
@@ -243,6 +264,17 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
         ({**ROUTING_OFF, "overload_sustained_seconds": 2.5}, None, "overload_sustained_seconds"),
         ({**ROUTING_OFF, "overload_sustained_seconds": "10"}, None, "overload_sustained_seconds"),
         ({**ROUTING_OFF, "overload_sustained_seconds": True}, None, "overload_sustained_seconds"),
+        # The parallel threshold is the profile's too (P3.6).
+        (None, {"routing": {"plugin": True, "parallel_queue_threshold": 3}}, "the profile's"),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "parallel_queue_threshold"},
+            None,
+            "routing.parallel_queue_threshold",
+        ),
+        ({**ROUTING_OFF, "parallel_queue_threshold": -1}, None, "parallel_queue_threshold"),
+        ({**ROUTING_OFF, "parallel_queue_threshold": 1.5}, None, "parallel_queue_threshold"),
+        ({**ROUTING_OFF, "parallel_queue_threshold": "2"}, None, "parallel_queue_threshold"),
+        ({**ROUTING_OFF, "parallel_queue_threshold": True}, None, "parallel_queue_threshold"),
         # The guard moves pinned runs only: with affinity off it would do nothing, and the
         # variant would read as its result.
         (None, {"routing": {"plugin": True, "overload_guard": True}}, "affinity is off"),
@@ -250,6 +282,13 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
             {**ROUTING_OFF, "plugin": True, "overload_guard": True},
             None,
             "affinity is off",
+        ),
+        # So does the parallel rule: a group stays on its run's pod, which only a pin names.
+        (None, {"routing": {"plugin": True, "parallel_spill": True}}, "parallel_spill on, but"),
+        (
+            {**ROUTING_OFF, "plugin": True, "parallel_spill": True},
+            None,
+            "parallel_spill on, but",
         ),
         (True, None, "map"),
         (None, {"routing": True}, "map"),

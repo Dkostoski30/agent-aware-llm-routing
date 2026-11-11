@@ -37,7 +37,8 @@ routing:
   # Sends one call of a pinned run to another pod when its pod is overloaded, and moves the run only when the overload
   # is sustained (P3.5). Acts on pinned runs only, so it needs affinity on.
   overload_guard: false
-  # Lets calls of one parallel group spill to other pods under overload (P3.6).
+  # Keeps the calls of one parallel group on their run's pod while it has room for them, and sends the rest to pods
+  # that have room (P3.6). Acts on pinned runs only, so it needs affinity on.
   parallel_spill: false
   # Serves runs close to finishing first (P4.1).
   priority: false
@@ -55,6 +56,13 @@ routing:
   # window, and spills carry the load meanwhile. A first guess, which P3.7 measures: several p50 calls of 2.3 s (P2.9),
   # so one long call is not sustained overload.
   overload_sustained_seconds: 10
+  # The parallel rule (P3.6): a call of a parallel group stays on its run's pod while that pod's waiting queue plus the
+  # group's calls already sent there and not ended are at or under this; otherwise it goes to another pod whose queue
+  # is at or under it, and stays when there is none. A first guess, which P3.7 measures: 2 is a fan-out of 2
+  # (replay.patterns) on a simulated pod that runs 2 at once (sim.yaml's max_num_seqs). With the overload guard on too,
+  # the guard judges first and spills a call at a queue over 1 while another pod is at or under 1, so this rule then
+  # finds a pod full only when every pod's queue is over 1.
+  parallel_queue_threshold: 2
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads
@@ -114,10 +122,22 @@ replay:
         runs: 5
         every_seconds: 120
     # The live check of fan-out through the gateway (P2.3): half of the later steps become 2 calls with one
-    # x-parallel-group. 5 runs: a check of the headers, not a load. P3.6 adds its own burst with a fan_out.
+    # x-parallel-group. 5 runs: a check of the headers, not a load, though P3.6's replay at seed 6 on sim spilled 1 of
+    # its 47 calls, 4 of the 5 runs having started on one pod.
     steady-fan-out:
       runs: 5
       rate_per_second: 0.05
+      fan_out:
+        share: 0.5
+        k: 2
+    # P3.6's load: burst's arrivals with steady-fan-out's fan_out, so half of the later steps become 2 calls with one
+    # x-parallel-group while the bursts load the pods. The same in every profile.
+    burst-fan-out:
+      runs: 30
+      rate_per_second: 0.02
+      burst:
+        runs: 5
+        every_seconds: 120
       fan_out:
         share: 0.5
         k: 2

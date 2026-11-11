@@ -76,10 +76,16 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
-# The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3) and the
-# overload limits (P3.5): a variant sets rules only (infra/routing-values.sh).
+# The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
+# overload limits (P3.5) and the parallel threshold (P3.6): a variant sets rules only
+# (infra/routing-values.sh).
 PROFILE_ONLY_KEYS = frozenset(
-    {"run_ttl_seconds", "overload_queue_threshold", "overload_sustained_seconds"}
+    {
+        "run_ttl_seconds",
+        "overload_queue_threshold",
+        "overload_sustained_seconds",
+        "parallel_queue_threshold",
+    }
 )
 # A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
 # tokens: the 9 a replay's chat template adds after it, and up to 15 of a partly filled 16-token
@@ -219,9 +225,9 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
 
 def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
     """Every rule a variant sets is one its profile has, no rule is on while the plugin is off, and
-    the overload guard is not on while affinity is off: either would do nothing and the variant
-    would read as its result. infra/routing-values.sh refuses all three too, but only when the
-    variant's switch runs, which may be hours into the run."""
+    neither the overload guard nor the parallel rule is on while affinity is off: each would do
+    nothing and the variant would read as its result. infra/routing-values.sh refuses all of these
+    too, but only when the variant's switch runs, which may be hours into the run."""
     for variant in experiment.variants:
         routing = profiles[variant.profile]["routing"]
         known = {rule: on for rule, on in routing.items() if rule not in PROFILE_ONLY_KEYS}
@@ -245,6 +251,11 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
             raise ExperimentError(
                 f"variant {variant.name}: overload_guard on, but affinity is off: the guard moves "
                 "pinned runs only"
+            )
+        if rules["parallel_spill"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: parallel_spill on, but affinity is off: a group stays "
+                "on its run's pinned pod"
             )
 
 

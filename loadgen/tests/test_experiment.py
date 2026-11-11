@@ -435,6 +435,54 @@ def test_the_overload_guard_with_affinity_off_is_refused(
         check_routing(experiment, {"real": real})
 
 
+def test_a_variant_may_not_set_the_profiles_parallel_threshold(tmp_path: Path) -> None:
+    """The parallel threshold is the profile's, as the overload limits are (P3.6)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "parallel_queue_threshold": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="parallel_queue_threshold"):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_parallel_threshold_is_not_a_rule_that_is_on(tmp_path: Path) -> None:
+    """A threshold of 2 is truthy, and must not read as a rule on while the plugin is off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["parallel_queue_threshold"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "parallel_spill": True}),
+        ({"plugin": True, "parallel_spill": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "parallel_spill": True}, {"affinity": False}),
+    ],
+)
+def test_parallel_spill_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The parallel rule keeps a group on its run's pinned pod (P3.6): with affinity off it would do
+    nothing, and the variant would read as its result. infra/routing-values.sh refuses it too."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="parallel_spill on, but affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_parallel_spill_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "parallel_spill": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
 def test_the_overload_guard_with_affinity_on_is_accepted(tmp_path: Path) -> None:
     variant = {
         **ROUTER_VARIANT,
