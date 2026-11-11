@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7).
@@ -305,6 +305,13 @@ experiment-graph:
 experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
+
+# A replay with one vLLM pod deleted partway, and where the runs pinned to it went (P3.4): the replay's lines, its printed
+# lines, the picker's log and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the
+# file's profile; it turns the file's rules on for the replay and puts the profile's back after.
+pod-removed:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make pod-removed EXPERIMENT=experiments/pod-removed.yaml"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.pod_removed $(EXPERIMENT)
 
 # Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
 # Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys

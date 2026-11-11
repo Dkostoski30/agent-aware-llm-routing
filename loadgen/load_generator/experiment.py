@@ -537,6 +537,21 @@ def count_clock_jumps(since: float, until: float) -> int:
     return sum(CLOCK_JUMP_LINE in line for line in done.stdout.splitlines())
 
 
+def set_routing(profile: str, values: Path | None, routing: Mapping[str, bool] | None) -> None:
+    """The picker on the profile's routing, with Helm values or rules laid over it; both None is
+    the profile's own. set-routing.sh takes one file: Helm values, or rules under a top-level
+    routing key. make pod-removed switches the picker this way too (P3.4)."""
+    script = str(REPO_ROOT / "infra" / "set-routing.sh")
+    if routing is None:
+        extra = [] if values is None else [str(values)]
+        subprocess.run(["bash", script, profile, *extra], check=True)
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as rules:
+        yaml.safe_dump({"routing": dict(routing)}, rules)
+        rules.flush()
+        subprocess.run(["bash", script, profile, rules.name], check=True)
+
+
 class LiveCluster:
     def __init__(self, experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
         self.experiment = experiment
@@ -608,18 +623,9 @@ class LiveCluster:
         subprocess.run(["bash", str(REPO_ROOT / "infra" / "restart-vllm.sh")], check=True)
 
     def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None:
-        """set-routing.sh takes one file: Helm values, or rules under a top-level routing key."""
         if self.current is None:
             raise ExperimentError("no profile is deployed yet")
-        script = str(REPO_ROOT / "infra" / "set-routing.sh")
-        if routing is None:
-            extra = [] if values is None else [str(values)]
-            subprocess.run(["bash", script, self.current, *extra], check=True)
-            return
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as rules:
-            yaml.safe_dump({"routing": dict(routing)}, rules)
-            rules.flush()
-            subprocess.run(["bash", script, self.current, rules.name], check=True)
+        set_routing(self.current, values, routing)
 
     def epp_config_file(self) -> str:
         return served_config_file(

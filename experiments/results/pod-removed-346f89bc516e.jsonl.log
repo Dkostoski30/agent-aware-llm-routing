@@ -1,0 +1,23 @@
+replay: 1/20 tau2_retail-867-1 tau2_retail: 13 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 2/20 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-66c49d9b9b-nw4h2']
+pod-removed: deleting vllm-66c49d9b9b-nw4h2, live pins {'vllm-66c49d9b9b-5lqzg': 0, 'vllm-66c49d9b9b-nw4h2': 3}
+replay: 3/20 tau2_telecom-963-2 tau2_telecom: 11 calls, pods ['vllm-66c49d9b9b-5lqzg', 'vllm-66c49d9b9b-nw4h2']
+replay: 4/20 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-66c49d9b9b-5lqzg', 'vllm-66c49d9b9b-nw4h2']
+replay: 5/20 hotpotqa-22-5 hotpotqa: 2 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 6/20 bfcl-615-6 bfcl: 10 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 7/20 gaia_dev-310-8 gaia_dev: 5 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 8/20 tau2_airline-764-7 tau2_airline: 4 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 9/20 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 10/20 bfcl-522-11 bfcl: 9 calls, pods ['vllm-66c49d9b9b-zf4dv']
+replay: 11/20 tau2_airline-772-10 tau2_airline: 13 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 12/20 hotpotqa-42-12 hotpotqa: 2 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 13/20 bfcl-624-13 bfcl: 11 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 14/20 tau2_airline-816-14 tau2_airline: 8 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 15/20 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 16/20 bfcl-514-16 bfcl: 12 calls, pods ['vllm-66c49d9b9b-zf4dv']
+replay: 17/20 gaia_dev-476-17 gaia_dev: 2 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 18/20 tau2_telecom-986-18 tau2_telecom: 9 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 19/20 gaia_dev-270-19 gaia_dev: 30 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 20/20 hotpotqa-145-20 hotpotqa: 4 calls, pods ['vllm-66c49d9b9b-5lqzg']
+replay: 153 calls, 0 failed
+replay: wrote /home/kosto/thesis/experiments/results/pod-removed-346f89bc516e.jsonl
