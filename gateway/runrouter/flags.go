@@ -24,7 +24,8 @@ type Flags struct {
 	// Sends one call of a pinned run elsewhere when its pod is overloaded, and moves the run only when the overload is
 	// sustained (P3.5).
 	OverloadGuard bool
-	// Lets calls of one parallel group spill to other pods under overload (P3.6).
+	// Keeps the calls of one parallel group on their run's pod while it has room for them, and sends the rest to pods
+	// that have room (P3.6). Acts on pinned runs only, so it needs affinity.
 	ParallelSpill bool
 	// Serves runs close to finishing first (P4.1).
 	Priority bool
@@ -39,6 +40,9 @@ type Parameters struct {
 	RunTTL time.Duration
 	// When the overload guard moves a pinned run's call (P3.5).
 	Overload Limits
+	// A pinned pod has room for a parallel group's call while its waiting queue plus the group's calls in flight on it
+	// are at or under this (routing.parallel_queue_threshold, P3.6).
+	ParallelQueueThreshold int
 	// The port POST /runs/{id}/end is served on (infra/routing-values.sh, which opens it on the picker's Service).
 	EndOfRunPort int
 }
@@ -63,12 +67,14 @@ type raw struct {
 	// The overload limits.
 	OverloadQueueThreshold   *int `json:"overloadQueueThreshold"`
 	OverloadSustainedSeconds *int `json:"overloadSustainedSeconds"`
+	// The parallel rule's threshold.
+	ParallelQueueThreshold *int `json:"parallelQueueThreshold"`
 }
 
 // parseParameters reads every parameter from the decoder the framework hands the factory. It refuses unknown keys
 // (the decoder is strict), missing or null ones, a TTL that is not a positive whole number of seconds, a port outside
-// 1-65535, a queue threshold that is not a whole number of calls, 0 or more, a sustained time that is not a positive
-// whole number of seconds, and no parameters at all.
+// 1-65535, a queue threshold or a parallel threshold that is not a whole number of calls, 0 or more, a sustained time
+// that is not a positive whole number of seconds, and no parameters at all.
 func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if decoder == nil {
 		return Parameters{}, errors.New("no parameters: every routing flag must be set")
@@ -107,6 +113,9 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 		return Parameters{}, fmt.Errorf(
 			"parameters: overloadSustainedSeconds must be a positive number of seconds, at most %d", maxDurationSeconds)
 	}
+	if in.ParallelQueueThreshold == nil || *in.ParallelQueueThreshold < 0 {
+		return Parameters{}, errors.New("parameters: parallelQueueThreshold must be a number of calls, 0 or more")
+	}
 	return Parameters{
 		Flags: Flags{
 			Affinity:      *in.Affinity,
@@ -120,6 +129,7 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 			QueueThreshold: *in.OverloadQueueThreshold,
 			Sustained:      time.Duration(*in.OverloadSustainedSeconds) * time.Second,
 		},
-		EndOfRunPort: *in.EndOfRunPort,
+		ParallelQueueThreshold: *in.ParallelQueueThreshold,
+		EndOfRunPort:           *in.EndOfRunPort,
 	}, nil
 }
