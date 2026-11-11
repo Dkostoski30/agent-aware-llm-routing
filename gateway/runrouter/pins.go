@@ -61,6 +61,17 @@ func (p *pins) record(runID, pod string) string {
 	return before
 }
 
+// renew restarts the TTL of the run's live pin and leaves its pod: a spilled call (P3.5) went elsewhere, but the run
+// is still active and stays pinned. A run with no live pin stays without one.
+func (p *pins) renew(runID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	if entry, ok := p.byRun[runID]; ok && p.live(entry.used, now) {
+		p.byRun[runID] = pin{pod: entry.pod, used: now}
+	}
+}
+
 // end removes the run's pin and reports whether it had a live one.
 func (p *pins) end(runID string) bool {
 	p.mu.Lock()

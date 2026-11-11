@@ -76,8 +76,11 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
-# The profile's routing key that is no rule: a variant sets rules only (infra/routing-values.sh).
-RUN_TTL_KEY = "run_ttl_seconds"
+# The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3) and the
+# overload limits (P3.5): a variant sets rules only (infra/routing-values.sh).
+PROFILE_ONLY_KEYS = frozenset(
+    {"run_ttl_seconds", "overload_queue_threshold", "overload_sustained_seconds"}
+)
 # A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
 # tokens: the 9 a replay's chat template adds after it, and up to 15 of a partly filled 16-token
 # block (P2.4, experiments/log.md). Derived, not tuned: a step short by more lost part of its run's
@@ -215,15 +218,18 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
 
 
 def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
-    """Every rule a variant sets is one its profile has, and no rule is on while the plugin is off,
-    where it would do nothing and the variant would read as its result. infra/routing-values.sh
-    refuses both too, but only when the variant's switch runs, which may be hours into the run."""
+    """Every rule a variant sets is one its profile has, no rule is on while the plugin is off, and
+    the overload guard is not on while affinity is off: either would do nothing and the variant
+    would read as its result. infra/routing-values.sh refuses all three too, but only when the
+    variant's switch runs, which may be hours into the run."""
     for variant in experiment.variants:
         routing = profiles[variant.profile]["routing"]
-        known = {rule: on for rule, on in routing.items() if rule != RUN_TTL_KEY}
-        if RUN_TTL_KEY in (variant.routing or {}):
+        known = {rule: on for rule, on in routing.items() if rule not in PROFILE_ONLY_KEYS}
+        set_here = sorted(PROFILE_ONLY_KEYS & set(variant.routing or {}))
+        if set_here:
             raise ExperimentError(
-                f"variant {variant.name}: {RUN_TTL_KEY} is the profile's, a variant sets only rules"
+                f"variant {variant.name}: {', '.join(set_here)}: the profile's, "
+                "a variant sets only rules"
             )
         unknown = sorted(set(variant.routing or {}) - set(known))
         if unknown:
@@ -235,6 +241,11 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
         on = [rule for rule, value in rules.items() if rule != "plugin" and value]
         if on and not rules["plugin"]:
             raise ExperimentError(f"variant {variant.name}: {', '.join(on)} on, but plugin is off")
+        if rules["overload_guard"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: overload_guard on, but affinity is off: the guard moves "
+                "pinned runs only"
+            )
 
 
 def plugin_on(

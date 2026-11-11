@@ -119,3 +119,40 @@ func TestPinsEndOfARunWithNoLivePinReportsNone(t *testing.T) {
 		})
 	}
 }
+
+func TestPinsRenewKeepsThePodAndRestartsTheTTL(t *testing.T) {
+	clock := newFakeClock()
+	store := newPins(testTTL, clock.now)
+	store.record("run-1", "pod-a")
+	clock.advance(testTTL - time.Second)
+	store.renew("run-1")
+	clock.advance(testTTL - time.Second)
+	if got := store.pod("run-1"); got != "pod-a" {
+		t.Fatalf("got %q, want pod-a: the renew restarted the TTL", got)
+	}
+}
+
+func TestPinsRenewPinsNoRunWithoutALivePin(t *testing.T) {
+	cases := []struct {
+		name   string
+		record bool
+		since  time.Duration
+	}{
+		{"never pinned", false, 0},
+		{"expired", true, testTTL + time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := newFakeClock()
+			store := newPins(testTTL, clock.now)
+			if tc.record {
+				store.record("run-1", "pod-a")
+			}
+			clock.advance(tc.since)
+			store.renew("run-1")
+			if got := store.pod("run-1"); got != "" {
+				t.Fatalf("got %q, want no pin: renew must not revive one", got)
+			}
+		})
+	}
+}

@@ -46,7 +46,8 @@ routing:
   plugin: false
   # Keeps steps 2..n of a run on the pod that has its context cached (P3.3).
   affinity: false
-  # Moves a run off its pod only under sustained overload (P3.5).
+  # Sends one call of a pinned run to another pod when its pod is overloaded, and moves the run only when the overload
+  # is sustained (P3.5). Acts on pinned runs only, so it needs affinity on.
   overload_guard: false
   # Lets calls of one parallel group spill to other pods under overload (P3.6).
   parallel_spill: false
@@ -58,6 +59,14 @@ routing:
   # lost signal, not the way a pin normally goes. A first guess, longer than the longest call (agent.llm_timeout_seconds
   # 120) plus the gap after it (2 ms at most in the converted trace, a tool's time in a recorded one).
   run_ttl_seconds: 300
+  # The overload guard (P3.5): a pinned run's call goes to another pod when its pod has more calls waiting than this
+  # (vllm:num_requests_waiting, which on a real pod also holds the calls waiting for KV blocks). A first guess, which
+  # P3.7 measures: 1 lets one call wait for a slot or KV blocks, and spills when a second would.
+  overload_queue_threshold: 1
+  # How long a pod must stay over the threshold before a run pinned to it moves to another pod; one run moves per
+  # window, and spills carry the load meanwhile. A first guess, which P3.7 measures: several p50 calls of 2.3 s (P2.9),
+  # so one long call is not sustained overload.
+  overload_sustained_seconds: 10
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

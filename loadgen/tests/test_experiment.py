@@ -393,6 +393,58 @@ def test_the_profiles_ttl_is_not_a_rule_that_is_on(tmp_path: Path) -> None:
     check_routing(experiment, {"real": real})
 
 
+@pytest.mark.parametrize("key", ["overload_queue_threshold", "overload_sustained_seconds"])
+def test_a_variant_may_not_set_the_profiles_overload_limits(tmp_path: Path, key: str) -> None:
+    """The overload limits are the profile's, as the TTL is (P3.5); infra/routing-values.sh refuses
+    them too, but at the switch. True, as for the TTL: a number is refused on loading already."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, key: True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match=key):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_overload_limits_are_not_rules_that_are_on(tmp_path: Path) -> None:
+    """A threshold of 1 and 10 s are truthy, and must not read as rules on while the plugin is
+    off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["overload_queue_threshold"] > 0
+    assert real["routing"]["overload_sustained_seconds"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "overload_guard": True}),
+        ({"plugin": True, "overload_guard": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "overload_guard": True}, {"affinity": False}),
+    ],
+)
+def test_the_overload_guard_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The guard moves pinned runs only: with affinity off it would do nothing, and the variant
+    would read as its result. infra/routing-values.sh refuses it too, but at the switch."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_overload_guard_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "overload_guard": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
 @pytest.mark.parametrize(
     ("profile_plugin", "variant_routing", "on"),
     [

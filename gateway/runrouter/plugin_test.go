@@ -3,6 +3,7 @@ package runrouter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
+	"github.com/prometheus/client_golang/prometheus"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -24,10 +27,13 @@ import (
 // The rules infra/routing-values.sh writes with every rule off.
 const allOffRules = `"affinity": false, "overloadGuard": false, "parallelSpill": false, "priority": false, "warmup": false`
 
+// The overload limits infra/routing-values.sh writes from every profile (testLimits).
+const overloadJSON = `"overloadQueueThreshold": 1, "overloadSustainedSeconds": 10`
+
 // parametersJSON is the plugin's config as infra/routing-values.sh writes it: the rules, the profile's
-// routing.run_ttl_seconds and the end-of-run port.
+// routing.run_ttl_seconds and overload limits, and the end-of-run port.
 func parametersJSON(rules string, port int) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, "endOfRunPort": %d}`, rules, port)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, "endOfRunPort": %d}`, rules, overloadJSON, port)
 }
 
 // freePort is a port nothing listens on, for a factory that opens the end-of-run server. Each test takes its own, so
@@ -70,7 +76,8 @@ func capture() (context.Context, *[]map[string]any) {
 
 // newRouter builds the plugin without the factory, so no port is opened, on a clock the test moves.
 func newRouter(flags Flags, clock *fakeClock) *RunRouter {
-	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, clock.now, logr.Discard())
+	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, testLimits, clock.now,
+		logr.Discard())
 }
 
 func endpoint(name string) scheduling.Endpoint {
@@ -363,7 +370,7 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 		lines = append(lines, line)
 	}, funcr.Options{Verbosity: 3})
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, Flags{Affinity: true}, testTTL,
-		newFakeClock().now, logger)
+		testLimits, newFakeClock().now, logger)
 	if err := router.PreRequest(context.Background(), request(map[string]string{headerRunID: "run-1"}),
 		resultOn("pod-a")); err != nil {
 		t.Fatal(err)
@@ -377,7 +384,8 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 func TestFactoryReadsEveryParameter(t *testing.T) {
 	port := freePort(t)
 	raw := fmt.Sprintf(`{"affinity": true, "overloadGuard": false, "parallelSpill": true, "priority": false,
-		"warmup": true, "runTTLSeconds": 120, "endOfRunPort": %d}`, port)
+		"warmup": true, "runTTLSeconds": 120, "overloadQueueThreshold": 3, "overloadSustainedSeconds": 20,
+		"endOfRunPort": %d}`, port)
 	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
 	if err != nil {
 		t.Fatal(err)
@@ -389,6 +397,9 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	}
 	if router.pins.ttl != 120*time.Second {
 		t.Fatalf("TTL %s, want 120s", router.pins.ttl)
+	}
+	if want := (Limits{QueueThreshold: 3, Sustained: 20 * time.Second}); router.overload.limits != want {
+		t.Fatalf("overload limits %+v, want %+v", router.overload.limits, want)
 	}
 }
 
@@ -489,6 +500,22 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"no port", fmt.Sprintf(`{%s, "runTTLSeconds": 300}`, allOffRules), "endOfRunPort"},
 		{"port zero", parametersJSON(allOffRules, 0), "endOfRunPort"},
 		{"a port past 65535", parametersJSON(allOffRules, 65536), "endOfRunPort"},
+		{"no queue threshold", overloadParameters(`"overloadSustainedSeconds": 10`), "overloadQueueThreshold"},
+		{"a negative queue threshold", overloadParameters(`"overloadQueueThreshold": -1, "overloadSustainedSeconds": 10`),
+			"overloadQueueThreshold"},
+		{"a queue threshold that is not a whole number",
+			overloadParameters(`"overloadQueueThreshold": 1.5, "overloadSustainedSeconds": 10`), "overloadQueueThreshold"},
+		{"no sustained time", overloadParameters(`"overloadQueueThreshold": 1`), "overloadSustainedSeconds"},
+		{"a sustained time of zero", overloadParameters(`"overloadQueueThreshold": 1, "overloadSustainedSeconds": 0`),
+			"overloadSustainedSeconds"},
+		{"a negative sustained time",
+			overloadParameters(`"overloadQueueThreshold": 1, "overloadSustainedSeconds": -1`), "overloadSustainedSeconds"},
+		{"a sustained time that is not whole seconds",
+			overloadParameters(`"overloadQueueThreshold": 1, "overloadSustainedSeconds": 2.5`), "overloadSustainedSeconds"},
+		// One second more than a time.Duration holds.
+		{"a sustained time too long for a duration",
+			overloadParameters(`"overloadQueueThreshold": 1, "overloadSustainedSeconds": 9223372037`),
+			"overloadSustainedSeconds"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -501,6 +528,11 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 			}
 		})
 	}
+}
+
+// overloadParameters is a config with every other parameter valid and the given overload limits.
+func overloadParameters(limits string) string {
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, "endOfRunPort": 9010}`, allOffRules, limits)
 }
 
 func TestFactoryLogsItsParametersOnce(t *testing.T) {
@@ -516,8 +548,9 @@ func TestFactoryLogsItsParametersOnce(t *testing.T) {
 	}
 	line := (*lines)[0]
 	if line["type"] != Type || line["affinity"] != false || line["warmup"] != false ||
-		line["runTTLSeconds"] != float64(300) {
-		t.Fatalf("line %v lacks the type, the flags or the TTL", line)
+		line["runTTLSeconds"] != float64(300) || line["overloadQueueThreshold"] != float64(1) ||
+		line["overloadSustainedSeconds"] != float64(10) {
+		t.Fatalf("line %v lacks the type, the flags, the TTL or the overload limits", line)
 	}
 }
 
@@ -591,5 +624,199 @@ func TestRegisterAddsThePluginAsBeta(t *testing.T) {
 	}
 	if got := fwkplugin.GetPluginStability(Type); got != fwkplugin.StabilityBeta {
 		t.Fatalf("stability %s, want Beta: Alpha needs --allow-experimental-plugins", got)
+	}
+}
+
+// guardEvent is one call of run-1 through the filter and PreRequest with the overload guard on.
+type guardEvent struct {
+	// The fake clock moves this far first.
+	advance time.Duration
+	pods    []queued
+	// What the filter must return.
+	want []string
+	// The scorers' choice among want, which PreRequest gets.
+	pick string
+	// The reason PreRequest must log, and the pod the line must name as from; "" means none.
+	reason string
+	from   string
+	// The pinned pod's queue on a spill or a remap.
+	queue int
+	// How long the pinned pod was over the threshold, on a remap.
+	overloaded time.Duration
+	// The pod run-1 is pinned to after the call.
+	pinAfter string
+}
+
+func TestOverloadGuardSpillsAndRemapsPinnedRuns(t *testing.T) {
+	calm := []queued{{"pod-a", 0}, {"pod-b", 0}}
+	over := []queued{{"pod-a", 2}, {"pod-b", 0}}
+	first := guardEvent{pods: calm, want: []string{"pod-a", "pod-b"}, pick: "pod-a", reason: reasonFirst,
+		pinAfter: "pod-a"}
+	spill := guardEvent{pods: over, want: []string{"pod-b"}, pick: "pod-b", reason: reasonSpill, from: "pod-a",
+		queue: 2, pinAfter: "pod-a"}
+	cases := []struct {
+		name   string
+		flags  Flags
+		events []guardEvent
+	}{
+		{"a spike spills one call, keeps the pin, and the next call returns", Flags{Affinity: true, OverloadGuard: true},
+			[]guardEvent{
+				first,
+				spill,
+				{advance: time.Second, pods: calm, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+					pinAfter: "pod-a"},
+			}},
+		{"sustained overload moves the pin", Flags{Affinity: true, OverloadGuard: true}, []guardEvent{
+			first,
+			spill,
+			{advance: testLimits.Sustained, pods: over, want: []string{"pod-b"}, pick: "pod-b", reason: reasonRemap,
+				from: "pod-a", queue: 2, overloaded: testLimits.Sustained, pinAfter: "pod-b"},
+			{advance: time.Second, pods: over, want: []string{"pod-b"}, pick: "pod-b", reason: reasonPinned,
+				pinAfter: "pod-b"},
+		}},
+		{"every pod overloaded stays pinned", Flags{Affinity: true, OverloadGuard: true}, []guardEvent{
+			first,
+			{pods: []queued{{"pod-a", 2}, {"pod-b", 2}}, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+		}},
+		{"a spill renews the pin's TTL", Flags{Affinity: true, OverloadGuard: true}, []guardEvent{
+			first,
+			{advance: testTTL - time.Second, pods: over, want: []string{"pod-b"}, pick: "pod-b", reason: reasonSpill,
+				from: "pod-a", queue: 2, pinAfter: "pod-a"},
+			{advance: testTTL - time.Second, pods: calm, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+		}},
+		{"the guard off never spills", Flags{Affinity: true}, []guardEvent{
+			first,
+			{pods: []queued{{"pod-a", 5}, {"pod-b", 0}}, want: []string{"pod-a"}, pick: "pod-a", reason: reasonPinned,
+				pinAfter: "pod-a"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := newFakeClock()
+			router := newRouter(tc.flags, clock)
+			for i, e := range tc.events {
+				clock.advance(e.advance)
+				call := request(map[string]string{headerRunID: "run-1", headerStep: fmt.Sprint(i + 1)})
+				got := router.Filter(context.Background(), call, endpointsWithQueues(e.pods))
+				if strings.Join(names(got), ",") != strings.Join(e.want, ",") {
+					t.Fatalf("event %d: filter returned %v, want %v", i, names(got), e.want)
+				}
+				ctx, lines := capture()
+				if err := router.PreRequest(ctx, call, resultOn(e.pick)); err != nil {
+					t.Fatalf("event %d: %v", i, err)
+				}
+				if len(*lines) != 1 {
+					t.Fatalf("event %d: got %d lines, want 1: %v", i, len(*lines), *lines)
+				}
+				line := (*lines)[0]
+				if line["run-id"] != "run-1" || line["pod"] != e.pick || line["reason"] != e.reason {
+					t.Fatalf("event %d: line %v, want pod %s, reason %s", i, line, e.pick, e.reason)
+				}
+				from, hasFrom := line["from"]
+				if (e.from == "" && hasFrom) || (e.from != "" && from != e.from) {
+					t.Fatalf("event %d: line %v, want from %q", i, line, e.from)
+				}
+				moved := e.reason == reasonSpill || e.reason == reasonRemap
+				if queue, ok := line["queue"]; ok != moved || (moved && queue != float64(e.queue)) {
+					t.Fatalf("event %d: line %v, want queue %d on a spill or a remap only", i, line, e.queue)
+				}
+				overloaded, ok := line["overloadedSeconds"]
+				if ok != (e.reason == reasonRemap) || (ok && overloaded != e.overloaded.Seconds()) {
+					t.Fatalf("event %d: line %v, want overloadedSeconds %v on a remap only", i, line,
+						e.overloaded.Seconds())
+				}
+				if pod := router.pins.pod("run-1"); pod != e.pinAfter {
+					t.Fatalf("event %d: run pinned to %q, want %q", i, pod, e.pinAfter)
+				}
+			}
+		})
+	}
+}
+
+func TestOverloadGuardWithoutAffinityPassesEveryCandidate(t *testing.T) {
+	router := newRouter(Flags{OverloadGuard: true}, newFakeClock())
+	call := request(map[string]string{headerRunID: "run-1", headerStep: "2"})
+	got := router.Filter(context.Background(), call, endpointsWithQueues([]queued{{"pod-a", 5}, {"pod-b", 0}}))
+	if strings.Join(names(got), ",") != "pod-a,pod-b" {
+		t.Fatalf("got %v, want every candidate: with no pin there is nothing to spill", names(got))
+	}
+}
+
+// decisionCount reads thesis_picker_decisions_total{decision} from the registry the picker serves on its metrics port.
+func decisionCount(t *testing.T, decision string) float64 {
+	t.Helper()
+	Register()
+	families, err := ctrlmetrics.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "thesis_picker_decisions_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetName() == "decision" && label.GetValue() == decision {
+					return metric.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestEveryDecisionOnACallOfARunIsCounted(t *testing.T) {
+	reasons := []string{reasonFirst, reasonPinned, reasonRemapped, reasonSpill, reasonRemap}
+	before := map[string]float64{}
+	for _, reason := range reasons {
+		before[reason] = decisionCount(t, reason)
+	}
+	clock := newFakeClock()
+	router := newRouter(Flags{Affinity: true, OverloadGuard: true}, clock)
+	steps := []struct {
+		advance time.Duration
+		pods    []queued
+		pick    string
+	}{
+		{0, []queued{{"pod-a", 0}, {"pod-b", 0}}, "pod-a"},
+		{0, []queued{{"pod-a", 0}, {"pod-b", 0}}, "pod-a"},
+		{0, []queued{{"pod-a", 2}, {"pod-b", 0}}, "pod-b"},
+		{testLimits.Sustained, []queued{{"pod-a", 2}, {"pod-b", 0}}, "pod-b"},
+		{0, []queued{{"pod-a", 0}, {"pod-c", 0}}, "pod-c"},
+	}
+	for i, step := range steps {
+		clock.advance(step.advance)
+		call := request(map[string]string{headerRunID: "run-1", headerStep: fmt.Sprint(i + 1)})
+		router.Filter(context.Background(), call, endpointsWithQueues(step.pods))
+		if err := router.PreRequest(context.Background(), call, resultOn(step.pick)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, reason := range reasons {
+		if got := decisionCount(t, reason) - before[reason]; got != 1 {
+			t.Fatalf("%s counted %v times, want 1", reason, got)
+		}
+	}
+}
+
+func TestADecisionWithAffinityOffIsNotCounted(t *testing.T) {
+	before := decisionCount(t, reasonFirst) + decisionCount(t, reasonPinned)
+	call := request(map[string]string{headerRunID: "run-1", headerStep: "1"})
+	if err := newRouter(Flags{}, newFakeClock()).PreRequest(context.Background(), call, resultOn("pod-a")); err != nil {
+		t.Fatal(err)
+	}
+	if after := decisionCount(t, reasonFirst) + decisionCount(t, reasonPinned); after != before {
+		t.Fatalf("counted %v with affinity off, want nothing", after-before)
+	}
+}
+
+func TestRegisterPutsTheDecisionsCounterOnThePickersRegistry(t *testing.T) {
+	Register()
+	Register()
+	err := ctrlmetrics.Registry.Register(decisions)
+	if !errors.As(err, &prometheus.AlreadyRegisteredError{}) {
+		t.Fatalf("registering the counter again returned %v, want AlreadyRegisteredError: Register put it there", err)
 	}
 }

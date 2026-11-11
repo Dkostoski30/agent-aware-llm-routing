@@ -31,8 +31,13 @@ RULES_OFF = {
     "priority": False,
     "warmup": False,
 }
-# A profile's routing section: the rules and the pin TTL (P3.3).
-ROUTING_OFF = {**RULES_OFF, "run_ttl_seconds": 300}
+# A profile's routing section: the rules, the pin TTL (P3.3) and the overload limits (P3.5).
+ROUTING_OFF = {
+    **RULES_OFF,
+    "run_ttl_seconds": 300,
+    "overload_queue_threshold": 1,
+    "overload_sustained_seconds": 10,
+}
 
 
 def repo(tmp_path: Path, routing: Any = None) -> Path:
@@ -79,18 +84,22 @@ def test_plugin_off_leaves_the_charts_default(tmp_path: Path) -> None:
 
 def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Path) -> None:
     root = repo(tmp_path)
-    rules = rules_file(tmp_path, {"routing": {"plugin": True, "overload_guard": True}})
+    rules = rules_file(
+        tmp_path, {"routing": {"plugin": True, "affinity": True, "overload_guard": True}}
+    )
     done = routing_values(root, "p", str(rules))
     assert done.returncode == 0, done.stderr
     config = picker_config(done.stdout)
     plugins = {plugin["type"]: plugin.get("parameters") for plugin in config["plugins"]}
     assert plugins["thesis-run-router"] == {
-        "affinity": False,
+        "affinity": True,
         "overloadGuard": True,
         "parallelSpill": False,
         "priority": False,
         "warmup": False,
         "runTTLSeconds": 300,
+        "overloadQueueThreshold": 1,
+        "overloadSustainedSeconds": 10,
         "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
@@ -162,6 +171,26 @@ def test_a_ttl_written_with_a_fraction_of_zero_reaches_the_plugin_as_an_integer(
     assert router["parameters"]["runTTLSeconds"] == 300
 
 
+def test_the_profiles_overload_limits_reach_the_plugin_as_integers(tmp_path: Path) -> None:
+    """yq keeps 20.0 as written, and the plugin's decoder refuses it for an int at start."""
+    root = repo(
+        tmp_path,
+        {**ROUTING_OFF, "overload_queue_threshold": 0, "overload_sustained_seconds": 20.0},
+    )
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "affinity": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert type(router["parameters"]["overloadQueueThreshold"]) is int
+    assert router["parameters"]["overloadQueueThreshold"] == 0
+    assert type(router["parameters"]["overloadSustainedSeconds"]) is int
+    assert router["parameters"]["overloadSustainedSeconds"] == 20
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)
@@ -192,6 +221,36 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
         ({**ROUTING_OFF, "run_ttl_seconds": True}, None, "run_ttl_seconds"),
         # Variants differ in rules only; the TTL is the profile's.
         (None, {"routing": {"plugin": True, "run_ttl_seconds": 60}}, "the profile's"),
+        # The overload limits are the profile's too, and the plugin refuses bad ones only at start.
+        (None, {"routing": {"plugin": True, "overload_queue_threshold": 2}}, "the profile's"),
+        (None, {"routing": {"plugin": True, "overload_sustained_seconds": 5}}, "the profile's"),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "overload_queue_threshold"},
+            None,
+            "routing.overload_queue_threshold",
+        ),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "overload_sustained_seconds"},
+            None,
+            "routing.overload_sustained_seconds",
+        ),
+        ({**ROUTING_OFF, "overload_queue_threshold": -1}, None, "overload_queue_threshold"),
+        ({**ROUTING_OFF, "overload_queue_threshold": 1.5}, None, "overload_queue_threshold"),
+        ({**ROUTING_OFF, "overload_queue_threshold": "1"}, None, "overload_queue_threshold"),
+        ({**ROUTING_OFF, "overload_queue_threshold": True}, None, "overload_queue_threshold"),
+        ({**ROUTING_OFF, "overload_sustained_seconds": 0}, None, "overload_sustained_seconds"),
+        ({**ROUTING_OFF, "overload_sustained_seconds": -5}, None, "overload_sustained_seconds"),
+        ({**ROUTING_OFF, "overload_sustained_seconds": 2.5}, None, "overload_sustained_seconds"),
+        ({**ROUTING_OFF, "overload_sustained_seconds": "10"}, None, "overload_sustained_seconds"),
+        ({**ROUTING_OFF, "overload_sustained_seconds": True}, None, "overload_sustained_seconds"),
+        # The guard moves pinned runs only: with affinity off it would do nothing, and the
+        # variant would read as its result.
+        (None, {"routing": {"plugin": True, "overload_guard": True}}, "affinity is off"),
+        (
+            {**ROUTING_OFF, "plugin": True, "overload_guard": True},
+            None,
+            "affinity is off",
+        ),
         (True, None, "map"),
         (None, {"routing": True}, "map"),
         (None, {"routing": ["plugin"]}, "map"),
