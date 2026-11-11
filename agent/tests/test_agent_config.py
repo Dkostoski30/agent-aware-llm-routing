@@ -77,3 +77,31 @@ def test_profile_sets_the_contracts_tools_limits(profile: str) -> None:
     assert config.max_clause_chars > 0
     assert config.max_diff_changes > 0
     assert config.diff_context_words >= 0
+
+
+@pytest.mark.parametrize("profile", ["real", "sim", "demo"])
+def test_the_end_of_run_follows_the_profiles_plugin_switch(profile: str) -> None:
+    """The picker serves POST /runs/{id}/end only when it runs the plugin (P3.3)."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    plugin = yaml.safe_load(path.read_text())["routing"]["plugin"]
+    assert load_config(path).end_of_run is plugin
+
+
+def profile_with_plugin(tmp_path: Path, plugin: object) -> Path:
+    profile = yaml.safe_load((CONFIG_DIR / "real.yaml").read_text())
+    profile["routing"]["plugin"] = plugin
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    return path
+
+
+def test_with_the_plugin_on_the_runtime_ends_its_runs(tmp_path: Path) -> None:
+    assert load_config(profile_with_plugin(tmp_path, True)).end_of_run is True
+
+
+@pytest.mark.parametrize("plugin", ["yes", 1, None])
+def test_a_plugin_switch_that_is_not_true_or_false_is_rejected(
+    tmp_path: Path, plugin: object
+) -> None:
+    with pytest.raises(ValueError, match=r"routing\.plugin"):
+        load_config(profile_with_plugin(tmp_path, plugin))

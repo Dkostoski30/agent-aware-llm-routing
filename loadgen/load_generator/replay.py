@@ -12,11 +12,15 @@ tokens and no duration_ms. The output is written once, after the last run, and n
 until then each run's lines go to <output>.partial as it ends, so a replay that dies keeps its
 finished runs. Decided with the user, docs/task-cards/26-P2.3-replayer.md.
 
+With the picker's plugin on, each run's end goes to the picker as the run stops, finished or failed
+(P3.3, D1), as the agent runtime sends it after its final save.
+
 Usage: python -m load_generator.replay TRACE PATTERN [--profile real] [--seed N] [--out FILE]
 """
 
 import argparse
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
@@ -64,6 +68,12 @@ CHAT_PATH = "/v1/chat/completions"
 VLLM_SERVICE = "vllm"
 VLLM_PORT = 8000
 TOKENIZE_PATH = "/tokenize"
+# The picker's Service and the port its plugin serves POST /runs/{id}/end on, found by the name
+# infra/routing-values.sh gives it, so the number lives there alone.
+PICKER_SERVICE = "vllm-pool-epp"
+END_OF_RUN_PORT_NAME = "end-of-run"
+# httpx's default: the picker answers at once, and an end that misses it is left to the pin's TTL.
+PICKER_TIMEOUT_SECONDS = 5.0
 # llm-d-inference-sim names the pod here; it has no system_fingerprint, which names a real vLLM pod.
 SIMULATED_POD_HEADER = "x-inference-pod"
 # httpx queues a request over 100 connections by default, and that wait would count as the gateway's
@@ -275,21 +285,38 @@ async def _replay_run(
     return lines
 
 
+async def end_run(picker: httpx.AsyncClient, run_id: str) -> None:
+    """POST /runs/{id}/end (D1), which clears the run's pin. A failure is printed and left to the
+    pin's TTL (routing.run_ttl_seconds): the run's lines do not depend on it."""
+    try:
+        response = await picker.post(f"/runs/{run_id}/end")
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        print(
+            f"replay: {run_id}: end of run not delivered, the pin lasts until its TTL: {error!r}",
+            flush=True,
+        )
+
+
 async def replay_runs(
     client: httpx.AsyncClient,
     model: str,
     plan: Sequence[PlannedRun],
     deadline_seconds: float,
     keep_run: Callable[[list[dict[str, Any]]], None],
+    picker: httpx.AsyncClient | None = None,
 ) -> list[dict[str, Any]]:
     """Every run's lines in the plan's order, whichever run ended first, so that two replays of one
-    seed can be compared line by line. keep_run gets a run's lines as it ends."""
+    seed can be compared line by line. keep_run gets a run's lines as it ends. With a picker, each
+    run's end goes to it as the run stops; None is the plugin off, where nothing serves it."""
     zero = asyncio.get_running_loop().time()
     finished = 0
 
     async def replay_one(run: PlannedRun) -> list[dict[str, Any]]:
         nonlocal finished
         lines = await _replay_run(client, model, run, zero, deadline_seconds)
+        if picker is not None:
+            await end_run(picker, run.run_id)
         keep_run(lines)
         finished += 1
         pods = sorted({line["pod"] for line in lines if "pod" in line})
@@ -362,6 +389,24 @@ def _service_url(service: str, port: int) -> str:
     return f"http://{ip}:{port}"
 
 
+def picker_url() -> str:
+    """The picker's end-of-run address. A Service without the port runs no plugin, so no pin would
+    ever be cleared and the replay does not start."""
+    port = kubectl(
+        "get",
+        "service",
+        PICKER_SERVICE,
+        "-o",
+        f'jsonpath={{.spec.ports[?(@.name=="{END_OF_RUN_PORT_NAME}")].port}}',
+    )
+    if not port:
+        raise ReplayError(
+            f"service {PICKER_SERVICE} has no {END_OF_RUN_PORT_NAME} port, though the profile has "
+            "routing.plugin on: the picker does not run the plugin"
+        )
+    return _service_url(PICKER_SERVICE, int(port))
+
+
 async def _replay(
     model: str,
     runs: Sequence[TraceRun],
@@ -370,25 +415,45 @@ async def _replay(
     seed: int,
     timeout: float,
     keep_run: Callable[[list[dict[str, Any]]], None],
+    end_runs: bool,
 ) -> list[dict[str, Any]]:
+    # Before the first call: a picker with no end-of-run port stops the replay here.
+    picker_base = picker_url() if end_runs else None
     async with httpx.AsyncClient(
         base_url=_service_url(VLLM_SERVICE, VLLM_PORT), timeout=timeout
     ) as tokenizer:
         plan = await measure_template_and_plan(tokenizer, model, runs, pattern, shared, seed)
-    async with httpx.AsyncClient(
-        base_url=_service_url(GATEWAY_SERVICE, GATEWAY_PORT),
-        # Each call has its own deadline, which covers connecting too.
-        timeout=None,
-        limits=NO_CONNECTION_LIMIT,
-    ) as gateway:
-        return await replay_runs(gateway, model, plan, timeout, keep_run)
+    async with contextlib.AsyncExitStack() as clients:
+        gateway = await clients.enter_async_context(
+            httpx.AsyncClient(
+                base_url=_service_url(GATEWAY_SERVICE, GATEWAY_PORT),
+                # Each call has its own deadline, which covers connecting too.
+                timeout=None,
+                limits=NO_CONNECTION_LIMIT,
+            )
+        )
+        picker = (
+            None
+            if picker_base is None
+            else await clients.enter_async_context(
+                httpx.AsyncClient(base_url=picker_base, timeout=PICKER_TIMEOUT_SECONDS)
+            )
+        )
+        return await replay_runs(gateway, model, plan, timeout, keep_run, picker)
 
 
 def replay_to_file(
-    profile: Mapping[str, Any], trace: Path, pattern_name: str, seed: int | None, out: Path | None
+    profile: Mapping[str, Any],
+    trace: Path,
+    pattern_name: str,
+    seed: int | None,
+    out: Path | None,
+    end_runs: bool,
 ) -> list[dict[str, Any]]:
     """A replay of a profile's named pattern to out, by default output_path. seed None is the
-    profile's. Returns its lines, failed calls included."""
+    profile's. end_runs sends each run's end to the picker: true when the running picker has the
+    plugin on, which an experiment's variant may set apart from its profile. Returns its lines,
+    failed calls included."""
     config = load_replay_config(profile["replay"])
     pattern = named_pattern(config, pattern_name)
     seed = config.seed if seed is None else seed
@@ -413,6 +478,7 @@ def replay_to_file(
             # A replayed call fails when a real agent's would.
             profile["agent"]["llm_timeout_seconds"],
             lambda run_lines: _append_lines(partial, run_lines),
+            end_runs,
         )
     )
     check_lines(trace_validator(), lines)
@@ -433,7 +499,9 @@ def main() -> None:
     args = parser.parse_args()
 
     profile = yaml.safe_load((REPO_ROOT / "config" / f"{args.profile}.yaml").read_text())
-    lines = replay_to_file(profile, args.trace, args.pattern, args.seed, args.out)
+    # The picker as make up installs it for the profile (infra/routing-values.sh).
+    end_runs = profile["routing"]["plugin"]
+    lines = replay_to_file(profile, args.trace, args.pattern, args.seed, args.out, end_runs)
     if failed_calls(lines):
         raise SystemExit(1)
 

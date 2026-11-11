@@ -1,16 +1,16 @@
 """make experiment-compare (P2.5): numbers across CSVs of one load, from the CSVs alone.
 
 A variant's medians say little about where a difference came from, so this gives sums, the runs
-paired one by one, and the slow first tokens. Over files, the same runs averaged per variant cancel
-a steady drift when the files run the variants in opposite orders. The same variant between files
-says how large a difference can be with no routing change at all.
+paired one by one on time and on hit rate, and the slow first tokens. Over files, the same runs
+averaged per variant cancel a steady drift when the files run the variants in opposite orders. The
+same variant between files says how large a difference can be with no routing change at all.
 
 Usage: python -m load_generator.experiment_compare --stall-seconds N CSV [CSV ...]
 """
 
 import argparse
 import statistics
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from load_generator.results import (
     read_csv,
     run_times_ms,
     slow_first_tokens,
+    summarise,
     variant_rows,
     variant_totals,
 )
@@ -38,6 +39,16 @@ class RunDifferences:
     # None with no runs to pair.
     median_ms: float | None
     total_ms: float
+
+
+@dataclass(frozen=True)
+class HitRateCounts:
+    """Runs whose hit rate was higher on each side or the same, and those a side has no rate for."""
+
+    first_higher: int
+    second_higher: int
+    same: int
+    without_count: int
 
 
 def _seconds(milliseconds: float) -> str:
@@ -63,6 +74,39 @@ def run_differences_summary(differences: Mapping[str, float]) -> RunDifferences:
         second_faster=sum(value > 0 for value in values),
         median_ms=statistics.median(values) if values else None,
         total_ms=sum(values),
+    )
+
+
+def run_hit_rates(rows: Iterable[CallRow]) -> dict[str, float | None]:
+    """Each run's hit rate in one variant, as the variant's own is counted. None for a run with no
+    cached count."""
+    by_run: dict[str, list[CallRow]] = {}
+    for row in rows:
+        by_run.setdefault(row.run, []).append(row)
+    return {
+        run: summary.hit_rate
+        for run, calls in by_run.items()
+        for summary in summarise(calls).values()
+    }
+
+
+def moved_runs(rows: Iterable[CallRow]) -> set[str]:
+    """The runs of one variant with a later step on another pod than the step before it."""
+    return {row.run for row in rows if row.moved is True}
+
+
+def hit_rate_counts(
+    first: Mapping[str, float | None], second: Mapping[str, float | None], runs: Iterable[str]
+) -> HitRateCounts:
+    """Over the named runs. With no tolerance: a run that nothing changed for finds the same cached
+    tokens, so the same rate, and a difference of any size is one."""
+    pairs = [(first[run], second[run]) for run in runs]
+    rated = [(one, other) for one, other in pairs if one is not None and other is not None]
+    return HitRateCounts(
+        first_higher=sum(one > other for one, other in rated),
+        second_higher=sum(one < other for one, other in rated),
+        same=sum(one == other for one, other in rated),
+        without_count=len(pairs) - len(rated),
     )
 
 
@@ -106,6 +150,38 @@ def _difference_line(first: str, second: str, summary: RunDifferences, runs: int
         f"{first} faster in {summary.first_faster} of {runs} runs, {second} in "
         f"{summary.second_faster}; {first} minus {second} per run: median {median}"
     )
+
+
+def _counts_text(first: str, second: str, counts: HitRateCounts) -> str:
+    return (
+        f"{first} higher in {counts.first_higher}, {second} in {counts.second_higher}, the same "
+        f"in {counts.same}"
+    )
+
+
+def _hit_rate_lines(
+    first: str, second: str, variants: Mapping[str, Sequence[CallRow]]
+) -> list[str]:
+    """Over every run, then over the runs each side moved a step in: where a rule that keeps a run
+    on its pod can change its cache at all."""
+    rates = {variant: run_hit_rates(variants[variant]) for variant in (first, second)}
+    every = hit_rate_counts(rates[first], rates[second], rates[first])
+    rated = every.first_higher + every.second_higher + every.same
+    line = (
+        f"  hit rate per run: {first} higher in {every.first_higher} of {rated} runs, {second} in "
+        f"{every.second_higher}, the same in {every.same}"
+    )
+    if every.without_count:
+        line += f"; {every.without_count} runs with no count on a side left out"
+    lines = [line]
+    for variant in (first, second):
+        runs = moved_runs(variants[variant])
+        counts = hit_rate_counts(rates[first], rates[second], sorted(runs))
+        lines.append(
+            f"    of the {len(runs)} runs {variant} moved a step in: "
+            f"{_counts_text(first, second, counts)}"
+        )
+    return lines
 
 
 def _variant_lines(variant: str, rows: Sequence[CallRow], stall_ms: int) -> list[str]:
@@ -204,6 +280,7 @@ def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
         )
         summary = run_differences_summary(differences)
         lines.append(f"  {_difference_line(first, second, summary, len(differences))}")
+        lines += _hit_rate_lines(first, second, variants)
     times = {
         variant: [run_times_ms(files[path][variant]) for path in csvs]
         for variant in (first, second)

@@ -43,10 +43,14 @@ class AgentConfig:
     diff_context_words: int
     # How often GET /runs/{id}/events reads the run from Redis for new steps (P1.4b-1).
     events_poll_seconds: float
+    # Whether a run's end is sent to the picker, POST /runs/{id}/end (P3.3, D1): routing.plugin,
+    # since only the plugin serves it.
+    end_of_run: bool
 
 
 def load_config(path: Path) -> AgentConfig:
-    """Reads the model's name and the agent section of a profile; a missing key raises KeyError.
+    """Reads the model's name, the agent section and the routing switch of a profile; a missing key
+    raises KeyError.
 
     With model.lora set, the name is the adapter's: vLLM serves the adapter under its own name next
     to the base model, and only a request that names it gets it (P1.7)."""
@@ -57,6 +61,9 @@ def load_config(path: Path) -> AgentConfig:
         raise ValueError(
             f"agent.tool_choice is {agent['tool_choice']!r}, expected one of {get_args(ToolChoice)}"
         )
+    plugin = profile["routing"]["plugin"]
+    if not isinstance(plugin, bool):
+        raise ValueError(f"routing.plugin is {plugin!r}, expected true or false")
     return AgentConfig(
         model_name=model["lora"]["name"] if "lora" in model else model["name"],
         tool_choice=cast(ToolChoice, agent["tool_choice"]),
@@ -76,4 +83,5 @@ def load_config(path: Path) -> AgentConfig:
         max_diff_changes=agent["max_diff_changes"],
         diff_context_words=agent["diff_context_words"],
         events_poll_seconds=agent["events_poll_seconds"],
+        end_of_run=plugin,
     )

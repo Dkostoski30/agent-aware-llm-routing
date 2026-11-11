@@ -1,8 +1,10 @@
 """The agent runtime's HTTP API: start a run, read it back, stream its events, read its call
-records, health (P1.3a-2, P1.4b-1, P2.6b)."""
+records, health (P1.3a-2, P1.4b-1, P2.6b). With the picker's plugin on, a run's end goes to the
+picker once the run is saved (P3.3)."""
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -28,6 +30,22 @@ from agent_runtime.store import CallRecord, RedisStore, RunRecord, RunStore
 
 # The port the agent Service targets (infra/manifests/agent.yaml, P1.3b).
 PORT = 8080
+
+logger = logging.getLogger(__name__)
+
+
+async def end_run(picker: httpx.AsyncClient, run_id: str) -> None:
+    """POST /runs/{id}/end (D1), which clears the run's pin. A failure is logged and left to the
+    pin's TTL (routing.run_ttl_seconds): the run is saved already, and its answer must not depend on
+    the picker."""
+    try:
+        response = await picker.post(f"/runs/{run_id}/end")
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        logger.warning(
+            "end of run not delivered, the pin lasts until its TTL",
+            extra={"run-id": run_id, "error": repr(error)},
+        )
 
 
 def _arguments(raw: str) -> Any:
@@ -119,6 +137,7 @@ def create_app(
     config: AgentConfig,
     store: RunStore,
     http: httpx.AsyncClient,
+    picker: httpx.AsyncClient,
     run_request_schema: dict[str, Any],
 ) -> FastAPI:
     llm = LLMClient(http, config)
@@ -149,6 +168,8 @@ def create_app(
             updated_ms=SYSTEM_CLOCK.wall_ms(),
         )
         await store.save(final, result.messages, result.calls)
+        if config.end_of_run:
+            await end_run(picker, record.run_id)
 
     @app.post("/runs", status_code=202)
     async def start_run(request: Request, background: BackgroundTasks) -> dict[str, str]:
@@ -237,8 +258,10 @@ def from_env() -> FastAPI:
     schema_path = Path(os.environ["THESIS_SCHEMAS_DIR"]) / "run-request.v1.json"
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     http = httpx.AsyncClient(base_url=os.environ["GATEWAY_URL"])
+    # httpx's default timeout, 5 s: the picker answers at once, and a missed end is left to the TTL.
+    picker = httpx.AsyncClient(base_url=os.environ["PICKER_URL"])
     store = RedisStore(redis, config.history_ttl_seconds)
-    return create_app(config, store, http, json.loads(schema_path.read_text()))
+    return create_app(config, store, http, picker, json.loads(schema_path.read_text()))
 
 
 def main() -> None:

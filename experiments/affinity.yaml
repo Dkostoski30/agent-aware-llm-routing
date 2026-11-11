@@ -1,0 +1,33 @@
+# P3.3: task affinity against the default picker on the same replay (docs/task-cards/38-P3.3-task-affinity.md). Run with
+# make experiment NAME=affinity after make up (real, 2 pods), about 1.3 h with the laptop idle; results carry this file's
+# hash (D11). On real pods in one order: the claim is the hit rate, which followed the variant in both of 2026-11-08's
+# orders, unlike generation time. It makes no latency claim; P3.7 does, in both orders.
+profile: real
+# The long runs (P2.4), as experiments/baseline.yaml, so default here reads against Gate 2's runs.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# 40 runs at the rate P2.4 measured, as experiments/baseline.yaml.
+pattern: baseline
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types.
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile: 274 blocks of 16 per pod, as
+# experiments/baseline.yaml. Calls that find more than this on their pod are reported apart (P2.4).
+kv_capacity_tokens_per_pod: 4384
+# As experiments/baseline.yaml, so the replay starts as P2.5's and Gate 2's did.
+warmup:
+  runs_discarded: 5
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# In this order, one after the other. default is the picker of the four runs that give its range, 0.794-0.836 (P2.5
+# twice, Gate 2 twice): the chart's default-plugins.yaml. affinity runs thesis-plugins.yaml, the same scorers and weights
+# behind thesis-run-router with only affinity on, so the filter is the one difference.
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml
+  - name: affinity
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+    epp_config: thesis-plugins.yaml
