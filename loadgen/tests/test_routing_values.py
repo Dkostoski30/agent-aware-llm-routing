@@ -145,6 +145,23 @@ def test_the_profiles_ttl_reaches_the_plugin(tmp_path: Path) -> None:
     assert router["parameters"]["affinity"] is True
 
 
+def test_a_ttl_written_with_a_fraction_of_zero_reaches_the_plugin_as_an_integer(
+    tmp_path: Path,
+) -> None:
+    """yq keeps 300.0 as written, and the plugin's decoder refuses it for an int at start."""
+    root = repo(tmp_path, {**ROUTING_OFF, "run_ttl_seconds": 300.0})
+    rules = rules_file(tmp_path, {"routing": {"plugin": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert type(router["parameters"]["runTTLSeconds"]) is int
+    assert router["parameters"]["runTTLSeconds"] == 300
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)

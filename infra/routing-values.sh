@@ -64,7 +64,9 @@ if ! jq -e '.run_ttl_seconds | type == "number" and . == floor and . > 0' <<<"$r
   echo "routing-values: routing.run_ttl_seconds must be a positive whole number of seconds, got $(jq -c .run_ttl_seconds <<<"$routing")" >&2
   exit 1
 fi
-ttl=$(jq '.run_ttl_seconds' <<<"$routing")
+# floor, so a TTL written 300.0 reaches the plugin as 300: jq prints a number as written, and the plugin's decoder
+# refuses 300.0 for an int.
+ttl=$(jq '.run_ttl_seconds | floor' <<<"$routing")
 routing=$(jq 'del(.run_ttl_seconds)' <<<"$routing")
 if ! jq -e 'all(.[]; type == "boolean")' <<<"$routing" >/dev/null; then
   echo "routing-values: every rule must be true or false, got $(jq -c . <<<"$routing")" >&2
