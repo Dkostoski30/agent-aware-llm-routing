@@ -382,6 +382,41 @@ func TestFactoryServesTheEndOfRunOnItsPort(t *testing.T) {
 	}
 }
 
+// closeWait bounds how long the server may take to close after its context ends: it closes from its own goroutine.
+const closeWait = 5 * time.Second
+
+func TestTheEndOfRunServerClosesWithTheHandlesContext(t *testing.T) {
+	port := freePort(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	raw := parametersJSON(allOffRules, port)
+	if _, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: ctx}); err != nil {
+		t.Fatal(err)
+	}
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	connection, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatalf("server not up before the context ended: %v", err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	deadline := time.Now().Add(closeWait)
+	for {
+		connection, err := net.Dial("tcp", address)
+		if err != nil {
+			return
+		}
+		if err := connection.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("port %d still open %s after the context ended", port, closeWait)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestFactoryRefusesAPortInUse(t *testing.T) {
 	taken, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -419,6 +454,9 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"a negative TTL", fmt.Sprintf(`{%s, "runTTLSeconds": -1, "endOfRunPort": 9010}`, allOffRules),
 			"runTTLSeconds"},
 		{"a TTL that is not whole seconds", fmt.Sprintf(`{%s, "runTTLSeconds": 1.5, "endOfRunPort": 9010}`,
+			allOffRules), "runTTLSeconds"},
+		// One second more than a time.Duration holds, which would wrap to a negative TTL.
+		{"a TTL too long for a duration", fmt.Sprintf(`{%s, "runTTLSeconds": 9223372037, "endOfRunPort": 9010}`,
 			allOffRules), "runTTLSeconds"},
 		{"no port", fmt.Sprintf(`{%s, "runTTLSeconds": 300}`, allOffRules), "endOfRunPort"},
 		{"port zero", parametersJSON(allOffRules, 0), "endOfRunPort"},

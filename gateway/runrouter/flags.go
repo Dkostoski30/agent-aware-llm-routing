@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
 // The highest TCP port.
 const maxPort = 65535
+
+// The longest TTL a time.Duration holds in whole seconds; one more would wrap to a negative TTL, and every pin would
+// be dead on arrival.
+const maxTTLSeconds = int(math.MaxInt64 / int64(time.Second))
 
 // Flags turns each routing rule on or off (D11). The values come from the profile's routing section, which
 // infra/routing-values.sh writes into the picker's config; none has a default here, so a rule is never on or off by
@@ -72,8 +77,9 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 			return Parameters{}, fmt.Errorf("parameters: %s is missing or null", flag.key)
 		}
 	}
-	if in.RunTTLSeconds == nil || *in.RunTTLSeconds <= 0 {
-		return Parameters{}, errors.New("parameters: runTTLSeconds must be a positive number of seconds")
+	if in.RunTTLSeconds == nil || *in.RunTTLSeconds <= 0 || *in.RunTTLSeconds > maxTTLSeconds {
+		return Parameters{}, fmt.Errorf("parameters: runTTLSeconds must be a positive number of seconds, at most %d",
+			maxTTLSeconds)
 	}
 	if in.EndOfRunPort == nil || *in.EndOfRunPort < 1 || *in.EndOfRunPort > maxPort {
 		return Parameters{}, errors.New("parameters: endOfRunPort must be a port, 1-65535")
