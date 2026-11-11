@@ -161,6 +161,8 @@ type event struct {
 	pick string
 	// The reason PreRequest must log; "" means no line.
 	reason string
+	// The pod a remapped run was pinned to, which the line must name; "" means the line has no from.
+	from string
 }
 
 func TestAffinityPinsLaterStepsToTheFirstStepsPod(t *testing.T) {
@@ -204,13 +206,35 @@ func TestAffinityPinsLaterStepsToTheFirstStepsPod(t *testing.T) {
 			{pods: both, want: both, pick: "pod-a"},
 			{pods: both, want: both, pick: "pod-b"},
 		}},
-		// P3.4 gives this case its own reason; until then it is a run with no pin.
 		{"a pin on a pod that is no candidate passes every candidate and moves the pin", []event{
 			{runID: "run-1", pods: both, want: both, pick: "pod-b", reason: reasonFirst},
 			{runID: "run-1", pods: []string{"pod-a", "pod-c"}, want: []string{"pod-a", "pod-c"}, pick: "pod-c",
-				reason: reasonFirst},
+				reason: reasonRemapped, from: "pod-b"},
 			{runID: "run-1", pods: []string{"pod-a", "pod-c"}, want: []string{"pod-c"}, pick: "pod-c",
 				reason: reasonPinned},
+		}},
+		{"a remapped run stays on its new pod when the old one is back", []event{
+			{runID: "run-1", pods: both, want: both, pick: "pod-a", reason: reasonFirst},
+			{runID: "run-1", pods: []string{"pod-b"}, want: []string{"pod-b"}, pick: "pod-b", reason: reasonRemapped,
+				from: "pod-a"},
+			{runID: "run-1", pods: both, want: []string{"pod-b"}, pick: "pod-b", reason: reasonPinned},
+		}},
+		{"an expired pin on a pod that left is a first pick", []event{
+			{runID: "run-1", pods: both, want: both, pick: "pod-a", reason: reasonFirst},
+			{advance: testTTL + time.Second, runID: "run-1", pods: []string{"pod-b"}, want: []string{"pod-b"},
+				pick: "pod-b", reason: reasonFirst},
+		}},
+		{"an ended run whose pod left is a first pick", []event{
+			{runID: "run-1", pods: both, want: both, pick: "pod-a", reason: reasonFirst},
+			{runID: "run-1", end: true},
+			{runID: "run-1", pods: []string{"pod-b"}, want: []string{"pod-b"}, pick: "pod-b", reason: reasonFirst},
+		}},
+		{"a run pinned to the pod that stays is untouched by another's remap", []event{
+			{runID: "run-1", pods: both, want: both, pick: "pod-a", reason: reasonFirst},
+			{runID: "run-2", pods: both, want: both, pick: "pod-b", reason: reasonFirst},
+			{runID: "run-1", pods: []string{"pod-b"}, want: []string{"pod-b"}, pick: "pod-b", reason: reasonRemapped,
+				from: "pod-a"},
+			{runID: "run-2", pods: []string{"pod-b"}, want: []string{"pod-b"}, pick: "pod-b", reason: reasonPinned},
 		}},
 	}
 	for _, tc := range cases {
@@ -249,6 +273,10 @@ func TestAffinityPinsLaterStepsToTheFirstStepsPod(t *testing.T) {
 				line := (*lines)[0]
 				if line["run-id"] != e.runID || line["pod"] != e.pick || line["reason"] != e.reason {
 					t.Fatalf("event %d: line %v, want run-id %s, pod %s, reason %s", i, line, e.runID, e.pick, e.reason)
+				}
+				from, hasFrom := line["from"]
+				if (e.from == "" && hasFrom) || (e.from != "" && from != e.from) {
+					t.Fatalf("event %d: line %v, want from %q", i, line, e.from)
 				}
 			}
 		})

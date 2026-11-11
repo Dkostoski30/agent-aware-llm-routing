@@ -1,0 +1,45 @@
+{
+  "experiment": "pod-removed",
+  "hash": "07fcbf93ea76",
+  "profile": "sim",
+  "profile_sha256": "6ce10ca47a3706b56bd407bba0c6734dc91b62cd7d72ff5d2b1e49ed1e2165b7",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "steady-long",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "delete_after_seconds": 120,
+  "settle_seconds": 5,
+  "deleted_pod": "vllm-66c49d9b9b-2mn9p",
+  "delete_requested_ms": 1794389019224,
+  "pod_gone_ms": 1794389020209,
+  "groups": {
+    "finished before": {
+      "calls": 23,
+      "failed": 0
+    },
+    "running at the delete": {
+      "calls": 2,
+      "failed": 0
+    },
+    "sent during the settle": {
+      "calls": 2,
+      "failed": 0
+    },
+    "sent after": {
+      "calls": 126,
+      "failed": 0
+    }
+  },
+  "affected_runs": [
+    "tau2_retail-867-1"
+  ],
+  "tested_runs": [],
+  "sent_after_on_deleted": 0,
+  "remap_misses": [],
+  "runs": 20,
+  "ended_runs": 20,
+  "passed": false
+}

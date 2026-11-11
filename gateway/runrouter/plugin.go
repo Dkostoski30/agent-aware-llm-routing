@@ -2,7 +2,8 @@
 // returning only the pinned pod is a hard rule, while a scorer's weight can be outvoted by the queue and KV scorers;
 // returning every pod hands the choice back to the default scorers (docs/task-cards/37-P3.2-plugin-skeleton.md).
 // With affinity on (P3.3), steps 2..n of a run go to the pod its last call went to; the first step is the default
-// scorers' pick, by load and prefix.
+// scorers' pick, by load and prefix. A run whose pod left the pool goes where the scorers send it and stays there
+// (P3.4).
 package runrouter
 
 import (
@@ -30,9 +31,10 @@ const (
 	headerRunID = "x-run-id"
 	headerStep  = "x-step"
 	// Why a call of a run went where it went, in PreRequest's log line: no live pin, so the default scorers chose;
-	// or the run's pinned pod.
-	reasonFirst  = "first"
-	reasonPinned = "pinned"
+	// the run's pinned pod; or the scorers chose because the pinned pod had left the pool.
+	reasonFirst    = "first"
+	reasonPinned   = "pinned"
+	reasonRemapped = "remapped"
 	// The end of a run (D1): the agent runtime and the replayer send it once a run stops.
 	endOfRunPattern = "POST /runs/{id}/end"
 	// How long the end-of-run server waits for a request's headers. The callers send a bodiless POST within the
@@ -127,7 +129,9 @@ func (r *RunRouter) TypedName() fwkplugin.TypedName {
 
 // Filter returns only the run's pinned pod when affinity is on and that pod is a candidate; otherwise every candidate,
 // in order, and the default scorers choose. A pin on a pod that is no longer a candidate passes every candidate, and
-// PreRequest moves the pin to the pod chosen instead.
+// PreRequest moves the pin to the pod chosen instead. Pods are told apart by endpoint name, which the picker makes
+// <pod>-rank-<n> (llm-d-router v0.11.0's datastore) and which is unique: an InferencePool selects pods in its own
+// namespace only.
 func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	runID := request.Headers[headerRunID]
 	if !r.flags.Affinity || runID == "" {
@@ -138,7 +142,7 @@ func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceReque
 		return endpoints
 	}
 	for _, endpoint := range endpoints {
-		if endpoint.GetMetadata().ID.String() == pod {
+		if endpoint.GetMetadata().ID.Name == pod {
 			return []scheduling.Endpoint{endpoint}
 		}
 	}
@@ -147,8 +151,13 @@ func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceReque
 
 // PreRequest pins the run to the chosen pod and renews its TTL when affinity is on, and logs the pick of a call that
 // belongs to a run, under run-id (D12), at the level of upstream's "Request handled" line (logging.VERBOSE). With
-// affinity on the line has a reason: pinned when the run's live pin was this pod, first otherwise. The pin is read and
-// written under one lock, so a call of the same run in between cannot make the reason wrong.
+// affinity on the line has a reason: pinned when the run's live pin was this pod; remapped, with the old pod as from,
+// when it was another, since Filter lets only a live pin's pod through unless that pod left the pool; first when the
+// run had no live pin. The pin is read and written under one lock, so a call of the same run in between cannot make
+// the reason wrong. Two calls of one run that pass the filter together with no pin to hold them (no live pin yet, or
+// their pin's pod gone) may be sent to two pods, and the second then reads as remapped from the first's, though no pod
+// left. Neither caller sends that today: the replayer fans out steps 2..n only, which a live pin holds, and the agent
+// runtime sends one call at a time. P3.6 decides where a parallel group goes.
 func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, result *scheduling.SchedulingResult) error {
 	runID := request.Headers[headerRunID]
 	if runID == "" {
@@ -158,14 +167,17 @@ func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.Inferenc
 	if !ok || primary == nil || len(primary.TargetEndpoints) == 0 {
 		return nil
 	}
-	target := primary.TargetEndpoints[0].GetMetadata().ID
-	fields := []any{"run-id", runID, "step", request.Headers[headerStep], "pod", target.Name}
+	target := primary.TargetEndpoints[0].GetMetadata().ID.Name
+	fields := []any{"run-id", runID, "step", request.Headers[headerStep], "pod", target}
 	if r.flags.Affinity {
-		reason := reasonFirst
-		if r.pins.record(runID, target.String()) == target.String() {
-			reason = reasonPinned
+		switch before := r.pins.record(runID, target); before {
+		case "":
+			fields = append(fields, "reason", reasonFirst)
+		case target:
+			fields = append(fields, "reason", reasonPinned)
+		default:
+			fields = append(fields, "reason", reasonRemapped, "from", before)
 		}
-		fields = append(fields, "reason", reason)
 	}
 	log.FromContext(ctx).V(logging.VERBOSE).Info("Run call picked", fields...)
 	return nil
