@@ -14,6 +14,13 @@ A variant may instead turn routing rules on (P3.2): routing: {plugin: true, affi
 over its profile's routing section by infra/routing-values.sh, and the picker runs
 thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the picker (P3.3).
 
+On real pods, nvidia-smi samples the GPU into a file beside the results for the whole run, and is
+checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons). A plugin variant's
+picker log is kept before the next switch restarts the picker. A file may name a
+not_worse_tolerance, which goes into the .meta.json for make experiment-compare's verdict. A file
+may name pod_stall_seconds: after each replay Prometheus is asked whether a pod made no tokens for
+that long while it had calls, and such a replay stops the run (P3.7, experiments/log.md).
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -24,6 +31,7 @@ import json
 import subprocess
 import tempfile
 import time
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +84,37 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
+# The picker's file when a variant runs the plugin (infra/routing-values.sh), whose log has a line
+# per call with the rule that picked it (P3.5, P3.6).
+PLUGIN_CONFIG = "thesis-plugins.yaml"
+# What the GPU log samples (P3.7). As P2.5's log beside the baseline, plus the memory clock and
+# load and the memory used: temperature, clocks, power and the reasons the clocks were held down
+# (clocks_event_reasons, which this driver also names in the file's header) tell a slowed GPU from a
+# routing difference.
+GPU_FIELDS = (
+    "timestamp,temperature.gpu,utilization.gpu,utilization.memory,clocks.gr,clocks.mem,"
+    "power.draw,memory.used,clocks_event_reasons.active"
+)
+# Prometheus's HTTP API through the API server's service proxy, so no port-forward is needed:
+# kube-prometheus-stack's service under make up's release name, monitoring
+# (infra/install-monitoring.sh).
+PROMETHEUS_RANGE_API = (
+    "/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090"
+    "/proxy/api/v1/query_range"
+)
+# Per pod, at each sample: the fewest calls it had running plus the fewest waiting over the window
+# before it, and the prompt and generation tokens it made in that window. Both sides of each +
+# carry the same labels, so they add pod by pod. A pod over 0 on the first and at 0 on the second
+# had calls all through the window and made nothing: on 2026-11-12 such a pod sat 30-135 s at a
+# time while the other pod on the GPU went on (P3.7).
+BUSY_QUERY = (
+    "sum by (pod) (min_over_time(vllm:num_requests_running[{window}s]) "
+    "+ min_over_time(vllm:num_requests_waiting[{window}s]))"
+)
+TOKENS_QUERY = (
+    "sum by (pod) (increase(vllm:prompt_tokens_total[{window}s]) "
+    "+ increase(vllm:generation_tokens_total[{window}s]))"
+)
 # The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
 # overload limits (P3.5) and the parallel threshold (P3.6): a variant sets rules only
 # (infra/routing-values.sh).
@@ -104,6 +143,14 @@ class Warmup:
     calls_per_pod: int
     words: int
     completion_tokens: int
+
+
+@dataclass(frozen=True)
+class PodStall:
+    pod: str
+    # When it stopped making tokens, in seconds since the epoch.
+    start: float
+    seconds: int
 
 
 @dataclass(frozen=True)
@@ -141,10 +188,23 @@ class Experiment:
     warmup: Warmup
     variants: list[Variant]
     validation: Validation | None
+    # How much slower than the reference variant's p95 still counts as not worse (P3.7); None
+    # when the file makes no such claim.
+    not_worse_tolerance: float | None
+    # The variant on the default picker, which the other is held to; None with no tolerance.
+    reference_variant: str | None
+    # How long a pod with calls may make no tokens before its replay is refused (P3.7); None when
+    # replays are not checked.
+    pod_stall_seconds: int | None
 
     def profiles(self) -> list[str]:
         """Each profile once, in the variants' order."""
         return list(dict.fromkeys(variant.profile for variant in self.variants))
+
+    @property
+    def gpu_logged(self) -> bool:
+        """Whether a variant runs real pods, which share the one GPU."""
+        return any(variant.profile != SIM_PROFILE for variant in self.variants)
 
 
 @dataclass(frozen=True)
@@ -156,6 +216,13 @@ class Outputs:
 
     def replay(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}.jsonl")
+
+    @property
+    def gpu(self) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-gpu.csv")
+
+    def picker(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-picker.log")
 
 
 class Cluster(Protocol):
@@ -181,6 +248,20 @@ class Cluster(Protocol):
     def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]: ...
 
     def clock_jumps(self, since: float, until: float) -> int: ...
+
+    # Raises ExperimentError if nvidia-smi cannot read the GPU.
+    def check_gpu(self) -> None: ...
+
+    def start_gpu_log(self, path: Path) -> None: ...
+
+    # nvidia-smi's exit code if it had ended before it was stopped, else None.
+    def stop_gpu_log(self) -> int | None: ...
+
+    # The running picker's whole log.
+    def picker_log(self) -> str: ...
+
+    # Each stretch from since to until in which a pod had calls and made no tokens for seconds.
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]: ...
 
 
 def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
@@ -288,6 +369,51 @@ def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -
                 raise ExperimentError(f"{key} differs: {first} has {expected[key]}, {name} {value}")
 
 
+def _not_worse(
+    spec: Mapping[str, Any], variants: Sequence[Variant]
+) -> tuple[float | None, str | None]:
+    """The tolerance and the variant it holds the other to, the one on the default picker."""
+    tolerance = spec.get("not_worse_tolerance")
+    if tolerance is None:
+        return None, None
+    if isinstance(tolerance, bool) or not isinstance(tolerance, int | float) or tolerance < 0:
+        raise ExperimentError(f"not_worse_tolerance must be a number at or over 0, got {tolerance}")
+    if len(variants) != 2:
+        raise ExperimentError(
+            f"not_worse_tolerance compares two variants, the file has {len(variants)}"
+        )
+    defaults = [variant.name for variant in variants if variant.default]
+    if len(defaults) != 1:
+        raise ExperimentError(
+            "not_worse_tolerance needs one variant on the default picker to hold the other to, "
+            f"found {defaults}"
+        )
+    return float(tolerance), defaults[0]
+
+
+def _pod_stall_seconds(spec: Mapping[str, Any]) -> int | None:
+    seconds = spec.get("pod_stall_seconds")
+    if seconds is not None and (isinstance(seconds, bool) or not isinstance(seconds, int)):
+        raise ExperimentError(f"pod_stall_seconds must be a whole number of seconds, got {seconds}")
+    if seconds is not None and seconds <= 0:
+        raise ExperimentError(f"pod_stall_seconds must be over 0, got {seconds}")
+    return seconds
+
+
+def check_stall_window(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Prometheus tells how many tokens a pod made in a window only from two samples in it, so the
+    window must hold two of each profile's scrapes. Before the run, which takes hours."""
+    if experiment.pod_stall_seconds is None:
+        return
+    for name in experiment.profiles():
+        interval = profiles[name]["monitoring"]["scrape_interval_seconds"]
+        if experiment.pod_stall_seconds < 2 * interval:
+            raise ExperimentError(
+                f"pod_stall_seconds {experiment.pod_stall_seconds} holds fewer than two of profile "
+                f"{name}'s scrapes, {interval} s apart"
+            )
+
+
 def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     """patterns are those of the profile the file names. A missing key raises KeyError."""
     spec = yaml.safe_load(path.read_text())
@@ -313,6 +439,7 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     validation = None
     if spec.get("validation") is not None:
         validation = load_validation(spec["validation"], names)
+    tolerance, reference = _not_worse(spec, variants)
     return Experiment(
         name=path.stem,
         hash=experiment_hash(path),
@@ -325,6 +452,9 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
         warmup=warmup,
         variants=variants,
         validation=validation,
+        not_worse_tolerance=tolerance,
+        reference_variant=reference,
+        pod_stall_seconds=_pod_stall_seconds(spec),
     )
 
 
@@ -367,6 +497,7 @@ def _variant_meta(
     starts: Sequence[float],
     times: tuple[float, float],
     clock_jumps: int,
+    picker_log: str | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
@@ -385,7 +516,22 @@ def _variant_meta(
         "calls_per_pod": calls_per_pod(lines),
         "pod_switch_share": pod_switch_share(lines, starts),
         "max_gap_deviation_ms": max_gap_deviation(trace, lines),
+        # The file name beside the results, None for a variant without the plugin.
+        "picker_log": picker_log,
     }
+
+
+def stall_text(variant: str, stalls: Sequence[PodStall], started: float) -> str:
+    found = ", ".join(
+        f"{stall.pod} made no tokens with calls running or waiting for {stall.seconds} s from "
+        f"{stall.start - started:.0f} s into the replay"
+        for stall in stalls
+    )
+    return (
+        f"variant {variant}: {found}. Such stalls hit both pickers on 2026-11-12 (P3.7, "
+        "experiments/log.md), so this replay is not comparable; its replay file stays, move this "
+        "file's results away to run it again"
+    )
 
 
 def _run_variant(
@@ -405,6 +551,15 @@ def _run_variant(
     started = clock()
     lines = cluster.replay(out.replay(variant.name), variant.routing)
     ended = clock()
+    jumps = cluster.clock_jumps(started, ended)
+    picker_log = None
+    if variant.epp_config == PLUGIN_CONFIG:
+        out.picker(variant.name).write_text(cluster.picker_log())
+        picker_log = out.picker(variant.name).name
+    if experiment.pod_stall_seconds is not None:
+        stalls = cluster.pod_stalls(started, ended, experiment.pod_stall_seconds)
+        if stalls:
+            raise ExperimentError(stall_text(variant.name, stalls, started))
     meta = _variant_meta(
         variant,
         profile_sha256,
@@ -413,7 +568,8 @@ def _run_variant(
         _trace_lines(experiment.trace),
         start_times(experiment.pattern, experiment.seed),
         (started, ended),
-        cluster.clock_jumps(started, ended),
+        jumps,
+        picker_log,
     )
     return lines, meta
 
@@ -430,6 +586,8 @@ def run_experiment(
     default picker is put back, so a switch that fails after the last variant does not lose them."""
     out.csv.parent.mkdir(parents=True, exist_ok=True)
     cluster.check_ready()
+    if experiment.gpu_logged:
+        cluster.check_gpu()
     # Now and not at the end: the profiles were loaded just before, and a run takes hours.
     profile_sha256 = {
         name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
@@ -444,7 +602,12 @@ def run_experiment(
     deployed = experiment.profile
     # True once the deployed profile runs another count than its own.
     scaled = False
+    # True from the GPU log's start until it is stopped.
+    gpu_logging = False
     try:
+        if experiment.gpu_logged:
+            cluster.start_gpu_log(out.gpu)
+            gpu_logging = True
         for variant in experiment.variants:
             if variant.profile != deployed:
                 # The release it scaled is being replaced, so there is nothing to scale back.
@@ -469,6 +632,10 @@ def run_experiment(
                 experiment.warmup.runs_discarded,
             )
             variants_meta[variant.name] = variant_meta
+        gpu_ended_early_with = None
+        if gpu_logging:
+            gpu_logging = False
+            gpu_ended_early_with = cluster.stop_gpu_log()
         meta = {
             "experiment": experiment.name,
             "hash": experiment.hash,
@@ -483,11 +650,20 @@ def run_experiment(
             "seed": experiment.seed,
             "runs_discarded": experiment.warmup.runs_discarded,
             "kv_capacity_tokens_per_pod": experiment.kv_capacity_tokens_per_pod,
+            "gpu_log": out.gpu.name if experiment.gpu_logged else None,
+            # A gap at the end of the GPU log, which its timestamps alone would not explain.
+            "gpu_log_ended_early_with": gpu_ended_early_with,
+            "not_worse_tolerance": experiment.not_worse_tolerance,
+            "reference_variant": experiment.reference_variant,
+            # Every replay was checked and had no pod stalled this long; None when not checked.
+            "pod_stall_seconds": experiment.pod_stall_seconds,
             "variants": variants_meta,
         }
         if finished is not None:
             finished(rows, meta)
     finally:
+        if gpu_logging:
+            cluster.stop_gpu_log()
         if off_default:
             cluster.set_routing(None, None)
         if scaled:
@@ -559,6 +735,47 @@ def count_clock_jumps(since: float, until: float) -> int:
     return sum(CLOCK_JUMP_LINE in line for line in done.stdout.splitlines())
 
 
+def pod_stalls_from(
+    busy: Sequence[Mapping[str, Any]],
+    tokens: Sequence[Mapping[str, Any]],
+    window: int,
+    step: int,
+) -> list[PodStall]:
+    """The stalls in BUSY_QUERY's and TOKENS_QUERY's range answers. A pod with calls and no token
+    series at all is an error, not a pod without stalls: a renamed counter would pass every replay.
+    A single sample with no token reading beside it, or not a number, is no evidence of a stall.
+    Stalled samples one step apart are one stall, which began a window before its first sample."""
+    counted = {series["metric"]["pod"] for series in tokens}
+    unread = sorted({series["metric"]["pod"] for series in busy} - counted)
+    if unread:
+        raise ExperimentError(
+            f"Prometheus has no token count for {', '.join(unread)}, so a stalled pod could not be "
+            "ruled out"
+        )
+    made = {
+        (series["metric"]["pod"], float(at)): float(value)
+        for series in tokens
+        for at, value in series["values"]
+    }
+    found = []
+    for series in busy:
+        pod = series["metric"]["pod"]
+        stalled = [
+            float(at)
+            for at, value in series["values"]
+            if float(value) > 0 and made.get((pod, float(at))) == 0
+        ]
+        runs: list[list[float]] = []
+        for at in stalled:
+            # Under two steps: the next sample, whatever the rounding of its timestamp.
+            if runs and at - runs[-1][-1] < 2 * step:
+                runs[-1].append(at)
+            else:
+                runs.append([at])
+        found += [PodStall(pod, run[0] - window, round(run[-1] - run[0]) + window) for run in runs]
+    return found
+
+
 def set_routing(profile: str, values: Path | None, routing: Mapping[str, bool] | None) -> None:
     """The picker on the profile's routing, with Helm values or rules laid over it; both None is
     the profile's own. set-routing.sh takes one file: Helm values, or rules under a top-level
@@ -582,6 +799,8 @@ class LiveCluster:
         self.current = experiment.profile
         # None is the profile's own count.
         self.replicas: int | None = None
+        # nvidia-smi while it samples the GPU.
+        self.gpu: subprocess.Popen[bytes] | None = None
 
     @property
     def profile(self) -> Mapping[str, Any]:
@@ -694,6 +913,74 @@ class LiveCluster:
     def clock_jumps(self, since: float, until: float) -> int:
         return count_clock_jumps(since, until)
 
+    def check_gpu(self) -> None:
+        """One sample of the fields the log takes: a field this driver does not know, or no GPU,
+        fails here and not hours later in an empty log."""
+        done = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader"],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if done.returncode != 0 or not done.stdout.strip():
+            raise ExperimentError(
+                f"nvidia-smi exited with {done.returncode} and printed {done.stdout!r}, so the GPU "
+                "could not be logged"
+            )
+
+    def start_gpu_log(self, path: Path) -> None:
+        """As often as Prometheus reads the pods, so a sample lines up with a queue reading. -f has
+        nvidia-smi write the file itself, a whole line per sample, so stopping it loses none."""
+        real = next(name for name in self.experiment.profiles() if name != SIM_PROFILE)
+        interval = self.profiles[real]["monitoring"]["scrape_interval_seconds"]
+        self.gpu = subprocess.Popen(
+            [
+                "nvidia-smi",
+                f"--query-gpu={GPU_FIELDS}",
+                "--format=csv",
+                "-l",
+                str(interval),
+                "-f",
+                str(path),
+            ]
+        )
+
+    def stop_gpu_log(self) -> int | None:
+        if self.gpu is None:
+            raise ExperimentError("the GPU log was not started")
+        ended_with = self.gpu.poll()
+        if ended_with is None:
+            self.gpu.terminate()
+            self.gpu.wait()
+        self.gpu = None
+        return ended_with
+
+    def picker_log(self) -> str:
+        """Since the picker's start, which the variant's switch was."""
+        return kubectl("logs", f"deployment/{EPP_DEPLOYMENT}")
+
+    def _prometheus(self, query: str, since: float, until: float, step: int) -> list[Any]:
+        arguments = urllib.parse.urlencode(
+            {"query": query, "start": f"{since:.3f}", "end": f"{until:.3f}", "step": step}
+        )
+        answer = json.loads(kubectl("get", "--raw", f"{PROMETHEUS_RANGE_API}?{arguments}"))
+        if answer["status"] != "success":
+            raise ExperimentError(f"Prometheus answered {answer.get('error')} to {query}")
+        result: list[Any] = answer["data"]["result"]
+        return result
+
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
+        """At the profile's scrape interval, so each sample is a reading. No pod at all means
+        Prometheus did not read them, which must not pass as no stall."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        busy = self._prometheus(BUSY_QUERY.format(window=seconds), since, until, step)
+        if not busy:
+            raise ExperimentError(
+                "Prometheus has no vLLM pod for the replay, so a stalled pod could not be ruled out"
+            )
+        tokens = self._prometheus(TOKENS_QUERY.format(window=seconds), since, until, step)
+        return pod_stalls_from(busy, tokens, seconds, step)
+
 
 def _seconds_text(milliseconds: int | None) -> str:
     return "-" if milliseconds is None else f"{milliseconds / 1000:.2f} s"
@@ -782,6 +1069,13 @@ def finish(
     for line in report_lines(rows, meta):
         print(line)
     print(f"experiment: wrote {out.csv}, {out.meta} and {out.graph}")
+    if meta["gpu_log"] is not None:
+        print(f"experiment: GPU log {out.gpu}")
+    if meta["gpu_log_ended_early_with"] is not None:
+        print(
+            f"experiment: nvidia-smi ended early with exit {meta['gpu_log_ended_early_with']}, so "
+            "the GPU log stops before the run did"
+        )
     if experiment.validation is not None:
         entries = table(rows, experiment.validation)
         write_table(out.validation, entries)
@@ -805,6 +1099,7 @@ def main() -> None:
     patterns = load_replay_config(first["replay"]).patterns
     experiment = load_experiment(args.experiment, patterns)
     check_routing(experiment, profiles)
+    check_stall_window(experiment, profiles)
     out = outputs(experiment, REPO_ROOT)
     refuse_leftovers(experiment, out)
 

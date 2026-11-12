@@ -1,13 +1,16 @@
 """make experiment-compare (P2.5): numbers across an experiment's CSVs, from the CSVs alone."""
 
+import json
 from pathlib import Path
 
 import pytest
 from load_generator.experiment_compare import (
     HitRateCounts,
+    NotWorse,
     hit_rate_counts,
     main,
     moved_runs,
+    p95_ms,
     paired_differences,
     report_lines,
     run_differences_summary,
@@ -430,3 +433,118 @@ def test_the_csv_round_trip_keeps_what_the_report_reads(tmp_path: Path) -> None:
     rows = [row("a", "r-1", over_kv_limit=True, ttft_ms=9000, duration_ms=9500)]
     write_csv(csv, rows)
     assert variant_totals(read_csv(csv)) == variant_totals(rows)
+
+
+def write_with_meta(path: Path, rows: list[CallRow], meta: dict[str, object] | None) -> Path:
+    """A CSV and, unless None, the .meta.json make experiment writes beside it."""
+    write_csv(path, rows)
+    if meta is not None:
+        path.with_suffix(".meta.json").write_text(json.dumps(meta))
+    return path
+
+
+NOT_WORSE = {"not_worse_tolerance": 0.05, "reference_variant": "default"}
+
+
+def timed_runs(variant: str, run_ms: list[int], ttft_ms: int = 500) -> list[CallRow]:
+    """One call per run, so each run's completion time is its call's duration."""
+    return [
+        row(variant, f"r-{number}", duration_ms=duration, ttft_ms=ttft_ms)
+        for number, duration in enumerate(run_ms, start=1)
+    ]
+
+
+def test_p95_is_the_nearest_rank_over_the_finished_runs_and_answered_calls() -> None:
+    rows = timed_runs("plugin", [1000 * second for second in range(1, 21)])
+    rows.append(a_failed_call("plugin", "r-21"))
+    # 20 finished runs: the nearest rank of 0.95 is the 19th, 19 s; the failed run is left out.
+    assert p95_ms(rows, "run completion") == 19_000
+    assert p95_ms(rows, "first token") == 500
+
+
+def test_a_variant_with_no_finished_run_has_no_p95() -> None:
+    assert p95_ms([a_failed_call("plugin", "r-1")], "run completion") is None
+
+
+def test_not_worse_averages_each_sides_p95_over_the_files_and_allows_the_tolerance() -> None:
+    verdict = NotWorse(
+        "run completion", "default", "plugin", [10_000, 20_000], [15_750, 15_750], 0.05
+    )
+    # Default averages 15 s, so the limit is 15.75 s; at the limit is not worse.
+    assert verdict.limit_ms == 15_750
+    assert verdict.not_worse
+
+
+def test_over_the_limit_is_worse() -> None:
+    verdict = NotWorse("first token", "default", "plugin", [1000, 1000], [1000, 1201], 0.10)
+    # The candidate averages 1100.5 ms against a limit of 1100.
+    assert not verdict.not_worse
+
+
+def test_the_report_ends_with_the_verdict_from_the_metas_tolerance(tmp_path: Path) -> None:
+    one = write_with_meta(
+        tmp_path / "one.csv",
+        timed_runs("default", [2000, 4000]) + timed_runs("plugin", [2000, 4100]),
+        NOT_WORSE,
+    )
+    other = write_with_meta(
+        tmp_path / "other.csv",
+        timed_runs("plugin", [2000, 4300], ttft_ms=600) + timed_runs("default", [2000, 4000]),
+        NOT_WORSE,
+    )
+    report = report_lines([one, other], stall_ms=5000)
+    verdict = report[report.index("p95 over 2 files, plugin against default, tolerance 5%:") :]
+    assert verdict[1] == (
+        "  run completion: plugin 4.20 s (4.10 s, 4.30 s), default 4.00 s (4.00 s, 4.00 s), "
+        "limit 4.20 s -> not worse"
+    )
+    assert verdict[2] == (
+        "  first token: plugin 0.55 s (0.50 s, 0.60 s), default 0.50 s (0.50 s, 0.50 s), "
+        "limit 0.53 s -> worse"
+    )
+
+
+def test_without_a_tolerance_in_any_meta_there_is_no_verdict(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, {"hash": "a"})
+    other = write_with_meta(tmp_path / "other.csv", rows, None)
+    assert not any(line.startswith("p95 over") for line in report_lines([one, other], 5000))
+
+
+def test_files_whose_tolerance_differs_are_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    other = write_with_meta(
+        tmp_path / "other.csv", rows, {**NOT_WORSE, "not_worse_tolerance": 0.10}
+    )
+    with pytest.raises(ValueError, match="not_worse_tolerance"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_file_without_the_tolerance_beside_one_with_it_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    other = write_with_meta(tmp_path / "other.csv", rows, None)
+    with pytest.raises(ValueError, match="not_worse_tolerance"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_reference_that_is_not_one_of_the_variants_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("round-robin", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    with pytest.raises(ValueError, match="reference"):
+        report_lines([one], stall_ms=5000)
+
+
+def test_a_side_with_no_finished_run_in_a_file_gets_no_verdict_on_that_measure(
+    tmp_path: Path,
+) -> None:
+    rows = [*timed_runs("default", [2000]), a_failed_call("plugin", "r-1")]
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    report = report_lines([one], stall_ms=5000)
+    assert "  run completion: no verdict, plugin has no p95 in one.csv" in report
+
+
+def test_run_completion_is_the_whole_run_not_its_slowest_call() -> None:
+    rows = [row("plugin", "r-1", 1, duration_ms=1000), row("plugin", "r-1", 2, duration_ms=1000)]
+    assert p95_ms(rows, "run completion") == 2000

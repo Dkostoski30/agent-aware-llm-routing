@@ -10,6 +10,7 @@ import csv
 import hashlib
 import json
 import subprocess
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -18,19 +19,23 @@ import httpx
 import pytest
 import yaml
 from load_generator.experiment import (
+    GPU_FIELDS,
     Experiment,
     ExperimentError,
     LiveCluster,
+    PodStall,
     Warmup,
     check_journal_readable,
     check_routing,
     check_same_replay,
+    check_stall_window,
     count_clock_jumps,
     finish,
     load_experiment,
     main,
     outputs,
     plugin_on,
+    pod_stalls_from,
     pods_to_warm,
     refuse_leftovers,
     report_lines,
@@ -139,8 +144,19 @@ class FakeCluster:
         fail_replay_of: str | None = None,
         fail_restart_number: int | None = None,
         fail_switch_number: int | None = None,
+        fail_gpu_check: bool = False,
+        gpu_exit: int | None = None,
+        stalls: Mapping[str, Sequence[PodStall]] | None = None,
     ) -> None:
         self.asked: list[str] = []
+        # Each variant's pod stalls, found after its replay (P3.7).
+        self.stalls = stalls or {}
+        self.replayed_variant: str | None = None
+        # The GPU log's steps apart from the others, each with how many cluster steps came before
+        # it, so the order holds without every sequence above naming them (P3.7).
+        self.gpu: list[tuple[str, int]] = []
+        self.fail_gpu_check = fail_gpu_check
+        self.gpu_exit = gpu_exit
         self.replays = replays
         self.fail_replay_of = fail_replay_of
         self.fail_restart_number = fail_restart_number
@@ -196,6 +212,7 @@ class FakeCluster:
         if self.fail_replay_of and self.fail_replay_of in out.name:
             raise RuntimeError("the replay broke")
         variant = out.stem.rsplit("-", 1)[-1]
+        self.replayed_variant = variant
         lines = (self.replays or {}).get(variant, replay_lines())
         out.write_text("".join(json.dumps(line) + "\n" for line in lines))
         return [dict(line) for line in lines]
@@ -203,6 +220,26 @@ class FakeCluster:
     def clock_jumps(self, since: float, until: float) -> int:
         self.asked.append(f"jumps {since:.0f} {until:.0f}")
         return 3
+
+    def check_gpu(self) -> None:
+        self.gpu.append(("gpu check", len(self.asked)))
+        if self.fail_gpu_check:
+            raise ExperimentError("nvidia-smi exited with 9")
+
+    def start_gpu_log(self, path: Path) -> None:
+        self.gpu.append((f"gpu log {path.name}", len(self.asked)))
+
+    def stop_gpu_log(self) -> int | None:
+        self.gpu.append(("gpu stop", len(self.asked)))
+        return self.gpu_exit
+
+    def picker_log(self) -> str:
+        self.asked.append("picker log")
+        return "the picker's log\n"
+
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
+        self.asked.append(f"stalls {since:.0f} {until:.0f} {seconds}")
+        return list(self.stalls.get(self.replayed_variant or "", []))
 
 
 def ticking_clock() -> Callable[[], float]:
@@ -1477,3 +1514,547 @@ def test_validate_sim_replays_the_baseline_load_on_both_profiles_at_1_and_2_pods
         ("real-2pods", "sim-2pods"),
     ]
     load_trace(experiment.trace)
+
+
+# P3.7: the GPU log, the picker's log of a plugin variant, the not-worse tolerance, the burst files.
+
+ROUTING_BURST = REPO_ROOT / "experiments" / "routing-burst.yaml"
+ROUTING_BURST_REVERSED = REPO_ROOT / "experiments" / "routing-burst-reversed.yaml"
+WHOLE_PLUGIN = {"plugin": True, "affinity": True, "overload_guard": True, "parallel_spill": True}
+
+
+def test_a_real_profile_checks_the_gpu_first_and_logs_it_around_the_variants(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    # After the readiness check and before the first restart; stopped after the last replay.
+    assert cluster.gpu == [
+        ("gpu check", 1),
+        (f"gpu log {stem}-gpu.csv", 1),
+        ("gpu stop", len(cluster.asked)),
+    ]
+    assert cluster.asked[:2] == ["check", "restart"]
+    assert cluster.asked[-1].startswith("jumps")
+
+
+def test_a_sim_only_experiment_has_no_gpu_log(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.gpu == []
+    assert meta["gpu_log"] is None
+
+
+def test_a_gpu_that_cannot_be_read_stops_the_experiment_before_any_restart(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_gpu_check=True)
+    with pytest.raises(ExperimentError, match="nvidia-smi"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked == ["check"]
+    assert cluster.gpu == [("gpu check", 1)]
+
+
+def test_a_replay_that_breaks_still_stops_the_gpu_log_before_the_default_comes_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_replay_of="round-robin")
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    stops = [steps for event, steps in cluster.gpu if event == "gpu stop"]
+    assert stops == [len(cluster.asked) - 1]
+    assert cluster.asked[-1] == "routing default"
+
+
+def test_the_meta_names_the_gpu_log_and_whether_nvidia_smi_ended_early(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    _, running = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    _, ended = run_experiment(experiment, out, FakeCluster(gpu_exit=6), ticking_clock())
+    assert running["gpu_log"] == out.gpu.name
+    assert running["gpu_log_ended_early_with"] is None
+    assert ended["gpu_log_ended_early_with"] == 6
+
+
+def test_finish_says_when_the_gpu_log_has_a_gap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(gpu_exit=6), ticking_clock())
+    finish(experiment, out, rows, meta)
+    printed = capsys.readouterr().out
+    assert f"GPU log {out.gpu}" in printed
+    assert "nvidia-smi ended early with exit 6, so the GPU log stops before the run did" in printed
+
+
+def test_the_gpu_log_is_an_output_and_a_leftover(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    assert out.gpu == out.csv.with_name(f"exp-{experiment.hash}-gpu.csv")
+    out.gpu.parent.mkdir(parents=True)
+    out.gpu.write_text("")
+    with pytest.raises(ExperimentError, match="exist"):
+        refuse_leftovers(experiment, out)
+
+
+def test_a_plugin_variants_picker_log_is_kept_before_the_next_switch(tmp_path: Path) -> None:
+    """Switching back to the default restarts the picker, and its log goes with it."""
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    picked = cluster.asked.index("picker log")
+    assert cluster.asked[picked - 1].startswith("jumps")
+    assert cluster.asked[picked + 1] == "restart"
+    assert cluster.asked.count("picker log") == 1
+    assert out.picker("run-router").read_text() == "the picker's log\n"
+    assert meta["variants"]["run-router"]["picker_log"] == out.picker("run-router").name
+    assert meta["variants"]["default"]["picker_log"] is None
+
+
+def test_a_picker_log_is_kept_when_the_plugin_variant_is_last(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[cluster.asked.index("picker log") + 1 :] == ["routing default"]
+    assert out.picker("run-router").exists()
+
+
+def test_the_tolerance_and_the_reference_variant_go_into_the_meta(tmp_path: Path) -> None:
+    experiment = loaded(
+        tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], not_worse_tolerance=0.05
+    )
+    assert experiment.not_worse_tolerance == 0.05
+    assert experiment.reference_variant == "default"
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["not_worse_tolerance"] == 0.05
+    assert meta["reference_variant"] == "default"
+
+
+def test_without_a_tolerance_the_meta_has_none(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["not_worse_tolerance"] is None
+    assert meta["reference_variant"] is None
+
+
+@pytest.mark.parametrize("tolerance", [-0.01, True, "0.05"])
+def test_a_tolerance_that_is_not_a_number_at_or_over_zero_is_refused(
+    tmp_path: Path, tolerance: object
+) -> None:
+    with pytest.raises(ExperimentError, match="not_worse_tolerance"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], not_worse_tolerance=tolerance)
+
+
+def test_a_tolerance_with_no_default_variant_to_hold_to_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="one variant on the default picker"):
+        loaded(tmp_path, variants=[ROUTER_VARIANT, other], not_worse_tolerance=0.05)
+
+
+def test_a_tolerance_over_other_than_two_variants_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="two variants"):
+        loaded(
+            tmp_path,
+            variants=[DEFAULT_VARIANT, ROUTER_VARIANT, other],
+            not_worse_tolerance=0.05,
+        )
+
+
+def test_the_live_cluster_checks_the_gpu_with_the_fields_it_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="2026/11/12 12:00:00.000, 43\n")
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    LiveCluster(experiment, {}).check_gpu()
+    ((args,),) = [handed]
+    assert args[0] == "nvidia-smi"
+    assert args[1] == f"--query-gpu={GPU_FIELDS}"
+
+
+@pytest.mark.parametrize(("code", "stdout"), [(2, ""), (0, "")], ids=["exits 2", "prints nothing"])
+def test_a_gpu_check_that_fails_or_prints_nothing_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, stdout: str
+) -> None:
+    experiment = loaded(tmp_path)
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, code, stdout=stdout)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    with pytest.raises(ExperimentError, match="nvidia-smi"):
+        LiveCluster(experiment, {}).check_gpu()
+
+
+class FakeProcess:
+    def __init__(self, args: list[str], exited: int | None) -> None:
+        self.args = args
+        self.exited = exited
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return self.exited
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self) -> int:
+        return 0
+
+
+def test_the_live_gpu_log_samples_at_the_profiles_scrape_interval_into_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    started: list[FakeProcess] = []
+
+    def popen(args: list[str]) -> FakeProcess:
+        started.append(FakeProcess(args, None))
+        return started[-1]
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.Popen", popen)
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.start_gpu_log(tmp_path / "gpu.csv")
+    assert cluster.stop_gpu_log() is None
+    (process,) = started
+    interval = str(real["monitoring"]["scrape_interval_seconds"])
+    assert process.args == [
+        "nvidia-smi",
+        f"--query-gpu={GPU_FIELDS}",
+        "--format=csv",
+        "-l",
+        interval,
+        "-f",
+        str(tmp_path / "gpu.csv"),
+    ]
+    assert process.terminated
+
+
+def test_a_live_gpu_log_that_ended_early_gives_its_exit_and_is_not_terminated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    started: list[FakeProcess] = []
+
+    def popen(args: list[str]) -> FakeProcess:
+        started.append(FakeProcess(args, 6))
+        return started[-1]
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.Popen", popen)
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.start_gpu_log(tmp_path / "gpu.csv")
+    assert cluster.stop_gpu_log() == 6
+    assert not started[0].terminated
+
+
+def test_the_live_picker_log_is_the_pickers_whole_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return "lines\n"
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    assert LiveCluster(experiment, {}).picker_log() == "lines\n"
+    assert asked == [("logs", "deployment/vllm-pool-epp")]
+
+
+@pytest.mark.parametrize("path", [ROUTING_BURST, ROUTING_BURST_REVERSED], ids=lambda p: p.stem)
+def test_the_routing_burst_files_load_and_pass_the_routing_checks(path: Path) -> None:
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    assert experiment.profile == "real"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == "burst-fan-out"
+    assert experiment.seed == 6
+    assert experiment.not_worse_tolerance == 0.05
+    assert experiment.reference_variant == "default"
+    plugin = next(variant for variant in experiment.variants if not variant.default)
+    assert plugin.routing == WHOLE_PLUGIN
+    assert plugin.epp_config == "thesis-plugins.yaml"
+
+
+def test_routing_burst_discards_the_runs_before_the_first_burst() -> None:
+    """They start on empty caches and empty queues, before the load the file is about."""
+    experiment = committed(ROUTING_BURST)
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+def test_routing_burst_reversed_differs_only_in_the_order() -> None:
+    """Otherwise a difference between the two could come from something other than the order."""
+    forward = yaml.safe_load(ROUTING_BURST.read_text())
+    backward = yaml.safe_load(ROUTING_BURST_REVERSED.read_text())
+    assert [variant["name"] for variant in forward["variants"]] == ["default", "plugin"]
+    assert backward["variants"] == list(reversed(forward["variants"]))
+    del forward["variants"], backward["variants"]
+    assert backward == forward
+    assert (
+        outputs(committed(ROUTING_BURST), REPO_ROOT).csv
+        != outputs(committed(ROUTING_BURST_REVERSED), REPO_ROOT).csv
+    )
+
+
+# P3.7, after the first run: a vLLM pod that made no tokens while it had calls, a host stall that
+# hit one variant and not the other, so the replay is refused rather than compared.
+
+STALL = PodStall(pod="pod-a", start=150.0, seconds=65)
+
+
+def test_with_pod_stall_seconds_each_replay_is_checked_after_its_logs(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT], pod_stall_seconds=30)
+    assert experiment.pod_stall_seconds == 30
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    checks = [step for step in cluster.asked if step.startswith("stalls")]
+    # The replay's own clock readings, and the file's seconds.
+    assert checks == ["stalls 101 102 30", "stalls 103 104 30"]
+    first = cluster.asked.index(checks[0])
+    assert cluster.asked[first - 2].startswith("jumps")
+    assert cluster.asked[first - 1] == "picker log"
+    assert cluster.asked[first + 1] == "restart"
+    assert meta["pod_stall_seconds"] == 30
+
+
+def test_without_pod_stall_seconds_no_replay_is_checked(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    assert experiment.pod_stall_seconds is None
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert not any(step.startswith("stalls") for step in cluster.asked)
+    assert meta["pod_stall_seconds"] is None
+
+
+def test_a_stall_stops_the_experiment_before_the_next_variant_and_says_where(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"default": [STALL]})
+    out = outputs(experiment, tmp_path)
+    handed: list[dict[str, Any]] = []
+    with pytest.raises(ExperimentError) as stopped:
+        run_experiment(
+            experiment, out, cluster, ticking_clock(), lambda _, meta: handed.append(meta)
+        )
+    # started is 101 on the ticking clock, so the stall began 49 s into the replay.
+    assert str(stopped.value) == (
+        "variant default: pod-a made no tokens with calls running or waiting for 65 s from 49 s "
+        "into the replay. Such stalls hit both pickers on 2026-11-12 (P3.7, experiments/log.md), "
+        "so this replay is not comparable; its replay file stays, move this file's results away "
+        "to run it again"
+    )
+    assert cluster.asked.count("restart") == 1
+    assert handed == []
+    assert out.replay("default").exists()
+    stops = [steps for event, steps in cluster.gpu if event == "gpu stop"]
+    assert stops == [len(cluster.asked)]
+
+
+def test_a_stall_in_a_plugin_variant_keeps_its_picker_log_and_puts_the_default_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"router": [STALL, PodStall("pod-b", 160.0, 30)]})
+    out = outputs(experiment, tmp_path)
+    with pytest.raises(ExperimentError, match=r"pod-a .* 65 s from 49 s.*pod-b .* 30 s from 59 s"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.picker("run-router").exists()
+    assert cluster.asked[-1] == "routing default"
+    assert cluster.asked.count("restart") == 1
+
+
+@pytest.mark.parametrize("seconds", [0, -5, True, 2.5, "30"])
+def test_pod_stall_seconds_that_are_not_a_whole_number_over_zero_are_refused(
+    tmp_path: Path, seconds: object
+) -> None:
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        loaded(tmp_path, pod_stall_seconds=seconds)
+
+
+def test_a_stall_window_under_two_scrapes_is_refused_before_the_cluster_is_touched(
+    tmp_path: Path,
+) -> None:
+    """Prometheus needs two samples in the window to tell how many tokens came."""
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    interval = real["monitoring"]["scrape_interval_seconds"]
+    check_stall_window(loaded(tmp_path, pod_stall_seconds=2 * interval), {"real": real})
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        check_stall_window(loaded(tmp_path, pod_stall_seconds=2 * interval - 1), {"real": real})
+    check_stall_window(loaded(tmp_path), {"real": real})
+
+
+def series(pod: str, values: Mapping[float, float]) -> dict[str, Any]:
+    """One pod's series in a Prometheus range answer, whose values are text."""
+    return {"metric": {"pod": pod}, "values": [[t, str(v)] for t, v in values.items()]}
+
+
+def test_a_stall_is_a_run_of_windows_with_calls_and_no_tokens() -> None:
+    times = [100.0 + 5 * k for k in range(8)]
+    busy = [series("pod-a", dict.fromkeys(times, 2.0)), series("pod-b", dict.fromkeys(times, 0.0))]
+    tokens = [
+        # pod-a: no tokens in the windows ending at 110 to 120, and again at 135.
+        series("pod-a", {t: 0.0 if t in (110.0, 115.0, 120.0, 135.0) else 40.0 for t in times}),
+        # pod-b made none, but it had no calls: idle, not stalled.
+        series("pod-b", dict.fromkeys(times, 0.0)),
+    ]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == [
+        # Each window reaches 30 s back from its end.
+        PodStall("pod-a", start=80.0, seconds=40),
+        PodStall("pod-a", start=105.0, seconds=30),
+    ]
+
+
+def test_a_window_with_no_token_reading_is_not_a_stall() -> None:
+    busy = [series("pod-a", {100.0: 3.0, 105.0: 3.0})]
+    tokens = [series("pod-a", {100.0: 50.0})]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == []
+
+
+def test_not_a_number_is_not_a_stall() -> None:
+    busy = [{"metric": {"pod": "pod-a"}, "values": [[100.0, "NaN"]]}]
+    tokens = [series("pod-a", {100.0: 0.0})]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == []
+
+
+def prometheus_answer(result: list[dict[str, Any]]) -> str:
+    return json.dumps({"status": "success", "data": {"resultType": "matrix", "result": result}})
+
+
+def test_the_live_cluster_asks_prometheus_through_the_api_server_for_the_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    asked: list[tuple[str, ...]] = []
+    answers = [
+        prometheus_answer([series("pod-a", {200.0: 1.0, 205.0: 1.0})]),
+        prometheus_answer([series("pod-a", {200.0: 0.0, 205.0: 7.0})]),
+    ]
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return answers[len(asked) - 1]
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    found = LiveCluster(experiment, {"real": real}).pod_stalls(170.5, 400.25, 30)
+    assert found == [PodStall("pod-a", start=170.0, seconds=30)]
+    assert [args[:2] for args in asked] == [("get", "--raw"), ("get", "--raw")]
+    paths = [urllib.parse.urlsplit(args[2]) for args in asked]
+    assert {path.path for path in paths} == {
+        "/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090"
+        "/proxy/api/v1/query_range"
+    }
+    busy, made = (urllib.parse.parse_qs(path.query) for path in paths)
+    interval = str(real["monitoring"]["scrape_interval_seconds"])
+    for query in (busy, made):
+        assert query["start"] == ["170.500"]
+        assert query["end"] == ["400.250"]
+        assert query["step"] == [interval]
+    assert busy["query"] == [
+        "sum by (pod) (min_over_time(vllm:num_requests_running[30s]) "
+        "+ min_over_time(vllm:num_requests_waiting[30s]))"
+    ]
+    assert made["query"] == [
+        "sum by (pod) (increase(vllm:prompt_tokens_total[30s]) "
+        "+ increase(vllm:generation_tokens_total[30s]))"
+    ]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        json.dumps({"status": "error", "error": "bad query"}),
+        prometheus_answer([]),
+    ],
+    ids=["an error", "no pods"],
+)
+def test_a_prometheus_answer_with_no_pods_is_an_error_not_no_stalls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *_: answer)
+    with pytest.raises(ExperimentError, match="Prometheus"):
+        LiveCluster(experiment, {"real": real}).pod_stalls(170.0, 400.0, 30)
+
+
+@pytest.mark.parametrize("path", [ROUTING_BURST, ROUTING_BURST_REVERSED], ids=lambda p: p.stem)
+def test_the_routing_burst_files_check_each_replay_for_a_stalled_pod(path: Path) -> None:
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    assert experiment.pod_stall_seconds == 30
+    check_stall_window(experiment, profiles)
+
+
+def test_main_refuses_a_stall_window_under_two_scrapes_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    interval = profile["monitoring"]["scrape_interval_seconds"]
+    path = experiment_file(tmp_path, pod_stall_seconds=2 * interval - 1)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        main()
+
+
+def test_a_pod_with_calls_and_no_token_count_is_an_error_not_no_stall() -> None:
+    """A renamed counter, or a pod whose tokens Prometheus did not read, would otherwise pass every
+    replay as stall-free."""
+    busy = [series("pod-a", {100.0: 2.0}), series("pod-b", {100.0: 2.0})]
+    tokens = [series("pod-a", {100.0: 40.0})]
+    with pytest.raises(ExperimentError, match="pod-b"):
+        pod_stalls_from(busy, tokens, window=30, step=5)
+
+
+def test_a_live_token_answer_with_no_pods_is_an_error_not_no_stalls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    answers = [prometheus_answer([series("pod-a", {200.0: 1.0})]), prometheus_answer([])]
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return answers[len(asked) - 1]
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    with pytest.raises(ExperimentError, match="pod-a"):
+        LiveCluster(experiment, {"real": real}).pod_stalls(170.0, 400.0, 30)

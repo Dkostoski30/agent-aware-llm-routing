@@ -5,10 +5,15 @@ paired one by one on time and on hit rate, and the slow first tokens. Over files
 averaged per variant cancel a steady drift when the files run the variants in opposite orders. The
 same variant between files says how large a difference can be with no routing change at all.
 
+When make experiment wrote a not_worse_tolerance into each file's .meta.json (P3.7), the report ends
+with the verdict: the other variant's p95 against the reference variant's, run completion and first
+token apart, each side's p95 averaged over the files.
+
 Usage: python -m load_generator.experiment_compare --stall-seconds N CSV [CSV ...]
 """
 
 import argparse
+import json
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -17,6 +22,7 @@ from pathlib import Path
 from load_generator.report_config import load_report_config
 from load_generator.results import (
     CallRow,
+    percentile,
     read_csv,
     run_times_ms,
     slow_first_tokens,
@@ -28,6 +34,10 @@ from load_generator.results import (
 RUNS_LEFT_OUT = load_report_config().runs_left_out
 # Not a setting: every number here is one side against the other.
 VARIANTS_COMPARED = 2
+# Not a setting: PLAN.md's P3.7 row and card 42 state the claim at p95.
+NOT_WORSE_SHARE = 0.95
+# The measures the verdict covers, as card 42 names them.
+MEASURES = ("run completion", "first token")
 
 
 @dataclass(frozen=True)
@@ -118,6 +128,109 @@ def without_largest(
     ordered = sorted(first, key=lambda run: (first[run] - second[run]) * direction, reverse=True)
     kept = ordered[count:]
     return sum(first[run] for run in kept), sum(second[run] for run in kept)
+
+
+def p95_ms(rows: Iterable[CallRow], measure: str) -> int | None:
+    """Over the finished runs for run completion, the answered calls for first token. None with
+    none to take it over."""
+    calls = list(rows)
+    if measure == "run completion":
+        values = [time for time in run_times_ms(calls).values() if time is not None]
+    else:
+        values = [call.ttft_ms for call in calls if call.ttft_ms is not None]
+    return percentile(values, NOT_WORSE_SHARE) if values else None
+
+
+@dataclass(frozen=True)
+class NotWorse:
+    """Each side's p95 per file, in the files' order."""
+
+    measure: str
+    reference: str
+    candidate: str
+    reference_ms: list[int]
+    candidate_ms: list[int]
+    tolerance: float
+
+    @property
+    def limit_ms(self) -> float:
+        return statistics.mean(self.reference_ms) * (1 + self.tolerance)
+
+    @property
+    def not_worse(self) -> bool:
+        return statistics.mean(self.candidate_ms) <= self.limit_ms
+
+
+def not_worse_setting(csvs: Sequence[Path]) -> tuple[float, str] | None:
+    """The tolerance and reference variant from the .meta.json beside each CSV; None if no file has
+    one. A file without it beside one with it, or two that differ, are refused: their verdict would
+    not be the one the experiment files state."""
+    settings = []
+    for path in csvs:
+        meta_path = path.with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        tolerance = meta.get("not_worse_tolerance")
+        settings.append(None if tolerance is None else (tolerance, meta["reference_variant"]))
+    if len(set(settings)) > 1:
+        pairs = zip(csvs, settings, strict=True)
+        found = ", ".join(f"{path.name} {setting}" for path, setting in pairs)
+        raise ValueError(f"not_worse_tolerance and reference_variant differ between files: {found}")
+    return settings[0]
+
+
+def _not_worse_lines(
+    csvs: Sequence[Path],
+    files: Mapping[Path, Mapping[str, Sequence[CallRow]]],
+    labels: Mapping[Path, str],
+    setting: tuple[float, str],
+) -> list[str]:
+    tolerance, reference = setting
+    variants = sorted(files[csvs[0]])
+    if reference not in variants:
+        raise ValueError(f"the reference variant {reference} is not among {variants}")
+    (candidate,) = [variant for variant in variants if variant != reference]
+    lines = [
+        f"p95 over {len(csvs)} files, {candidate} against {reference}, "
+        f"tolerance {100 * tolerance:g}%:"
+    ]
+    for measure in MEASURES:
+        times = {
+            variant: [p95_ms(files[path][variant], measure) for path in csvs]
+            for variant in (reference, candidate)
+        }
+        missing = [
+            (variant, labels[path])
+            for variant in (candidate, reference)
+            for path, time in zip(csvs, times[variant], strict=True)
+            if time is None
+        ]
+        if missing:
+            variant, label = missing[0]
+            lines.append(f"  {measure}: no verdict, {variant} has no p95 in {label}")
+            continue
+        verdict = NotWorse(
+            measure,
+            reference,
+            candidate,
+            [time for time in times[reference] if time is not None],
+            [time for time in times[candidate] if time is not None],
+            tolerance,
+        )
+
+        def side(values: Sequence[int]) -> str:
+            each = ", ".join(_two_places(value) for value in values)
+            return f"{_two_places(statistics.mean(values))} ({each})"
+
+        lines.append(
+            f"  {measure}: {candidate} {side(verdict.candidate_ms)}, {reference} "
+            f"{side(verdict.reference_ms)}, limit {_two_places(verdict.limit_ms)} -> "
+            f"{'not worse' if verdict.not_worse else 'worse'}"
+        )
+    return lines
+
+
+def _two_places(milliseconds: float) -> str:
+    return f"{milliseconds / 1000:.2f} s"
 
 
 def _load(csvs: Sequence[Path]) -> dict[Path, dict[str, list[CallRow]]]:
@@ -268,6 +381,7 @@ def _between_files_lines(
 
 def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
     files = _load(csvs)
+    setting = not_worse_setting(csvs)
     first, second = sorted(files[csvs[0]])
     labels = _labels(csvs)
     lines = []
@@ -288,6 +402,8 @@ def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
     lines += _average_lines(first, second, times)
     for variant in (first, second):
         lines += _between_files_lines(list(labels.values()), variant, times[variant])
+    if setting is not None:
+        lines += _not_worse_lines(csvs, files, labels, setting)
     return lines
 
 
