@@ -13,6 +13,44 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-13 · P3.7b · red (neither first-call rule made runs faster in both orders); closed with the findings stated
+Command: the spike (P3.7's second-session files, a script outside the repo, numbers below) · sim: `make up PROFILE=sim`, `bash infra/set-routing.sh sim <rules>`, `make replay ... PATTERN=burst-fan-out PROFILE=sim SEED=6` for least_work_first and for least_context_first · real: `make experiment NAME=routing-faster`, `routing-faster-reversed`, `routing-context`, `routing-context-reversed` (the last three through the overnight script `p3-7b-overnight.txt`, outside the repo; its output in `experiments/results/p3-7b-*.log`) · `make experiment-compare CSVS="<both csv>" STALL_SECONDS=5` per rule · `make test`, `make lint` (green before every real run)
+Result:
+- **Spike** (P3.7's b36ab68af75c and e19c9624b221, runs paired by id, plugin minus default 566.1 s over both orders): A, runs whose first call went to the pod with more pinned remaining work, held 341.7 s; B, stayed calls over the KV limit that lost their cache, held 345.0 s (139.1 s of it in A's runs). The fixed criterion gave B by 3.3 s; the user called it a tie and chose A. Measured KV use (`vllm:kv_cache_usage_perc`) had a median of about 0.60 per pod, over 0.9 in 1-6% of scrapes, and barely differed at a stayed call's start between calls that lost their cache (0.69) and kept it (0.66), so B's premise was weak.
+- **Sim checks green:** least_work_first 357 calls, 0 failed, 16 least-work; least_context_first 357 calls, 0 failed, 30 least-context, sizes in 30 lines. 0 rule breaks in both.
+- **Real, both rules, every replay clean** (357 calls, 0 failed, 26 of 26 runs, no pod stall; clock jumps 0, and 19 in routing-faster-reversed); total run time, the verdict's measure:
+  | rule | order | plugin | default | plugin vs default |
+  |---|---|---|---|---|
+  | least_work_first (A) | d7acfd33b019 | 3,441.2 s | 3,718.7 s | -7.5% |
+  | | 9a6c4680fec5 (reversed) | 3,692.8 s | 3,550.9 s | +4.0% |
+  | | averaged | 3,567.0 s | 3,634.8 s | -1.9%: not faster |
+  | least_context_first | 3930f5a0c2f4 | 3,668.1 s | 4,272.0 s | -14.1% |
+  | | 5b00a10b5b0c (reversed) | 4,437.0 s | 3,566.1 s | +24.4% |
+  | | averaged | 4,052.6 s | 3,919.0 s | +3.4%: not faster |
+  P3.7's not-worse check on the same files: A worse on both measures (run-completion p95 312.94 s against a limit of 312.04 s; first token 33.63 s against 32.86 s); the context rule not worse on both (327.35 s against 352.00 s; 34.86 s against 36.50 s).
+- **The host moved more than either rule:** default alone, the same picker and load, took 3,550.9-4,272.0 s across these four files, a 20% spread. Each rule looked like a gain in one order and a loss in the other.
+- **Reasons per plugin picker log** (each `first` count includes set-routing's probe), and 0 lines breaking any rule in every log (least-work not on the lightest or within the slack, first over the slack, least-context not on the smallest, first with unequal context, spill at queue ≤ 1, remap under 10 s, parallel-spill with room):
+  | log | first | least-work / least-context | pinned | parallel-stay | parallel-spill | spill | remap |
+  |---|---|---|---|---|---|---|---|
+  | d7acfd33b019 | 16 | 15 | 106 | 167 | 18 | 30 | 6 |
+  | 9a6c4680fec5 | 11 | 20 | 109 | 190 | 17 | 6 | 5 |
+  | 3930f5a0c2f4 | 1 | 30 | 102 | 188 | 10 | 21 | 6 |
+  | 5b00a10b5b0c | 1 | 30 | 103 | 196 | 3 | 19 | 6 |
+- **Where A's first order gained** (plugin minus default per step, by routing reason): pinned -214.5 s, spill -46.2 s, parallel-stay -37.6 s, remap -35.6 s, first -4.0 s, parallel-spill +3.4 s, the placed first calls themselves +57.1 s (they skip the queue scorer's pick).
+Notes:
+- **Findings for the thesis:** on one 4 GB GPU with two pods, (1) losing the cache costs through KV admission, not prefill compute: later prompts are 2,465 tokens at the median against 4,384 tokens of KV per pod, both pods run about one call at a time (vLLM's own stats, P3.7c), and stayed calls that lost their cache waited 8.5 s for a first token against 3.1 s for those that kept it, while the simulator prices a hit at 0.146 ms per uncached token (at most about 3% of run time here); (2) pod "stalls" are one pod starved of the shared GPU (P3.7c's entry); (3) run-to-run noise is about 20% of total run time, so one seed per order cannot resolve a 5% effect. P5's comparisons need more repetitions than its three seeds to claim an effect of that size.
+- **Decided with the user, 2026-11-12/13:** A first (the spike's tie); the verdict on total run time instead of run-completion p95, changed after A's first order and before its reversed order ran (at 26 runs a file's p95 is its second-slowest run, bfcl-565-21 in both variants, 291.43 s and 292.16 s); B dropped after its premise failed; least_context_first as the second and last try (rule 8), against Claude's reading that the data did not support it; close with the findings stated, then P3.8.
+- **Failed attempts, files kept:** `routing-faster-reversed-pod-stall/` (both pods stalled, 30 of 73 calls failed, 2026-11-12); `routing-context-dns-fail/` (WSL's DNS stopped resolving ghcr.io at the first routing switch); `routing-context-pod-stall/` (both orders stalled in the plugin variant, 2026-11-13 morning, with the two salvaged vLLM logs). The overnight script failed twice before that, Claude's script: a failed `make up` did not stop it, and a re-run's sim replay refused its own earlier output, so `least-context-burst-fan-out-6-picker.log` holds an empty run's log; the passing sim check's counts are in `p3-7b-overnight-2026-11-12-2319.log`.
+- **Changed along the way:** the gateway chart is installed from a local copy that make up pulls once (`infra/router-chart.sh`, same digest, `helm template` output identical, sha256 db341e11…), so an experiment needs no network after make up; make experiment keeps both vLLM pods' logs (P3.7c). Every rule stays off in every profile.
+- What it does not show: whether either rule helps on a GPU per pod or with more repetitions; one seed, one load.
+
+### 2026-11-13 · P3.7c · green (both vLLM pods' logs kept per real variant)
+Command: `make test`, `make lint` · `make experiment NAME=routing-context`, `routing-context-reversed` (P3.7b's last runs)
+Result: each of the four variants left two `<stem>-<variant>-vllm-<pod>.log` files (1.43-1.62 MB, every line timestamped by `kubectl logs --timestamps`, 61-71 engine stats lines each), and each variant's meta names them (`vllm_logs`).
+Notes:
+- **What the two salvaged logs showed** (`routing-context-pod-stall/`, the reversed run of 2026-11-13 morning, plugin variant): pod 6dhf6 made 0 prompt and generation tokens in some 10 s intervals and printed no stats line in others (one long engine step), 1 call running and 6-9 waiting, while pod jjnph made about 630 prompt tokens/s every 10 s. No preemption line in either log. So a "stall" is one pod starved of the shared GPU, not a frozen one: a prefill of about 0.6 s took 30 s or more, and the calls behind it timed out at 120 s. Why one process starves, and whether a rule makes it likelier, is open; the next stall comes with these logs.
+- No stall in the two runs since, so the logs were not yet needed.
+
 ### 2026-11-12 · P3.7 · red on run completion (plugin's p95 5.1% over default's, the tolerance 5%), first token not worse; closed with the result stated
 Command: the spike (`make replay ... PATTERN=burst-fan-out PROFILE=real SEED=6` on the default picker, to `experiments/results/replays/routing-burst-spike-6.jsonl`) · first session: `make test`, `make lint`, `make down`, `make up`, `make experiment NAME=routing-burst` (hash e7ba766de6cd: default 13:03, plugin 13:18), `make experiment NAME=routing-burst-reversed` (22bc5d047b67: plugin 13:37, default 13:52), the reversed file again (plugin 15:29, default 15:46) · Windows restarted, screen unlocked, display never off · second session, after the stall check: `make test` (1672 Python, Go, 22 training), `make lint`, `make down`, `make up`, `make experiment NAME=routing-burst` (b36ab68af75c: default 17:58-18:10, plugin 18:15-18:28), `make experiment NAME=routing-burst-reversed` (e19c9624b221: plugin 18:35-18:47, default 18:53-19:05) · `make experiment-compare CSVS="experiments/results/routing-burst-b36ab68af75c.csv experiments/results/routing-burst-reversed-e19c9624b221.csv" STALL_SECONDS=5` · card 42's Prometheus queue read and three `jq` checks on each plugin picker log, on the user's run. Times local (UTC+1)
 Result:
