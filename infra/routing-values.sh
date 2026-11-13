@@ -4,8 +4,10 @@
 # Usage: routing-values.sh <profile> [rules-file]
 #   rules-file holds rules under a top-level routing key, laid over the profile's, as an experiment variant's
 #   routing: {plugin: true, affinity: true}. A rule the profile does not have is refused, so a typo fails here, and so
-#   is a rule on while plugin is off, and overload_guard or parallel_spill on while affinity is off. run_ttl_seconds,
-#   the overload limits and the parallel threshold are the profile's alone: variants differ only in rules.
+#   is a rule on while plugin is off, overload_guard, parallel_spill, least_work_first or least_context_first on while
+#   affinity is off, and least_work_first and least_context_first both on.
+#   run_ttl_seconds, the overload limits, the parallel threshold and the least-work slack are the profile's alone:
+#   variants differ only in rules.
 # With routing.plugin false it prints {}: the chart's default-plugins.yaml stays. With it true, an EndpointPickerConfig
 # named thesis-plugins.yaml: the default's plugins and weights, with thesis-run-router (gateway/runrouter) first, and
 # the end-of-run port (P3.3) on the picker's container and Service, so the port is open exactly when the plugin runs.
@@ -17,13 +19,16 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/profile.sh"
 profile=${1:?usage: infra/routing-values.sh <profile> [rules-file]}
 rules_file=${2:-}
 
-# The switch, the five rules, the pin TTL, the overload limits and the parallel threshold gateway/runrouter/flags.go
-# requires, and no others, in every profile: a missing one would reach the plugin as null, which it refuses only when
-# the picker starts, as a rollout timeout; an extra one, a typo, would let a variant's same typo through.
-KEYS='["plugin", "affinity", "overload_guard", "parallel_spill", "priority", "warmup", "run_ttl_seconds",
-  "overload_queue_threshold", "overload_sustained_seconds", "parallel_queue_threshold"]'
+# The switch, the seven rules, the pin TTL, the overload limits, the parallel threshold and the least-work slack
+# gateway/runrouter/flags.go requires, and no others, in every profile: a missing one would reach the plugin as null,
+# which it refuses only when the picker starts, as a rollout timeout; an extra one, a typo, would let a variant's same
+# typo through.
+KEYS='["plugin", "affinity", "overload_guard", "parallel_spill", "least_work_first", "least_context_first", "priority",
+  "warmup", "run_ttl_seconds", "overload_queue_threshold", "overload_sustained_seconds", "parallel_queue_threshold",
+  "least_work_slack"]'
 # The keys that are no rule but the profile's own numbers.
-PROFILE_ONLY='["run_ttl_seconds", "overload_queue_threshold", "overload_sustained_seconds", "parallel_queue_threshold"]'
+PROFILE_ONLY='["run_ttl_seconds", "overload_queue_threshold", "overload_sustained_seconds", "parallel_queue_threshold",
+  "least_work_slack"]'
 # Where the plugin serves POST /runs/{id}/end (D1, P3.3). Not a tunable: the picker's container already has 9002 (ext
 # proc), 9003 (health) and 9090 (metrics), and 9010 is free next to them. infra/manifests/agent.yaml's PICKER_URL
 # names the same port; the replayer finds it on the Service by its name.
@@ -81,12 +86,17 @@ if ! jq -e '.parallel_queue_threshold | type == "number" and . == floor and . >=
   echo "routing-values: routing.parallel_queue_threshold must be a whole number of calls, 0 or more, got $(jq -c .parallel_queue_threshold <<<"$routing")" >&2
   exit 1
 fi
+if ! jq -e '.least_work_slack | type == "number" and . == floor and . >= 0' <<<"$routing" >/dev/null; then
+  echo "routing-values: routing.least_work_slack must be a whole number, 0 or more, got $(jq -c .least_work_slack <<<"$routing")" >&2
+  exit 1
+fi
 # floor, so a number written 300.0 reaches the plugin as 300: jq prints a number as written, and the plugin's decoder
 # refuses 300.0 for an int.
 ttl=$(jq '.run_ttl_seconds | floor' <<<"$routing")
 queue_threshold=$(jq '.overload_queue_threshold | floor' <<<"$routing")
 sustained=$(jq '.overload_sustained_seconds | floor' <<<"$routing")
 parallel_threshold=$(jq '.parallel_queue_threshold | floor' <<<"$routing")
+least_work_slack=$(jq '.least_work_slack | floor' <<<"$routing")
 routing=$(jq --argjson only "$PROFILE_ONLY" 'with_entries(select(.key | IN($only[]) | not))' <<<"$routing")
 if ! jq -e 'all(.[]; type == "boolean")' <<<"$routing" >/dev/null; then
   echo "routing-values: every rule must be true or false, got $(jq -c . <<<"$routing")" >&2
@@ -114,19 +124,36 @@ if [[ $(jq -r '.parallel_spill and (.affinity | not)' <<<"$routing") == true ]];
   echo "routing-values: parallel_spill on, but affinity is off" >&2
   exit 1
 fi
+# So does the least-work rule (P3.7b): it adds up the work of pinned runs, and only affinity keeps pins.
+if [[ $(jq -r '.least_work_first and (.affinity | not)' <<<"$routing") == true ]]; then
+  echo "routing-values: least_work_first on, but affinity is off" >&2
+  exit 1
+fi
+# And the least-context rule (P3.7b's second try), which also places a run's first call, by another measure: not both.
+if [[ $(jq -r '.least_context_first and (.affinity | not)' <<<"$routing") == true ]]; then
+  echo "routing-values: least_context_first on, but affinity is off" >&2
+  exit 1
+fi
+if [[ $(jq -r '.least_work_first and .least_context_first' <<<"$routing") == true ]]; then
+  echo "routing-values: least_work_first and least_context_first both on: each places a run's first call" >&2
+  exit 1
+fi
 
 # The plugin's parameters, by the names gateway/runrouter/flags.go reads. plugin is the switch above, not a rule.
 parameters=$(jq -c --argjson ttl "$ttl" --argjson threshold "$queue_threshold" --argjson sustained "$sustained" \
-  --argjson parallel "$parallel_threshold" --argjson port "$END_OF_RUN_PORT" '{
+  --argjson parallel "$parallel_threshold" --argjson slack "$least_work_slack" --argjson port "$END_OF_RUN_PORT" '{
   affinity: .affinity,
   overloadGuard: .overload_guard,
   parallelSpill: .parallel_spill,
+  leastWorkFirst: .least_work_first,
+  leastContextFirst: .least_context_first,
   priority: .priority,
   warmup: .warmup,
   runTTLSeconds: $ttl,
   overloadQueueThreshold: $threshold,
   overloadSustainedSeconds: $sustained,
   parallelQueueThreshold: $parallel,
+  leastWorkSlack: $slack,
   endOfRunPort: $port
 }' <<<"$routing")
 

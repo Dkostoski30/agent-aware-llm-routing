@@ -28,17 +28,20 @@ RULES_OFF = {
     "affinity": False,
     "overload_guard": False,
     "parallel_spill": False,
+    "least_work_first": False,
+    "least_context_first": False,
     "priority": False,
     "warmup": False,
 }
-# A profile's routing section: the rules, the pin TTL (P3.3), the overload limits (P3.5) and the
-# parallel threshold (P3.6).
+# A profile's routing section: the rules, the pin TTL (P3.3), the overload limits (P3.5), the
+# parallel threshold (P3.6) and the least-work slack (P3.7b).
 ROUTING_OFF = {
     **RULES_OFF,
     "run_ttl_seconds": 300,
     "overload_queue_threshold": 1,
     "overload_sustained_seconds": 10,
     "parallel_queue_threshold": 2,
+    "least_work_slack": 2,
 }
 
 
@@ -97,12 +100,15 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
         "affinity": True,
         "overloadGuard": True,
         "parallelSpill": False,
+        "leastWorkFirst": False,
+        "leastContextFirst": False,
         "priority": False,
         "warmup": False,
         "runTTLSeconds": 300,
         "overloadQueueThreshold": 1,
         "overloadSustainedSeconds": 10,
         "parallelQueueThreshold": 2,
+        "leastWorkSlack": 2,
         "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
@@ -212,6 +218,40 @@ def test_the_profiles_parallel_threshold_reaches_the_plugin_as_an_integer(tmp_pa
     assert router["parameters"]["parallelQueueThreshold"] == 3
 
 
+def test_the_profiles_least_work_slack_reaches_the_plugin_as_an_integer(tmp_path: Path) -> None:
+    """As the parallel threshold: 4.0 must reach the plugin as 4."""
+    root = repo(tmp_path, {**ROUTING_OFF, "least_work_slack": 4.0})
+    rules = rules_file(
+        tmp_path, {"routing": {"plugin": True, "affinity": True, "least_work_first": True}}
+    )
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert router["parameters"]["leastWorkFirst"] is True
+    assert type(router["parameters"]["leastWorkSlack"]) is int
+    assert router["parameters"]["leastWorkSlack"] == 4
+
+
+def test_least_context_first_reaches_the_plugin(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    rules = rules_file(
+        tmp_path, {"routing": {"plugin": True, "affinity": True, "least_context_first": True}}
+    )
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert router["parameters"]["leastContextFirst"] is True
+    assert router["parameters"]["leastWorkFirst"] is False
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)
@@ -290,6 +330,43 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
             None,
             "parallel_spill on, but",
         ),
+        # The least-work slack is the profile's too (P3.7b).
+        (None, {"routing": {"plugin": True, "least_work_slack": 3}}, "the profile's"),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "least_work_slack"},
+            None,
+            "routing.least_work_slack",
+        ),
+        ({**ROUTING_OFF, "least_work_slack": -1}, None, "least_work_slack"),
+        ({**ROUTING_OFF, "least_work_slack": 1.5}, None, "least_work_slack"),
+        ({**ROUTING_OFF, "least_work_slack": "2"}, None, "least_work_slack"),
+        ({**ROUTING_OFF, "least_work_slack": True}, None, "least_work_slack"),
+        # The least-work rule counts pinned runs, which only affinity keeps.
+        (None, {"routing": {"plugin": True, "least_work_first": True}}, "least_work_first on, but"),
+        (
+            {**ROUTING_OFF, "plugin": True, "least_work_first": True},
+            None,
+            "least_work_first on, but",
+        ),
+        # So does the least-context rule (P3.7b's second try), and it places the same calls as the
+        # least-work rule by another measure, so not both.
+        (
+            None,
+            {"routing": {"plugin": True, "least_context_first": True}},
+            "least_context_first on, but",
+        ),
+        (
+            None,
+            {
+                "routing": {
+                    "plugin": True,
+                    "affinity": True,
+                    "least_work_first": True,
+                    "least_context_first": True,
+                }
+            },
+            "least_work_first and least_context_first",
+        ),
         (True, None, "map"),
         (None, {"routing": True}, "map"),
         (None, {"routing": ["plugin"]}, "map"),
@@ -315,7 +392,19 @@ def test_a_profile_that_is_not_there_is_refused(tmp_path: Path) -> None:
 
 
 FAKE_HELM = """#!/usr/bin/env bash
-# Records each --values file's content, in order, one YAML document each.
+# pull: records the chart and, unless PULL_FAILS is set, unpacks a stand-in chart where
+# --untardir says, as helm pull --untar does. upgrade: records the chart it installs, then each
+# --values file's content, in order, one YAML document each.
+if [[ $1 == pull ]]; then
+  echo "$2" >>"$LOG.pull"
+  [[ -z ${PULL_FAILS:-} ]] || exit 1
+  while [[ $# -gt 0 ]]; do
+    if [[ $1 == --untardir ]]; then mkdir -p "$2/llm-d-router-gateway"; fi
+    shift
+  done
+  exit 0
+fi
+echo "$4" >>"$LOG.chart"
 while [[ $# -gt 0 ]]; do
   if [[ $1 == --values ]]; then
     { echo '---'; cat "$2"; echo; } >>"$LOG"
@@ -332,8 +421,11 @@ echo curl >>"$LOG.curl"
 """
 
 
-def set_routing(root: Path, tmp_path: Path, *args: str) -> tuple[int, list[Any], str]:
-    """Exit code, the --values documents helm got, and the output."""
+def set_routing(
+    root: Path, tmp_path: Path, *args: str, pull_fails: bool = False
+) -> tuple[int, list[Any], str]:
+    """Exit code, the --values documents helm got, and the output. The chart's local copy goes
+    under tmp_path/cache, through XDG_CACHE_HOME."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     for name, text in (("helm", FAKE_HELM), ("kubectl", FAKE_KUBECTL), ("curl", FAKE_CURL)):
@@ -346,7 +438,13 @@ def set_routing(root: Path, tmp_path: Path, *args: str) -> tuple[int, list[Any],
         text=True,
         check=False,
         # The fakes first; yq, jq and the rest are the machine's.
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "LOG": str(log)},
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
+            **({"PULL_FAILS": "1"} if pull_fails else {}),
+        },
     )
     documents = list(yaml.safe_load_all(log.read_text())) if log.exists() else []
     return done.returncode, documents, done.stdout + done.stderr
@@ -401,3 +499,43 @@ def test_set_routing_refuses_a_file_before_helm_runs(
     assert code != 0
     assert documents == []
     assert says in output
+
+
+# P3.7b: the gateway chart's local copy. WSL's DNS stopped resolving for minutes on 2026-11-12 and
+# -13, and a routing switch that fetched the chart from ghcr.io failed the experiment.
+
+ROUTER_CHART = (
+    "oci://ghcr.io/llm-d/charts/llm-d-router-gateway"
+    "@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0"
+)
+CHART_COPY = (
+    "thesis/charts/llm-d-router-gateway-"
+    "63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0/llm-d-router-gateway"
+)
+
+
+def lines(path: Path) -> list[str]:
+    return path.read_text().splitlines() if path.exists() else []
+
+
+def test_set_routing_pulls_the_pinned_chart_once_and_installs_the_local_copy(
+    tmp_path: Path,
+) -> None:
+    root = repo(tmp_path)
+    for _ in range(2):
+        code, _documents, output = set_routing(root, tmp_path)
+        assert code == 0, output
+    assert lines(tmp_path / "helm.log.pull") == [ROUTER_CHART]
+    copy = str(tmp_path / "cache" / CHART_COPY)
+    assert lines(tmp_path / "helm.log.chart") == [copy, copy]
+
+
+def test_a_failed_pull_stops_set_routing_before_any_upgrade(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    code, documents, output = set_routing(root, tmp_path, pull_fails=True)
+    assert code != 0, output
+    assert documents == []
+    assert lines(tmp_path / "helm.log.chart") == []
+    # Nothing left that a later run would take for a copy, nor a half-pulled folder.
+    charts = tmp_path / "cache" / "thesis" / "charts"
+    assert list(charts.iterdir()) == []

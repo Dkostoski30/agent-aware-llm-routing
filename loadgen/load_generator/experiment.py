@@ -17,9 +17,11 @@ thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the 
 On real pods, nvidia-smi samples the GPU into a file beside the results for the whole run, and is
 checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons). A plugin variant's
 picker log is kept before the next switch restarts the picker. A file may name a
-not_worse_tolerance, which goes into the .meta.json for make experiment-compare's verdict. A file
-may name pod_stall_seconds: after each replay Prometheus is asked whether a pod made no tokens for
-that long while it had calls, and such a replay stops the run (P3.7, experiments/log.md).
+not_worse_tolerance, and a faster_by (P3.7b), which go into the .meta.json for make
+experiment-compare's verdicts. A file may name pod_stall_seconds: after each replay Prometheus is
+asked whether a pod made no tokens for that long while it had calls, and such a replay stops the
+run (P3.7, experiments/log.md). After each replay on real pods, both vLLM pods' logs are kept beside
+the results before that check, so a stall comes with the engine's own numbers (P3.7c).
 
 Usage: python -m load_generator.experiment EXPERIMENT
 """
@@ -116,14 +118,15 @@ TOKENS_QUERY = (
     "+ increase(vllm:generation_tokens_total[{window}s]))"
 )
 # The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
-# overload limits (P3.5) and the parallel threshold (P3.6): a variant sets rules only
-# (infra/routing-values.sh).
+# overload limits (P3.5), the parallel threshold (P3.6) and the least-work slack (P3.7b): a variant
+# sets rules only (infra/routing-values.sh).
 PROFILE_ONLY_KEYS = frozenset(
     {
         "run_ttl_seconds",
         "overload_queue_threshold",
         "overload_sustained_seconds",
         "parallel_queue_threshold",
+        "least_work_slack",
     }
 )
 # A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
@@ -191,7 +194,10 @@ class Experiment:
     # How much slower than the reference variant's p95 still counts as not worse (P3.7); None
     # when the file makes no such claim.
     not_worse_tolerance: float | None
-    # The variant on the default picker, which the other is held to; None with no tolerance.
+    # How much lower than the reference variant's total run time, averaged over the files, the
+    # other's must be to count as faster (P3.7b); None when the file makes no such claim.
+    faster_by: float | None
+    # The variant on the default picker, which the other is held to; None with neither claim.
     reference_variant: str | None
     # How long a pod with calls may make no tokens before its replay is refused (P3.7); None when
     # replays are not checked.
@@ -223,6 +229,9 @@ class Outputs:
 
     def picker(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}-picker.log")
+
+    def vllm(self, variant: str, pod: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-vllm-{pod}.log")
 
 
 class Cluster(Protocol):
@@ -259,6 +268,9 @@ class Cluster(Protocol):
 
     # The running picker's whole log.
     def picker_log(self) -> str: ...
+
+    # Each vLLM pod's whole log, by pod name.
+    def vllm_logs(self) -> dict[str, str]: ...
 
     # Each stretch from since to until in which a pod had calls and made no tokens for seconds.
     def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]: ...
@@ -306,9 +318,11 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
 
 def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
     """Every rule a variant sets is one its profile has, no rule is on while the plugin is off, and
-    neither the overload guard nor the parallel rule is on while affinity is off: each would do
-    nothing and the variant would read as its result. infra/routing-values.sh refuses all of these
-    too, but only when the variant's switch runs, which may be hours into the run."""
+    none of the overload guard, the parallel rule and the two first-call rules is on while affinity
+    is off: each would do nothing and the variant would read as its result. The two first-call
+    rules place the same calls by different measures, so not both. infra/routing-values.sh
+    refuses all of these too, but only when the variant's switch runs, which may be hours into the
+    run."""
     for variant in experiment.variants:
         routing = profiles[variant.profile]["routing"]
         known = {rule: on for rule, on in routing.items() if rule not in PROFILE_ONLY_KEYS}
@@ -337,6 +351,21 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
             raise ExperimentError(
                 f"variant {variant.name}: parallel_spill on, but affinity is off: a group stays "
                 "on its run's pinned pod"
+            )
+        if rules["least_work_first"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_work_first on, but affinity is off: it adds up the "
+                "work of pinned runs"
+            )
+        if rules["least_context_first"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_context_first on, but affinity is off: it adds up "
+                "the context of pinned runs"
+            )
+        if rules["least_work_first"] and rules["least_context_first"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_work_first and least_context_first both on: each "
+                "places a run's first call"
             )
 
 
@@ -369,26 +398,41 @@ def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -
                 raise ExperimentError(f"{key} differs: {first} has {expected[key]}, {name} {value}")
 
 
-def _not_worse(
-    spec: Mapping[str, Any], variants: Sequence[Variant]
-) -> tuple[float | None, str | None]:
-    """The tolerance and the variant it holds the other to, the one on the default picker."""
+def _number(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int | float)
+
+
+def _not_worse(spec: Mapping[str, Any]) -> float | None:
     tolerance = spec.get("not_worse_tolerance")
-    if tolerance is None:
-        return None, None
-    if isinstance(tolerance, bool) or not isinstance(tolerance, int | float) or tolerance < 0:
+    if tolerance is not None and (not _number(tolerance) or tolerance < 0):
         raise ExperimentError(f"not_worse_tolerance must be a number at or over 0, got {tolerance}")
+    return None if tolerance is None else float(tolerance)
+
+
+def _faster_by(spec: Mapping[str, Any]) -> float | None:
+    """A share of the reference's total run time: at 1 or over, no time could be that much lower."""
+    share = spec.get("faster_by")
+    if share is not None and (not _number(share) or not 0 <= share < 1):
+        raise ExperimentError(f"faster_by must be a number from 0 up to but not 1, got {share}")
+    return None if share is None else float(share)
+
+
+def _reference(spec: Mapping[str, Any], variants: Sequence[Variant]) -> str | None:
+    """The variant the other is held to, the one on the default picker, when the file makes a
+    claim: not_worse_tolerance, faster_by or both."""
+    claims = [key for key in ("not_worse_tolerance", "faster_by") if spec.get(key) is not None]
+    if not claims:
+        return None
+    claim = claims[0]
     if len(variants) != 2:
-        raise ExperimentError(
-            f"not_worse_tolerance compares two variants, the file has {len(variants)}"
-        )
+        raise ExperimentError(f"{claim} compares two variants, the file has {len(variants)}")
     defaults = [variant.name for variant in variants if variant.default]
     if len(defaults) != 1:
         raise ExperimentError(
-            "not_worse_tolerance needs one variant on the default picker to hold the other to, "
+            f"{claim} needs one variant on the default picker to hold the other to, "
             f"found {defaults}"
         )
-    return float(tolerance), defaults[0]
+    return defaults[0]
 
 
 def _pod_stall_seconds(spec: Mapping[str, Any]) -> int | None:
@@ -439,7 +483,8 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     validation = None
     if spec.get("validation") is not None:
         validation = load_validation(spec["validation"], names)
-    tolerance, reference = _not_worse(spec, variants)
+    tolerance, faster_by = _not_worse(spec), _faster_by(spec)
+    reference = _reference(spec, variants)
     return Experiment(
         name=path.stem,
         hash=experiment_hash(path),
@@ -453,6 +498,7 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
         variants=variants,
         validation=validation,
         not_worse_tolerance=tolerance,
+        faster_by=faster_by,
         reference_variant=reference,
         pod_stall_seconds=_pod_stall_seconds(spec),
     )
@@ -498,6 +544,7 @@ def _variant_meta(
     times: tuple[float, float],
     clock_jumps: int,
     picker_log: str | None,
+    vllm_logs: list[str] | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
@@ -518,6 +565,8 @@ def _variant_meta(
         "max_gap_deviation_ms": max_gap_deviation(trace, lines),
         # The file name beside the results, None for a variant without the plugin.
         "picker_log": picker_log,
+        # Each vLLM pod's log beside the results, None on simulated pods.
+        "vllm_logs": vllm_logs,
     }
 
 
@@ -556,6 +605,15 @@ def _run_variant(
     if variant.epp_config == PLUGIN_CONFIG:
         out.picker(variant.name).write_text(cluster.picker_log())
         picker_log = out.picker(variant.name).name
+    # Before the stall check, so a stalled replay keeps them, and before the next restart, which
+    # replaces the pods. Real pods only: two of them share the one GPU, and on 2026-11-13 one got
+    # almost none of it for up to a minute while the other ran on (P3.7c, experiments/log.md).
+    vllm_logs = None
+    if variant.profile != SIM_PROFILE:
+        vllm_logs = []
+        for pod, log in sorted(cluster.vllm_logs().items()):
+            out.vllm(variant.name, pod).write_text(log)
+            vllm_logs.append(out.vllm(variant.name, pod).name)
     if experiment.pod_stall_seconds is not None:
         stalls = cluster.pod_stalls(started, ended, experiment.pod_stall_seconds)
         if stalls:
@@ -570,6 +628,7 @@ def _run_variant(
         (started, ended),
         jumps,
         picker_log,
+        vllm_logs,
     )
     return lines, meta
 
@@ -654,6 +713,7 @@ def run_experiment(
             # A gap at the end of the GPU log, which its timestamps alone would not explain.
             "gpu_log_ended_early_with": gpu_ended_early_with,
             "not_worse_tolerance": experiment.not_worse_tolerance,
+            "faster_by": experiment.faster_by,
             "reference_variant": experiment.reference_variant,
             # Every replay was checked and had no pod stalled this long; None when not checked.
             "pod_stall_seconds": experiment.pod_stall_seconds,
@@ -958,6 +1018,14 @@ class LiveCluster:
     def picker_log(self) -> str:
         """Since the picker's start, which the variant's switch was."""
         return kubectl("logs", f"deployment/{EPP_DEPLOYMENT}")
+
+    def vllm_logs(self) -> dict[str, str]:
+        """Since each pod's start, which the variant's restart was. --timestamps, so the access
+        lines, which carry no time of their own, line up with the engine's stats lines."""
+        names = kubectl(
+            "get", "pods", "-l", VLLM_SELECTOR, "-o", "jsonpath={.items[*].metadata.name}"
+        ).split()
+        return {name: kubectl("logs", "--timestamps", name) for name in names}
 
     def _prometheus(self, query: str, since: float, until: float, step: int) -> list[Any]:
         arguments = urllib.parse.urlencode(

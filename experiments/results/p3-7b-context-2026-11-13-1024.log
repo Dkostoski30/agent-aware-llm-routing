@@ -1,0 +1,737 @@
+
+=== 2026-11-13 10:24:07 make test
+uv run --locked pytest
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.13.5
+collected 1722 items
+
+agent/tests/test_agent_config.py .......................                 [  1%]
+agent/tests/test_agent_loop.py ......................................... [  3%]
+.....................................................                    [  6%]
+agent/tests/test_app.py ...........................................      [  9%]
+agent/tests/test_calculator.py ......................................... [ 11%]
+...................                                                      [ 12%]
+agent/tests/test_csv_tools.py .......................................... [ 15%]
+..................................                                       [ 17%]
+agent/tests/test_documents.py ........................................   [ 19%]
+agent/tests/test_logs.py ....                                            [ 19%]
+agent/tests/test_store.py .....                                          [ 20%]
+agent/tests/test_support.py .........................                    [ 21%]
+app/tests/test_app_config.py .....                                       [ 21%]
+app/tests/test_app_logs.py ...                                           [ 21%]
+app/tests/test_auth.py .....................                             [ 23%]
+app/tests/test_db.py .....                                               [ 23%]
+app/tests/test_passwords.py .....                                        [ 23%]
+experiments/tests/test_finetune_data.py ................................ [ 25%]
+.........                                                                [ 26%]
+experiments/tests/test_go_no_go.py ..................................... [ 28%]
+......................................................                   [ 31%]
+experiments/tests/test_heldout.py .............................          [ 33%]
+infra/checks/test_concurrency_check.py ........................          [ 34%]
+infra/checks/test_sim_chart.py ..                                        [ 34%]
+loadgen/tests/test_compare.py .......................................... [ 37%]
+....                                                                     [ 37%]
+loadgen/tests/test_convert.py .......................................... [ 39%]
+........................................................................ [ 43%]
+....                                                                     [ 44%]
+loadgen/tests/test_expected_steps.py ............                        [ 44%]
+loadgen/tests/test_experiment.py ....................................... [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 55%]
+........                                                                 [ 55%]
+loadgen/tests/test_experiment_compare.py ............................... [ 57%]
+........................                                                 [ 59%]
+loadgen/tests/test_graph.py .......                                      [ 59%]
+loadgen/tests/test_pod_removed.py ...................................... [ 61%]
+.............                                                            [ 62%]
+loadgen/tests/test_record.py ........................................... [ 64%]
+...............................                                          [ 66%]
+loadgen/tests/test_replay.py ........................................... [ 69%]
+.............................................                            [ 71%]
+loadgen/tests/test_replay_plan.py ...................................... [ 74%]
+.................................                                        [ 76%]
+loadgen/tests/test_report_config.py ............                         [ 76%]
+loadgen/tests/test_results.py ........................................   [ 79%]
+loadgen/tests/test_routing_values.py ................................... [ 81%]
+......................................                                   [ 83%]
+loadgen/tests/test_validation.py .....................                   [ 84%]
+schemas/tests/test_schemas.py .......................................... [ 86%]
+........................................................................ [ 91%]
+................................................................         [ 94%]
+sim/tests/test_calibrate.py .......................                      [ 96%]
+sim/tests/test_calibration_config.py .................................   [ 98%]
+sim/tests/test_calibration_mapping.py ..........                         [ 98%]
+sim/tests/test_calibration_prompts.py ........                           [ 99%]
+sim/tests/test_calibration_stats.py ..............                       [ 99%]
+sim/tests/test_real_plain_profile.py .                                   [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/kosto/thesis/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 1722 passed, 1 warning in 41.76s =======================
+if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
+?   	github.com/Dkostoski30/agent-aware-llm-routing/gateway/cmd/picker	[no test files]
+ok  	github.com/Dkostoski30/agent-aware-llm-routing/gateway/runrouter	(cached)
+if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis/training
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 22 items
+
+training/tests/test_render.py .........                                  [ 40%]
+training/tests/test_train.py .............                               [100%]
+
+============================= 22 passed in 17.32s ==============================
+=== 2026-11-13 10:25:16 exit 0: make test
+
+=== 2026-11-13 10:25:16 make lint
+uv run --locked pre-commit run --all-files
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check yaml...............................................................Passed
+check json...............................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+mypy (strict)............................................................Passed
+mypy (strict, training)..................................................Passed
+golangci-lint............................................................Passed
+eslint (ui)..............................................................Passed
+tsc --strict (ui)........................................................Passed
+=== 2026-11-13 10:26:09 exit 0: make lint
+
+=== 2026-11-13 10:26:09 make down
+bash infra/down.sh
+deployment.apps "app" deleted from default namespace
+service "app" deleted from default namespace
+configmap "app-config" deleted from default namespace
+deployment.apps "agent" deleted from default namespace
+service "agent" deleted from default namespace
+deployment.apps "redis" deleted from default namespace
+service "redis" deleted from default namespace
+configmap "agent-config" deleted from default namespace
+agentgatewayparameters.agentgateway.dev "inference-gateway" deleted from default namespace
+gateway.gateway.networking.k8s.io "inference-gateway" deleted from default namespace
+httproute.gateway.networking.k8s.io "vllm" deleted from default namespace
+agentgatewaypolicy.agentgateway.dev "inference-gateway-access-log" deleted from default namespace
+release "vllm-pool" uninstalled
+release "agentgateway" uninstalled
+release "agentgateway-crds" uninstalled
+release "vllm" uninstalled
+release "monitoring" uninstalled
+release "nvidia-device-plugin" uninstalled
+namespace "agentgateway-system" deleted
+namespace "monitoring" deleted
+namespace "nvidia-device-plugin" deleted
++ [ -s /etc/systemd/system/k3s.service ]
++ basename /etc/systemd/system/k3s.service
++ systemctl stop k3s.service
++ [ -x /etc/init.d/k3s* ]
++ killtree 2715 2742 3095 3210 5415 5439
++ kill -9 2715 2987 3818 2742 2991 3677 3095 3263 3778 3210 3332 3794 5415 5485 5588 8676 5439 5492 5591 8669
++ do_unmount_and_remove /run/k3s
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/f20d5746c0357bfb4a7339629237a76ec3f94ddb3df382ed4190528a06cf9cd1/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/bc813543d1fd2c09ce7e04c8c2280c86c978422253f153e45529fd0fd0164fa1/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/aa80322fb202eceaefa1693b41e2a6076ec5f86150921d1d89af3fd7c8988c66/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/a1c258be23465def5822a4b16c7f65f0a1f609f97047c9e26e0db07a027c147c/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/a02ce8c608ec21a5f24456ccb8cb1e98ea617a9ad84e2ff3a8197fb2c4d3e2cf/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/912fa7c40a02bcd84e61e961689ca27174b779f93b6114a751753096c9a2acaa/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/88c9e91ec931c4a14f96ce666d0b4d2adcd9e109316784289812e8e70a6b0deb/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/7df5016d6d45b5f9715f154c893879d6d8a3c4a001394c3b61658340bf9bc645/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/77227260fdf909d382f9eaa39d15b60435151a83f593f0517cbc9487bd187dcb/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/4cad458a8bb796369a0f7bd53dd8e27f0dc38e6a420d8fab9b6d4b46f1766555/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/137656aa4387e9c74bb55abe9073222b3bdf5bba924aaaae64b2366ba7af411e/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/05b644f0ec891dec42669ad7b289640492f441c27a96001600a49978d2a33aec/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/aa80322fb202eceaefa1693b41e2a6076ec5f86150921d1d89af3fd7c8988c66/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/a1c258be23465def5822a4b16c7f65f0a1f609f97047c9e26e0db07a027c147c/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/a02ce8c608ec21a5f24456ccb8cb1e98ea617a9ad84e2ff3a8197fb2c4d3e2cf/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/912fa7c40a02bcd84e61e961689ca27174b779f93b6114a751753096c9a2acaa/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/88c9e91ec931c4a14f96ce666d0b4d2adcd9e109316784289812e8e70a6b0deb/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/7df5016d6d45b5f9715f154c893879d6d8a3c4a001394c3b61658340bf9bc645/shm
++ do_unmount_and_remove /var/lib/kubelet/pods
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/c99d3b28-f4c2-4913-a993-2f6eb2998a5a/volumes/kubernetes.io~projected/kube-api-access-cf9mp
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/a34517c2-60fe-4075-b12e-51e674ac29f7/volumes/kubernetes.io~projected/kube-api-access-6hlvb
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/905d4a12-0e92-4e31-81b4-31fe09dce5a6/volumes/kubernetes.io~projected/kube-api-access-scgqt
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/905d4a12-0e92-4e31-81b4-31fe09dce5a6/volumes/kubernetes.io~empty-dir/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/7d4ca644-87c6-4251-a879-f13ead255553/volumes/kubernetes.io~projected/kube-api-access-bcfrl
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/7d4ca644-87c6-4251-a879-f13ead255553/volumes/kubernetes.io~empty-dir/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/321dce9c-215e-4516-9331-2c14c42011d2/volumes/kubernetes.io~projected/kube-api-access-j4lrr
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/02c30c75-f621-436d-bd33-6e7c6fd78164/volumes/kubernetes.io~projected/kube-api-access-mzx59
++ do_unmount_and_remove /var/lib/kubelet/plugins
++ set +x
++ do_unmount_and_remove /run/netns/cni-
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-ca8b8529-0e06-dbbe-b678-b1cc5c6bab1b
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-c9e02bcc-2759-3ece-c9e2-70d726ff6bbe
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-c14fe6b0-59e7-b615-57c6-d8aa8f9d29fd
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-7566bbef-0ea9-c372-2a0b-5fe1ad3d1c5e
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-542abe08-ded9-f64a-8446-52c39cef302f
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-2e2524b5-4280-2e37-ad01-636d90327a3a
++ ip netns show
++ grep cni-
++ xargs -r -t -n 1 ip netns delete
++ remove_interfaces
++ ip link show
++ grep master cni0
++ read ignore iface ignore
++ iface=veth46206cd7
++ [ -z veth46206cd7 ]
++ ip link delete veth46206cd7
++ read ignore iface ignore
++ iface=vetha6ecdc1e
++ [ -z vetha6ecdc1e ]
++ ip link delete vetha6ecdc1e
++ read ignore iface ignore
++ iface=veth45ccdc64
++ [ -z veth45ccdc64 ]
++ ip link delete veth45ccdc64
+Cannot find device "veth45ccdc64"
++ read ignore iface ignore
++ iface=veth605b129a
++ [ -z veth605b129a ]
++ ip link delete veth605b129a
+Cannot find device "veth605b129a"
++ read ignore iface ignore
++ iface=veth7efdc94f
++ [ -z veth7efdc94f ]
++ ip link delete veth7efdc94f
+Cannot find device "veth7efdc94f"
++ read ignore iface ignore
++ ip link delete cni0
++ ip link delete flannel.1
++ ip link delete flannel-v6.1
+Cannot find device "flannel-v6.1"
++ ip link delete kube-ipvs0
+Cannot find device "kube-ipvs0"
++ ip link delete flannel-wg
+Cannot find device "flannel-wg"
++ ip link delete flannel-wg-v6
+Cannot find device "flannel-wg-v6"
++ command -v tailscale
++ [ -n  ]
++ rm -rf /var/lib/cni/
++ iptables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ iptables-restore
++ ip6tables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ ip6tables-restore
+=== 2026-11-13 10:26:35 exit 0: make down
+
+=== 2026-11-13 10:26:35 make up
+make vllm-stop
+make[1]: Entering directory '/home/kosto/thesis'
+vllm-stop: no vLLM containers
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-k3s.sh
+runtimeclass.node.k8s.io/nvidia serverside-applied
+Release "nvidia-device-plugin" does not exist. Installing it now.
+NAME: nvidia-device-plugin
+LAST DEPLOYED: Fri Nov 13 10:26:53 2026
+NAMESPACE: nvidia-device-plugin
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+node reports allocatable nvidia.com/gpu: 2 (ladder step 1: device plugin)
+== k3s and device plugin versions
+k3s version v1.36.5+k3s1 (3dd98cc5)
+device plugin chart nvidia-device-plugin-0.20.1, app 0.20.1
+bash infra/picker-image.sh
+picker-image: thesis/picker:bf01d913cbf8 is already in k3s
+bash infra/install-monitoring.sh real
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Fri Nov 13 10:27:19 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+if [ "" = sim ]; then \
+	make sim-deploy; \
+else \
+	bash infra/download-model.sh real && make vllm-deploy PROFILE=real; \
+fi
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 410.55it/s]
+[32m✓ Downloaded[0m
+  path: /home/kosto/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-GPTQ-Int8/snapshots/d3f20e7e71825fe57ad32705b396e9e156279107
+make[1]: Entering directory '/home/kosto/thesis'
+Release "vllm" does not exist. Installing it now.
+NAME: vllm
+LAST DEPLOYED: Fri Nov 13 10:27:55 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+vllm-deploy: waiting for the pods to load the model (about 2-3 min)
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+NAME                    READY   STATUS    RESTARTS   AGE    IP           NODE           NOMINATED NODE   READINESS GATES
+vllm-5c9565db76-g4hv4   1/1     Running   0          2m7s   10.42.0.13   daniellaptop   <none>           <none>
+vllm-5c9565db76-wmvr6   1/1     Running   0          2m7s   10.42.0.12   daniellaptop   <none>           <none>
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-gateway.sh real
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io condition met
+Release "agentgateway-crds" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds@sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+Digest: sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+NAME: agentgateway-crds
+LAST DEPLOYED: Fri Nov 13 10:30:10 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Release "agentgateway" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway@sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+Digest: sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+NAME: agentgateway
+LAST DEPLOYED: Fri Nov 13 10:30:16 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Release "vllm-pool" does not exist. Installing it now.
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 10:30:24 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+agentgatewayparameters.agentgateway.dev/inference-gateway created
+gateway.gateway.networking.k8s.io/inference-gateway created
+httproute.gateway.networking.k8s.io/vllm created
+agentgatewaypolicy.agentgateway.dev/inference-gateway-access-log created
+gateway.gateway.networking.k8s.io/inference-gateway condition met
+Waiting for deployment "inference-gateway" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inference-gateway" successfully rolled out
+if [ "" != sim ]; then bash infra/deploy-agent.sh real; fi
+deploy-agent: thesis/agent:bf2848f1f42a is already in k3s
+deployment.apps/redis created
+service/redis created
+configmap/agent-config created
+deployment.apps/agent created
+service/agent created
+deployment "redis" successfully rolled out
+Waiting for deployment "agent" rollout to finish: 0 of 1 updated replicas are available...
+deployment "agent" successfully rolled out
+NAME                     READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+agent-b54d6564b-vddt5    1/1     Running   0          11s   10.42.0.19   daniellaptop   <none>           <none>
+redis-5b9fcb4c45-vmgff   1/1     Running   0          12s   10.42.0.18   daniellaptop   <none>           <none>
+if [ "" != sim ]; then bash infra/deploy-app.sh real; fi
+deploy-app: thesis/app:c286d44790b3 is already in k3s
+configmap/app-config created
+persistentvolumeclaim/app-data unchanged
+deployment.apps/app created
+service/app created
+Waiting for deployment "app" rollout to finish: 0 of 1 updated replicas are available...
+deployment "app" successfully rolled out
+NAME                   READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+app-8446c7f656-v9lh2   1/1     Running   0          12s   10.42.0.20   daniellaptop   <none>           <none>
+NAME       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+app-data   Bound    pvc-a80b8b37-23f2-4019-9c9f-8d35370ddab0   1Gi        RWO            local-path     <unset>                 5d7h
+=== 2026-11-13 10:30:56 exit 0: make up
+
+=== 2026-11-13 10:30:56 make experiment NAME=routing-context
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/routing-context.yaml
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 10:33:13 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: config/real.yaml is serving, on try 1
+replay: 1/1 warmup-1 warmup: 5 calls, pods ['vllm-58bd48b6c9-2cr7l']
+experiment: warmed vllm-58bd48b6c9-2cr7l, ms to first token [17828, 354, 364, 291, 327]
+replay: 1/1 warmup-2 warmup: 5 calls, pods ['vllm-58bd48b6c9-tkmtl']
+experiment: warmed vllm-58bd48b6c9-tkmtl, ms to first token [3752, 380, 323, 445, 415]
+replay: 1/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-58bd48b6c9-tkmtl']
+replay: 2/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-58bd48b6c9-tkmtl']
+replay: 3/30 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-58bd48b6c9-2cr7l']
+replay: 4/30 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-58bd48b6c9-tkmtl']
+replay: 5/30 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 6/30 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 7/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 8/30 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 9/30 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-58bd48b6c9-2cr7l']
+replay: 10/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-58bd48b6c9-2cr7l']
+replay: 11/30 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 12/30 bfcl-615-6 bfcl: 14 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 13/30 bfcl-522-11 bfcl: 14 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 14/30 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-58bd48b6c9-2cr7l']
+replay: 15/30 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-58bd48b6c9-2cr7l']
+replay: 16/30 bfcl-624-13 bfcl: 18 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 17/30 tau2_airline-816-14 tau2_airline: 9 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 18/30 tau2_telecom-986-18 tau2_telecom: 13 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 19/30 tau2_airline-772-10 tau2_airline: 19 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 20/30 bfcl-514-16 bfcl: 16 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 21/30 bfcl-527-25 bfcl: 11 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 22/30 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 23/30 hotpotqa-25-28 hotpotqa: 4 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 24/30 bfcl-708-27 bfcl: 8 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 25/30 bfcl-508-29 bfcl: 10 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 26/30 bfcl-561-22 bfcl: 13 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 27/30 bfcl-679-24 bfcl: 17 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 28/30 gaia_dev-270-19 gaia_dev: 39 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 29/30 bfcl-565-21 bfcl: 25 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+replay: 30/30 gaia_dev-345-26 gaia_dev: 50 calls, pods ['vllm-58bd48b6c9-2cr7l', 'vllm-58bd48b6c9-tkmtl']
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 10:49:52 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: /tmp/tmp79j5smdl.yaml is serving, on try 1
+replay: 357 calls, 0 failed
+replay: wrote /home/kosto/thesis/experiments/results/routing-context-3930f5a0c2f4-default.jsonl
+replay: 1/1 warmup-1 warmup: 5 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+experiment: warmed vllm-6c7f8f6d45-kwmhz, ms to first token [3929, 415, 356, 323, 365]
+replay: 1/1 warmup-2 warmup: 5 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+experiment: warmed vllm-6c7f8f6d45-m5rv2, ms to first token [19014, 523, 392, 359, 373]
+replay: 1/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 2/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: 3/30 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 4/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 5/30 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: 6/30 bfcl-615-6 bfcl: 14 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 7/30 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 8/30 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 9/30 bfcl-522-11 bfcl: 14 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 10/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: 11/30 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: 12/30 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-6c7f8f6d45-kwmhz', 'vllm-6c7f8f6d45-m5rv2']
+replay: bfcl-514-16 step 4: no full reply: TimeoutError()
+replay: bfcl-514-16 step 4: no full reply: TimeoutError()
+replay: 13/30 bfcl-514-16 bfcl: 6 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: bfcl-624-13 step 7: no full reply: TimeoutError()
+replay: bfcl-624-13 step 7: no full reply: TimeoutError()
+replay: 14/30 bfcl-624-13 bfcl: 12 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: gaia_dev-270-19 step 5: no full reply: TimeoutError()
+replay: gaia_dev-270-19 step 5: no full reply: TimeoutError()
+replay: 15/30 gaia_dev-270-19 gaia_dev: 7 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: gaia_dev-310-8 step 5: no full reply: TimeoutError()
+replay: 16/30 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: tau2_airline-772-10 step 6: no full reply: TimeoutError()
+replay: 17/30 tau2_airline-772-10 tau2_airline: 9 calls, pods ['vllm-6c7f8f6d45-kwmhz', 'vllm-6c7f8f6d45-m5rv2']
+replay: tau2_telecom-986-18 step 3: no full reply: TimeoutError()
+replay: tau2_telecom-986-18 step 3: no full reply: TimeoutError()
+replay: 18/30 tau2_telecom-986-18 tau2_telecom: 4 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: bfcl-527-25 step 1: no full reply: TimeoutError()
+replay: hotpotqa-78-23 step 1: no full reply: TimeoutError()
+replay: 19/30 bfcl-527-25 bfcl: 1 calls, pods []
+replay: 20/30 hotpotqa-78-23 hotpotqa: 1 calls, pods []
+replay: tau2_airline-764-7 step 4: no full reply: TimeoutError()
+replay: 21/30 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-6c7f8f6d45-m5rv2']
+replay: 22/30 tau2_airline-816-14 tau2_airline: 9 calls, pods ['vllm-6c7f8f6d45-kwmhz', 'vllm-6c7f8f6d45-m5rv2']
+replay: bfcl-708-27 step 1: no full reply: TimeoutError()
+replay: 23/30 bfcl-708-27 bfcl: 1 calls, pods []
+replay: hotpotqa-25-28 step 1: no full reply: TimeoutError()
+replay: hotpotqa-237-30 step 1: no full reply: TimeoutError()
+replay: bfcl-508-29 step 1: no full reply: TimeoutError()
+replay: 24/30 hotpotqa-237-30 hotpotqa: 1 calls, pods []
+replay: 25/30 bfcl-508-29 bfcl: 1 calls, pods []
+replay: 26/30 hotpotqa-25-28 hotpotqa: 1 calls, pods []
+replay: bfcl-565-21 step 12: no full reply: TimeoutError()
+replay: bfcl-565-21 step 12: no full reply: TimeoutError()
+replay: 27/30 bfcl-565-21 bfcl: 17 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: bfcl-561-22 step 7: no full reply: TimeoutError()
+replay: 28/30 bfcl-561-22 bfcl: 9 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: gaia_dev-345-26 step 8: no full reply: TimeoutError()
+replay: gaia_dev-345-26 step 8: no full reply: TimeoutError()
+replay: 29/30 gaia_dev-345-26 gaia_dev: 15 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+replay: bfcl-679-24 step 7: no full reply: TimeoutError()
+replay: 30/30 bfcl-679-24 bfcl: 10 calls, pods ['vllm-6c7f8f6d45-kwmhz']
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 11:03:58 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 4
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: config/real.yaml is serving, on try 1
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1153, in <module>
+    main()
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1149, in main
+    run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 663, in run_experiment
+    lines, variant_meta = _run_variant(
+                          ^^^^^^^^^^^^^
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 601, in _run_variant
+    raise ExperimentError(stall_text(variant.name, stalls, started))
+ExperimentError: variant plugin: vllm-6c7f8f6d45-m5rv2 made no tokens with calls running or waiting for 30 s from 405 s into the replay, vllm-6c7f8f6d45-m5rv2 made no tokens with calls running or waiting for 55 s from 635 s into the replay. Such stalls hit both pickers on 2026-11-12 (P3.7, experiments/log.md), so this replay is not comparable; its replay file stays, move this file's results away to run it again
+replay: 205 calls, 23 failed
+replay: wrote /home/kosto/thesis/experiments/results/routing-context-3930f5a0c2f4-plugin.jsonl
+make: *** [Makefile:296: experiment] Error 1
+=== 2026-11-13 11:05:41 exit 2: make experiment NAME=routing-context
+
+=== 2026-11-13 11:05:41 make experiment NAME=routing-context-reversed
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/routing-context-reversed.yaml
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 11:08:10 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 5
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: /tmp/tmpfdrraz5w.yaml is serving, on try 1
+replay: 1/1 warmup-1 warmup: 5 calls, pods ['vllm-6786987f8c-6dhf6']
+experiment: warmed vllm-6786987f8c-6dhf6, ms to first token [18456, 366, 424, 380, 376]
+replay: 1/1 warmup-2 warmup: 5 calls, pods ['vllm-6786987f8c-jjnph']
+experiment: warmed vllm-6786987f8c-jjnph, ms to first token [3757, 317, 301, 330, 302]
+replay: 1/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 2/30 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 3/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 4/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 5/30 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 6/30 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+replay: 7/30 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 8/30 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 9/30 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+replay: 10/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 11/30 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+replay: 12/30 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 13/30 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: tau2_airline-816-14 step 4: no full reply: TimeoutError()
+replay: tau2_airline-816-14 step 4: no full reply: TimeoutError()
+replay: 14/30 tau2_airline-816-14 tau2_airline: 5 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 15/30 tau2_airline-772-10 tau2_airline: 19 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+replay: bfcl-679-24 step 2: no full reply: TimeoutError()
+replay: bfcl-679-24 step 2: no full reply: TimeoutError()
+replay: 16/30 bfcl-679-24 bfcl: 3 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 17/30 bfcl-624-13 bfcl: 18 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 18/30 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 19/30 hotpotqa-25-28 hotpotqa: 4 calls, pods ['vllm-6786987f8c-jjnph']
+replay: tau2_telecom-986-18 step 5: no full reply: TimeoutError()
+replay: 20/30 tau2_telecom-986-18 tau2_telecom: 7 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 21/30 bfcl-514-16 bfcl: 16 calls, pods ['vllm-6786987f8c-jjnph']
+replay: bfcl-708-27 step 2: no full reply: TimeoutError()
+replay: bfcl-708-27 step 2: no full reply: TimeoutError()
+replay: 22/30 bfcl-708-27 bfcl: 3 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 23/30 bfcl-508-29 bfcl: 10 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 24/30 bfcl-561-22 bfcl: 13 calls, pods ['vllm-6786987f8c-jjnph']
+replay: gaia_dev-345-26 step 4: no full reply: TimeoutError()
+replay: gaia_dev-345-26 step 4: no full reply: TimeoutError()
+replay: 25/30 gaia_dev-345-26 gaia_dev: 7 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 26/30 bfcl-615-6 bfcl: 14 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+replay: 27/30 bfcl-565-21 bfcl: 25 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 28/30 bfcl-522-11 bfcl: 14 calls, pods ['vllm-6786987f8c-6dhf6']
+replay: 29/30 gaia_dev-270-19 gaia_dev: 39 calls, pods ['vllm-6786987f8c-jjnph']
+replay: 30/30 bfcl-527-25 bfcl: 11 calls, pods ['vllm-6786987f8c-6dhf6', 'vllm-6786987f8c-jjnph']
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 11:23:55 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 6
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: config/real.yaml is serving, on try 1
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1153, in <module>
+    main()
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1149, in main
+    run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 663, in run_experiment
+    lines, variant_meta = _run_variant(
+                          ^^^^^^^^^^^^^
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 601, in _run_variant
+    raise ExperimentError(stall_text(variant.name, stalls, started))
+ExperimentError: variant plugin: vllm-6786987f8c-6dhf6 made no tokens with calls running or waiting for 30 s from 585 s into the replay, vllm-6786987f8c-6dhf6 made no tokens with calls running or waiting for 35 s from 645 s into the replay. Such stalls hit both pickers on 2026-11-12 (P3.7, experiments/log.md), so this replay is not comparable; its replay file stays, move this file's results away to run it again
+replay: 285 calls, 9 failed
+replay: wrote /home/kosto/thesis/experiments/results/routing-context-reversed-5b00a10b5b0c-plugin.jsonl
+make: *** [Makefile:296: experiment] Error 1
+=== 2026-11-13 11:25:06 exit 2: make experiment NAME=routing-context-reversed
+
+=== 2026-11-13 11:25:06 no verdict: a routing-context CSV is missing (see the experiment's error above)
+
+=== 2026-11-13 11:25:06 picker checks for experiments/results/routing-context-3930f5a0c2f4-plugin-picker.log
+      1 first
+     30 least-context
+      4 parallel-spill
+    114 parallel-stay
+     49 pinned
+      3 remap
+      5 spill
+least-context not smallest (want 0): 0
+first with unequal context (want 0): 0
+lines with a size (want > 0): 30
+spill at queue <= 1 (want 0): 0
+remap under 10 s (want 0): 0
+parallel-spill with room (want 0): 0
+
+=== 2026-11-13 11:25:06 picker checks for experiments/results/routing-context-reversed-5b00a10b5b0c-plugin-picker.log
+      1 first
+     30 least-context
+      3 parallel-spill
+    154 parallel-stay
+     92 pinned
+      2 remap
+      4 spill
+least-context not smallest (want 0): 0
+first with unequal context (want 0): 0
+lines with a size (want > 0): 30
+spill at queue <= 1 (want 0): 0
+remap under 10 s (want 0): 0
+parallel-spill with room (want 0): 0
+
+=== 2026-11-13 11:25:06 finished; Windows shuts down in 120 s (cancel: shutdown /a in a Windows terminal). Log: experiments/results/p3-7b-context-2026-11-13-1024.log

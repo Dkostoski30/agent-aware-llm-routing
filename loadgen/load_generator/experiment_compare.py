@@ -7,7 +7,11 @@ same variant between files says how large a difference can be with no routing ch
 
 When make experiment wrote a not_worse_tolerance into each file's .meta.json (P3.7), the report ends
 with the verdict: the other variant's p95 against the reference variant's, run completion and first
-token apart, each side's p95 averaged over the files.
+token apart, each side's p95 averaged over the files. When it wrote a faster_by (P3.7b), the
+report ends with the faster verdict on run completion: the other variant's total run time lower
+than the reference's in each file, and averaged over the files lower by at least that share. Each
+side's run-completion p95 is printed beside it, not judged: at 26 runs a file's p95 is its
+second-slowest run (P3.7b, decided 2026-11-12).
 
 Usage: python -m load_generator.experiment_compare --stall-seconds N CSV [CSV ...]
 """
@@ -162,20 +166,8 @@ class NotWorse:
 
 
 def not_worse_setting(csvs: Sequence[Path]) -> tuple[float, str] | None:
-    """The tolerance and reference variant from the .meta.json beside each CSV; None if no file has
-    one. A file without it beside one with it, or two that differ, are refused: their verdict would
-    not be the one the experiment files state."""
-    settings = []
-    for path in csvs:
-        meta_path = path.with_suffix(".meta.json")
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-        tolerance = meta.get("not_worse_tolerance")
-        settings.append(None if tolerance is None else (tolerance, meta["reference_variant"]))
-    if len(set(settings)) > 1:
-        pairs = zip(csvs, settings, strict=True)
-        found = ", ".join(f"{path.name} {setting}" for path, setting in pairs)
-        raise ValueError(f"not_worse_tolerance and reference_variant differ between files: {found}")
-    return settings[0]
+    """The tolerance and reference variant from the .meta.json beside each CSV (_meta_setting)."""
+    return _meta_setting(csvs, "not_worse_tolerance")
 
 
 def _not_worse_lines(
@@ -185,10 +177,7 @@ def _not_worse_lines(
     setting: tuple[float, str],
 ) -> list[str]:
     tolerance, reference = setting
-    variants = sorted(files[csvs[0]])
-    if reference not in variants:
-        raise ValueError(f"the reference variant {reference} is not among {variants}")
-    (candidate,) = [variant for variant in variants if variant != reference]
+    candidate = _candidate(sorted(files[csvs[0]]), reference)
     lines = [
         f"p95 over {len(csvs)} files, {candidate} against {reference}, "
         f"tolerance {100 * tolerance:g}%:"
@@ -226,6 +215,119 @@ def _not_worse_lines(
             f"{side(verdict.reference_ms)}, limit {_two_places(verdict.limit_ms)} -> "
             f"{'not worse' if verdict.not_worse else 'worse'}"
         )
+    return lines
+
+
+@dataclass(frozen=True)
+class Faster:
+    """Each side's run-completion p95 and total run time per file, in the files' order (P3.7b). The
+    verdict is on total run time; the p95 is reported beside it."""
+
+    reference: str
+    candidate: str
+    reference_p95_ms: list[int]
+    candidate_p95_ms: list[int]
+    reference_total_ms: list[int]
+    candidate_total_ms: list[int]
+    share: float
+
+    @property
+    def limit_ms(self) -> float:
+        return statistics.mean(self.reference_total_ms) * (1 - self.share)
+
+    @property
+    def lower_in_each(self) -> bool:
+        pairs = zip(self.candidate_total_ms, self.reference_total_ms, strict=True)
+        return all(candidate < reference for candidate, reference in pairs)
+
+    @property
+    def faster(self) -> bool:
+        return self.lower_in_each and statistics.mean(self.candidate_total_ms) <= self.limit_ms
+
+
+def _meta_setting(csvs: Sequence[Path], key: str) -> tuple[float, str] | None:
+    """key and the reference variant from the .meta.json beside each CSV; None if no file has key.
+    A file without it beside one with it, or two that differ, are refused: their verdict would not
+    be the one the experiment files state."""
+    settings = []
+    for path in csvs:
+        meta_path = path.with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        value = meta.get(key)
+        settings.append(None if value is None else (value, meta["reference_variant"]))
+    if len(set(settings)) > 1:
+        pairs = zip(csvs, settings, strict=True)
+        found = ", ".join(f"{path.name} {setting}" for path, setting in pairs)
+        raise ValueError(f"{key} and reference_variant differ between files: {found}")
+    return settings[0]
+
+
+def _candidate(variants: Sequence[str], reference: str) -> str:
+    if reference not in variants:
+        raise ValueError(f"the reference variant {reference} is not among {variants}")
+    (candidate,) = [variant for variant in variants if variant != reference]
+    return candidate
+
+
+def _faster_lines(
+    csvs: Sequence[Path],
+    files: Mapping[Path, Mapping[str, Sequence[CallRow]]],
+    labels: Mapping[Path, str],
+    setting: tuple[float, str],
+) -> list[str]:
+    """No verdict when a run did not finish on either side in any file: a failed run has no time,
+    and leaving it out could leave out the slowest run (P3.7's first session)."""
+    share, reference = setting
+    candidate = _candidate(sorted(files[csvs[0]]), reference)
+    lines = [f"faster by {100 * share:g}% over {len(csvs)} files, {candidate} against {reference}:"]
+    times = {
+        path: {variant: run_times_ms(files[path][variant]) for variant in (reference, candidate)}
+        for path in csvs
+    }
+    for path in csvs:
+        for variant in (candidate, reference):
+            unfinished = sum(time is None for time in times[path][variant].values())
+            if unfinished:
+                return [
+                    *lines,
+                    f"  run completion: no verdict, {variant} did not finish {unfinished} of its "
+                    f"runs in {labels[path]}",
+                ]
+
+    def finished(path: Path, variant: str) -> list[int]:
+        return [time for time in times[path][variant].values() if time is not None]
+
+    def p95(path: Path, variant: str) -> int:
+        return percentile(finished(path, variant), NOT_WORSE_SHARE)
+
+    verdict = Faster(
+        reference,
+        candidate,
+        [p95(path, reference) for path in csvs],
+        [p95(path, candidate) for path in csvs],
+        [sum(finished(path, reference)) for path in csvs],
+        [sum(finished(path, candidate)) for path in csvs],
+        share,
+    )
+
+    def lower(candidate_ms: int, reference_ms: int) -> str:
+        return "lower" if candidate_ms < reference_ms else "not lower"
+
+    for index, path in enumerate(csvs):
+        p95s = verdict.candidate_p95_ms[index], verdict.reference_p95_ms[index]
+        totals = verdict.candidate_total_ms[index], verdict.reference_total_ms[index]
+        lines.append(
+            f"  {labels[path]}: total run time {candidate} {_two_places(totals[0])}, {reference} "
+            f"{_two_places(totals[1])} -> {lower(*totals)}; run completion p95 {candidate} "
+            f"{_two_places(p95s[0])}, {reference} {_two_places(p95s[1])} (reported, not judged)"
+        )
+    lines += [
+        f"  total run time averaged: {candidate} "
+        f"{_two_places(statistics.mean(verdict.candidate_total_ms))}, {reference} "
+        f"{_two_places(statistics.mean(verdict.reference_total_ms))}, limit "
+        f"{_two_places(verdict.limit_ms)}",
+        f"  run completion: {'faster' if verdict.faster else 'not faster'}",
+    ]
     return lines
 
 
@@ -382,6 +484,7 @@ def _between_files_lines(
 def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
     files = _load(csvs)
     setting = not_worse_setting(csvs)
+    faster = _meta_setting(csvs, "faster_by")
     first, second = sorted(files[csvs[0]])
     labels = _labels(csvs)
     lines = []
@@ -404,6 +507,8 @@ def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
         lines += _between_files_lines(list(labels.values()), variant, times[variant])
     if setting is not None:
         lines += _not_worse_lines(csvs, files, labels, setting)
+    if faster is not None:
+        lines += _faster_lines(csvs, files, labels, faster)
     return lines
 
 

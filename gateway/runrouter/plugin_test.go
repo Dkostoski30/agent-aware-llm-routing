@@ -26,7 +26,8 @@ import (
 )
 
 // The rules infra/routing-values.sh writes with every rule off.
-const allOffRules = `"affinity": false, "overloadGuard": false, "parallelSpill": false, "priority": false, "warmup": false`
+const allOffRules = `"affinity": false, "overloadGuard": false, "parallelSpill": false, "leastWorkFirst": false,
+	"leastContextFirst": false, "priority": false, "warmup": false`
 
 // The overload limits infra/routing-values.sh writes from every profile (testLimits).
 const overloadJSON = `"overloadQueueThreshold": 1, "overloadSustainedSeconds": 10`
@@ -34,11 +35,14 @@ const overloadJSON = `"overloadQueueThreshold": 1, "overloadSustainedSeconds": 1
 // The parallel threshold infra/routing-values.sh writes from every profile (testParallelThreshold).
 const parallelJSON = `"parallelQueueThreshold": 2`
 
+// The least-work slack infra/routing-values.sh writes from every profile (testLeastWorkSlack).
+const leastWorkJSON = `"leastWorkSlack": 2`
+
 // parametersJSON is the plugin's config as infra/routing-values.sh writes it: the rules, the profile's
-// routing.run_ttl_seconds, overload limits and parallel threshold, and the end-of-run port.
+// routing.run_ttl_seconds, overload limits, parallel threshold and least-work slack, and the end-of-run port.
 func parametersJSON(rules string, port int) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "endOfRunPort": %d}`, rules, overloadJSON, parallelJSON,
-		port)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, %s, "endOfRunPort": %d}`, rules, overloadJSON, parallelJSON,
+		leastWorkJSON, port)
 }
 
 // freePort is a port nothing listens on, for a factory that opens the end-of-run server. Each test takes its own, so
@@ -82,7 +86,7 @@ func capture() (context.Context, *[]map[string]any) {
 // newRouter builds the plugin without the factory, so no port is opened, on a clock the test moves.
 func newRouter(flags Flags, clock *fakeClock) *RunRouter {
 	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, testLimits,
-		testParallelThreshold, clock.now, logr.Discard())
+		testParallelThreshold, testLeastWorkSlack, clock.now, logr.Discard())
 }
 
 func endpoint(name string) scheduling.Endpoint {
@@ -375,7 +379,7 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 		lines = append(lines, line)
 	}, funcr.Options{Verbosity: 3})
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, Flags{Affinity: true}, testTTL,
-		testLimits, testParallelThreshold, newFakeClock().now, logger)
+		testLimits, testParallelThreshold, testLeastWorkSlack, newFakeClock().now, logger)
 	if err := router.PreRequest(context.Background(), request(map[string]string{headerRunID: "run-1"}),
 		resultOn("pod-a")); err != nil {
 		t.Fatal(err)
@@ -388,15 +392,16 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 
 func TestFactoryReadsEveryParameter(t *testing.T) {
 	port := freePort(t)
-	raw := fmt.Sprintf(`{"affinity": true, "overloadGuard": false, "parallelSpill": true, "priority": false,
-		"warmup": true, "runTTLSeconds": 120, "overloadQueueThreshold": 3, "overloadSustainedSeconds": 20,
-		"parallelQueueThreshold": 4, "endOfRunPort": %d}`, port)
+	raw := fmt.Sprintf(`{"affinity": true, "overloadGuard": false, "parallelSpill": true, "leastWorkFirst": false,
+		"leastContextFirst": true, "priority": false, "warmup": true, "runTTLSeconds": 120, "overloadQueueThreshold": 3,
+		"overloadSustainedSeconds": 20, "parallelQueueThreshold": 4, "leastWorkSlack": 5, "endOfRunPort": %d}`, port)
 	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := built.(*RunRouter)
-	want := Flags{Affinity: true, OverloadGuard: false, ParallelSpill: true, Priority: false, Warmup: true}
+	want := Flags{Affinity: true, OverloadGuard: false, ParallelSpill: true, LeastWork: false, LeastContext: true,
+		Priority: false, Warmup: true}
 	if router.flags != want {
 		t.Fatalf("got %+v, want %+v", router.flags, want)
 	}
@@ -408,6 +413,29 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	}
 	if router.parallel.threshold != 4 {
 		t.Fatalf("parallel threshold %d, want 4", router.parallel.threshold)
+	}
+	if router.firstCall == nil || router.firstCall.reason != reasonLeastContext {
+		t.Fatalf("first-call rule %+v, want least context", router.firstCall)
+	}
+}
+
+func TestFactoryHandsTheLeastWorkRuleItsSlack(t *testing.T) {
+	rules := strings.Replace(allOffRules, `"leastWorkFirst": false`, `"leastWorkFirst": true`, 1)
+	raw := fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": 5, "endOfRunPort": %d}`, rules,
+		overloadJSON, parallelJSON, freePort(t))
+	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := built.(*RunRouter).firstCall
+	if rule == nil || rule.reason != reasonLeastWork || rule.slack != 5 {
+		t.Fatalf("first-call rule %+v, want least work with slack 5", rule)
+	}
+}
+
+func TestEveryRuleOffHasNoFirstCallRule(t *testing.T) {
+	if rule := newRouter(Flags{Affinity: true}, newFakeClock()).firstCall; rule != nil {
+		t.Fatalf("first-call rule %+v with both off, want none", rule)
 	}
 }
 
@@ -493,9 +521,12 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"a missing rule", `{"affinity": false, "overloadGuard": false, "parallelSpill": false, "priority": false,
 			"runTTLSeconds": 300, "endOfRunPort": 9010}`, "warmup"},
 		{"a rule that is not a bool", parametersJSON(`"affinity": "yes", "overloadGuard": false, "parallelSpill": false,
-			"priority": false, "warmup": false`, 9010), "affinity"},
+			"leastWorkFirst": false, "leastContextFirst": false, "priority": false, "warmup": false`, 9010), "affinity"},
 		{"null for a rule", parametersJSON(`"affinity": null, "overloadGuard": false, "parallelSpill": false,
-			"priority": false, "warmup": false`, 9010), "affinity"},
+			"leastWorkFirst": false, "leastContextFirst": false, "priority": false, "warmup": false`, 9010), "affinity"},
+		{"both first-call rules", parametersJSON(`"affinity": true, "overloadGuard": false, "parallelSpill": false,
+			"leastWorkFirst": true, "leastContextFirst": true, "priority": false, "warmup": false`, 9010),
+			"leastContextFirst"},
 		{"no TTL", fmt.Sprintf(`{%s, "endOfRunPort": 9010}`, allOffRules), "runTTLSeconds"},
 		{"a TTL of zero", fmt.Sprintf(`{%s, "runTTLSeconds": 0, "endOfRunPort": 9010}`, allOffRules), "runTTLSeconds"},
 		{"a negative TTL", fmt.Sprintf(`{%s, "runTTLSeconds": -1, "endOfRunPort": 9010}`, allOffRules),
@@ -519,6 +550,17 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"null for the parallel threshold", fmt.Sprintf(
 			`{%s, "runTTLSeconds": 300, %s, "parallelQueueThreshold": null, "endOfRunPort": 9010}`, allOffRules,
 			overloadJSON), "parallelQueueThreshold"},
+		{"no least-work slack", fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON, parallelJSON), "leastWorkSlack"},
+		{"a negative least-work slack", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": -1, "endOfRunPort": 9010}`, allOffRules, overloadJSON,
+			parallelJSON), "leastWorkSlack"},
+		{"a least-work slack that is not a whole number", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": 1.5, "endOfRunPort": 9010}`, allOffRules, overloadJSON,
+			parallelJSON), "leastWorkSlack"},
+		{"null for the least-work slack", fmt.Sprintf(
+			`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": null, "endOfRunPort": 9010}`, allOffRules,
+			overloadJSON, parallelJSON), "leastWorkSlack"},
 		{"no queue threshold", overloadParameters(`"overloadSustainedSeconds": 10`), "overloadQueueThreshold"},
 		{"a negative queue threshold", overloadParameters(`"overloadQueueThreshold": -1, "overloadSustainedSeconds": 10`),
 			"overloadQueueThreshold"},
@@ -551,7 +593,8 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 
 // overloadParameters is a config with every other parameter valid and the given overload limits.
 func overloadParameters(limits string) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "endOfRunPort": 9010}`, allOffRules, limits, parallelJSON)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, %s, "endOfRunPort": 9010}`, allOffRules, limits, parallelJSON,
+		leastWorkJSON)
 }
 
 func TestFactoryLogsItsParametersOnce(t *testing.T) {
@@ -568,8 +611,10 @@ func TestFactoryLogsItsParametersOnce(t *testing.T) {
 	line := (*lines)[0]
 	if line["type"] != Type || line["affinity"] != false || line["warmup"] != false ||
 		line["runTTLSeconds"] != float64(300) || line["overloadQueueThreshold"] != float64(1) ||
-		line["overloadSustainedSeconds"] != float64(10) || line["parallelQueueThreshold"] != float64(2) {
-		t.Fatalf("line %v lacks the type, the flags, the TTL, the overload limits or the parallel threshold", line)
+		line["overloadSustainedSeconds"] != float64(10) || line["parallelQueueThreshold"] != float64(2) ||
+		line["leastWorkFirst"] != false || line["leastWorkSlack"] != float64(2) || line["leastContextFirst"] != false {
+		t.Fatalf("line %v lacks the type, the flags, the TTL, the overload limits, the parallel threshold or the "+
+			"least-work slack", line)
 	}
 }
 
@@ -1045,5 +1090,262 @@ func TestEveryParallelDecisionIsCounted(t *testing.T) {
 		if got := decisionCount(t, reason) - before[reason]; got != 1 {
 			t.Fatalf("%s counted %v times, want 1", reason, got)
 		}
+	}
+}
+
+func TestRemainingWorkIsWhatTheRunTrackerCounts(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+		want    int
+	}{
+		{"steps left", map[string]string{headerStep: "2", headerExpectedSteps: "10"}, 8},
+		{"the last expected step counts 1", map[string]string{headerStep: "10", headerExpectedSteps: "10"}, 1},
+		{"past the expected steps counts 1", map[string]string{headerStep: "12", headerExpectedSteps: "10"}, 1},
+		{"no step counts 1", map[string]string{headerExpectedSteps: "10"}, 1},
+		{"no expected steps counts 1", map[string]string{headerStep: "2"}, 1},
+		{"a step that is no number counts 1", map[string]string{headerStep: "two", headerExpectedSteps: "10"}, 1},
+		{"expected steps that are no number count 1", map[string]string{headerStep: "2", headerExpectedSteps: "ten"}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := remainingWork(tc.headers); got != tc.want {
+				t.Fatalf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// workCall is one call through the filter and PreRequest with the least-work rule on.
+type workCall struct {
+	runID    string
+	step     int
+	expected int
+	pods     []string
+	want     []string
+	pick     string
+	reason   string
+	from     string
+	work     map[string]any
+	pinAfter string
+}
+
+func runWorkCalls(t *testing.T, router *RunRouter, calls []workCall) {
+	t.Helper()
+	for i, c := range calls {
+		call := request(map[string]string{headerRunID: c.runID, headerStep: fmt.Sprint(c.step),
+			headerExpectedSteps: fmt.Sprint(c.expected)})
+		got := router.Filter(context.Background(), call, endpoints(c.pods))
+		if strings.Join(names(got), ",") != strings.Join(c.want, ",") {
+			t.Fatalf("call %d: filter returned %v, want %v", i, names(got), c.want)
+		}
+		ctx, lines := capture()
+		if err := router.PreRequest(ctx, call, resultOn(c.pick)); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if len(*lines) != 1 {
+			t.Fatalf("call %d: got %d lines, want 1: %v", i, len(*lines), *lines)
+		}
+		line := (*lines)[0]
+		if line["reason"] != c.reason || line["pod"] != c.pick {
+			t.Fatalf("call %d: line %v, want reason %s on %s", i, line, c.reason, c.pick)
+		}
+		from, hasFrom := line["from"]
+		if (c.from == "" && hasFrom) || (c.from != "" && from != c.from) {
+			t.Fatalf("call %d: line %v, want from %q", i, line, c.from)
+		}
+		work, hasWork := line["work"]
+		if c.work == nil && hasWork {
+			t.Fatalf("call %d: line %v has work, want none", i, line)
+		}
+		if c.work != nil && fmt.Sprint(work) != fmt.Sprint(c.work) {
+			t.Fatalf("call %d: line's work %v, want %v", i, work, c.work)
+		}
+		if got := router.pins.pod(c.runID); got != c.pinAfter {
+			t.Fatalf("call %d: run pinned to %q after, want %q", i, got, c.pinAfter)
+		}
+	}
+}
+
+func TestLeastWorkPlacesARunsFirstCallOnTheLightestPod(t *testing.T) {
+	both := []string{"pod-a", "pod-b"}
+	router := newRouter(Flags{Affinity: true, LeastWork: true}, newFakeClock())
+	runWorkCalls(t, router, []workCall{
+		{runID: "run-1", step: 1, expected: 10, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+			work: map[string]any{"pod-a": 0, "pod-b": 0}, pinAfter: "pod-a"},
+		{runID: "run-1", step: 2, expected: 10, pods: both, want: []string{"pod-a"}, pick: "pod-a",
+			reason: reasonPinned, pinAfter: "pod-a"},
+		{runID: "run-2", step: 1, expected: 8, pods: both, want: []string{"pod-b"}, pick: "pod-b",
+			reason: reasonLeastWork, work: map[string]any{"pod-a": 8, "pod-b": 0}, pinAfter: "pod-b"},
+		{runID: "run-3", step: 1, expected: 4, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+			work: map[string]any{"pod-a": 8, "pod-b": 7}, pinAfter: "pod-a"},
+	})
+}
+
+func TestLeastWorkCountsARunsWorkAtItsLatestCall(t *testing.T) {
+	both := []string{"pod-a", "pod-b"}
+	router := newRouter(Flags{Affinity: true, LeastWork: true}, newFakeClock())
+	runWorkCalls(t, router, []workCall{
+		{runID: "run-1", step: 1, expected: 10, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+			work: map[string]any{"pod-a": 0, "pod-b": 0}, pinAfter: "pod-a"},
+		{runID: "run-1", step: 9, expected: 10, pods: both, want: []string{"pod-a"}, pick: "pod-a",
+			reason: reasonPinned, pinAfter: "pod-a"},
+		{runID: "run-2", step: 1, expected: 4, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+			work: map[string]any{"pod-a": 1, "pod-b": 0}, pinAfter: "pod-a"},
+	})
+}
+
+func TestLeastWorkCountsTheStepOfASpilledCall(t *testing.T) {
+	router := newRouter(Flags{Affinity: true, OverloadGuard: true, LeastWork: true}, newFakeClock())
+	level := endpointsWithQueues([]queued{{"pod-a", 0}, {"pod-b", 0}})
+	first := request(map[string]string{headerRunID: "run-1", headerStep: "1", headerExpectedSteps: "10"})
+	router.Filter(context.Background(), first, level)
+	if err := router.PreRequest(context.Background(), first, resultOn("pod-a")); err != nil {
+		t.Fatal(err)
+	}
+	spilled := request(map[string]string{headerRunID: "run-1", headerStep: "9", headerExpectedSteps: "10"})
+	got := router.Filter(context.Background(), spilled, endpointsWithQueues([]queued{{"pod-a", 2}, {"pod-b", 0}}))
+	if strings.Join(names(got), ",") != "pod-b" {
+		t.Fatalf("filter returned %v, want the spill to pod-b", names(got))
+	}
+	if err := router.PreRequest(context.Background(), spilled, resultOn("pod-b")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, lines := capture()
+	second := request(map[string]string{headerRunID: "run-2", headerStep: "1", headerExpectedSteps: "4"})
+	router.Filter(context.Background(), second, level)
+	if err := router.PreRequest(ctx, second, resultOn("pod-a")); err != nil {
+		t.Fatal(err)
+	}
+	if work := fmt.Sprint((*lines)[0]["work"]); work != fmt.Sprint(map[string]any{"pod-a": 1, "pod-b": 0}) {
+		t.Fatalf("work %s, want pod-a at 1: run-1 spilled its step 9 and stays pinned there", work)
+	}
+}
+
+func TestLeastWorkLeavesEveryOtherCallToTheOtherRules(t *testing.T) {
+	both := []string{"pod-a", "pod-b"}
+	cases := []struct {
+		name  string
+		flags Flags
+		calls []workCall
+	}{
+		{"the rule off: a first call goes to the scorers with no work", Flags{Affinity: true}, []workCall{
+			{runID: "run-0", step: 1, expected: 30, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+				pinAfter: "pod-a"},
+			{runID: "run-1", step: 1, expected: 10, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+				pinAfter: "pod-a"},
+		}},
+		{"a remapped run is not placed by work", Flags{Affinity: true, LeastWork: true}, []workCall{
+			{runID: "run-1", step: 1, expected: 10, pods: both, want: both, pick: "pod-a", reason: reasonFirst,
+				work: map[string]any{"pod-a": 0, "pod-b": 0}, pinAfter: "pod-a"},
+			{runID: "run-2", step: 1, expected: 30, pods: []string{"pod-b", "pod-c"}, want: []string{"pod-b", "pod-c"},
+				pick: "pod-b", reason: reasonFirst, work: map[string]any{"pod-b": 0, "pod-c": 0}, pinAfter: "pod-b"},
+			{runID: "run-1", step: 2, expected: 10, pods: []string{"pod-b", "pod-c"}, want: []string{"pod-b", "pod-c"},
+				pick: "pod-b", reason: reasonRemapped, from: "pod-a", pinAfter: "pod-b"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runWorkCalls(t, newRouter(tc.flags, newFakeClock()), tc.calls)
+		})
+	}
+}
+
+func TestLeastWorkWithoutAffinityPassesEveryCandidate(t *testing.T) {
+	router := newRouter(Flags{LeastWork: true}, newFakeClock())
+	router.pins.record("run-0", "pod-a", progress{work: 30})
+	call := request(map[string]string{headerRunID: "run-1", headerStep: "1", headerExpectedSteps: "10"})
+	got := router.Filter(context.Background(), call, endpoints([]string{"pod-a", "pod-b"}))
+	if strings.Join(names(got), ",") != "pod-a,pod-b" || router.pins.pod("run-1") != "" {
+		t.Fatalf("filter returned %v and pinned run-1 to %q, want every candidate and no pin: no pins are kept "+
+			"without affinity", names(got), router.pins.pod("run-1"))
+	}
+}
+
+func TestLeastWorkDecisionsAreCounted(t *testing.T) {
+	before := decisionCount(t, reasonLeastWork)
+	router := newRouter(Flags{Affinity: true, LeastWork: true}, newFakeClock())
+	router.pins.record("run-0", "pod-a", progress{work: 30})
+	call := request(map[string]string{headerRunID: "run-1", headerStep: "1", headerExpectedSteps: "10"})
+	router.Filter(context.Background(), call, endpoints([]string{"pod-a", "pod-b"}))
+	if err := router.PreRequest(context.Background(), call, resultOn("pod-b")); err != nil {
+		t.Fatal(err)
+	}
+	if got := decisionCount(t, reasonLeastWork) - before; got != 1 {
+		t.Fatalf("least-work counted %v times, want 1", got)
+	}
+}
+
+// sized is a first call of a run with its body size, as the picker's director fills RequestSizeBytes.
+func sized(runID string, step, expected, size int) *scheduling.InferenceRequest {
+	call := request(map[string]string{headerRunID: runID, headerStep: fmt.Sprint(step),
+		headerExpectedSteps: fmt.Sprint(expected)})
+	call.RequestSizeBytes = size
+	return call
+}
+
+func TestLeastContextPlacesARunsFirstCallOnThePodWithTheSmallerContext(t *testing.T) {
+	both := []string{"pod-a", "pod-b"}
+	router := newRouter(Flags{Affinity: true, LeastContext: true}, newFakeClock())
+	calls := []struct {
+		call   *scheduling.InferenceRequest
+		want   []string
+		pick   string
+		reason string
+		load   map[string]any
+	}{
+		{sized("run-1", 1, 10, 4000), both, "pod-a", reasonFirst, map[string]any{"pod-a": 0, "pod-b": 0}},
+		// run-1's second call is bigger; its pin holds the latest size.
+		{sized("run-1", 2, 10, 9000), []string{"pod-a"}, "pod-a", reasonPinned, nil},
+		{sized("run-2", 1, 3, 1000), []string{"pod-b"}, "pod-b", reasonLeastContext,
+			map[string]any{"pod-a": 9000, "pod-b": 0}},
+		// Many steps left on pod-a but the larger context there: run-3 goes to pod-b's 1000.
+		{sized("run-3", 1, 30, 500), []string{"pod-b"}, "pod-b", reasonLeastContext,
+			map[string]any{"pod-a": 9000, "pod-b": 1000}},
+	}
+	for i, c := range calls {
+		got := router.Filter(context.Background(), c.call, endpoints(both))
+		if strings.Join(names(got), ",") != strings.Join(c.want, ",") {
+			t.Fatalf("call %d: filter returned %v, want %v", i, names(got), c.want)
+		}
+		ctx, lines := capture()
+		if err := router.PreRequest(ctx, c.call, resultOn(c.pick)); err != nil {
+			t.Fatal(err)
+		}
+		line := (*lines)[0]
+		if line["reason"] != c.reason {
+			t.Fatalf("call %d: line %v, want reason %s", i, line, c.reason)
+		}
+		load, hasLoad := line["context"]
+		if (c.load == nil) == hasLoad || (c.load != nil && fmt.Sprint(load) != fmt.Sprint(c.load)) {
+			t.Fatalf("call %d: line's context %v, want %v", i, load, c.load)
+		}
+		if _, hasWork := line["work"]; hasWork {
+			t.Fatalf("call %d: line %v has work, which only the least-work rule logs", i, line)
+		}
+	}
+}
+
+func TestLeastContextWithoutAffinityPassesEveryCandidate(t *testing.T) {
+	router := newRouter(Flags{LeastContext: true}, newFakeClock())
+	router.pins.record("run-0", "pod-a", progress{size: 9000})
+	got := router.Filter(context.Background(), sized("run-1", 1, 10, 100), endpoints([]string{"pod-a", "pod-b"}))
+	if strings.Join(names(got), ",") != "pod-a,pod-b" || router.pins.pod("run-1") != "" {
+		t.Fatalf("filter returned %v and pinned run-1 to %q, want every candidate and no pin", names(got),
+			router.pins.pod("run-1"))
+	}
+}
+
+func TestLeastContextDecisionsAreCounted(t *testing.T) {
+	before := decisionCount(t, reasonLeastContext)
+	router := newRouter(Flags{Affinity: true, LeastContext: true}, newFakeClock())
+	router.pins.record("run-0", "pod-a", progress{size: 9000})
+	call := sized("run-1", 1, 10, 100)
+	router.Filter(context.Background(), call, endpoints([]string{"pod-a", "pod-b"}))
+	if err := router.PreRequest(context.Background(), call, resultOn("pod-b")); err != nil {
+		t.Fatal(err)
+	}
+	if got := decisionCount(t, reasonLeastContext) - before; got != 1 {
+		t.Fatalf("least-context counted %v times, want 1", got)
 	}
 }

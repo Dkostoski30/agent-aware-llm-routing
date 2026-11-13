@@ -68,7 +68,9 @@ helm upgrade --install agentgateway "$AGENTGATEWAY_CHART" \
 # The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp). The image's tag and the profile's
 # routing as infra/set-routing.sh passes them; captured first, since a failure inside <(...) would not stop the script.
 picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
-helm upgrade --install vllm-pool "$ROUTER_CHART" \
+# Pulled here into the local copy every later routing switch installs from (router_chart_path).
+chart=$(router_chart_path)
+helm upgrade --install vllm-pool "$chart" \
   --namespace "$POOL_NAMESPACE" \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
   --values <(echo "$picker_values") \

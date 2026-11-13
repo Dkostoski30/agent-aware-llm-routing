@@ -37,6 +37,13 @@ routing:
   # Keeps the calls of one parallel group on their run's pod while it has room for them, and sends the rest to pods
   # that have room (P3.6). Acts on pinned runs only, so it needs affinity on.
   parallel_spill: false
+  # Sends a run's first call to the pod whose pinned runs have the least work left (P3.7b). Counts pinned runs, so it
+  # needs affinity on.
+  least_work_first: false
+  # Sends a run's first call to the pod whose pinned runs' latest calls are the smallest in bytes, the context their
+  # next calls bring to the pod's KV cache (P3.7b's second try). Needs affinity on, and not with least_work_first, which
+  # places the same calls by remaining work. No threshold: sizes in bytes are almost never level.
+  least_context_first: false
   # Serves runs close to finishing first (P4.1).
   priority: false
   # Sends new runs to the newest pod right after scale-up (P4.2).
@@ -60,6 +67,12 @@ routing:
   # the guard judges first and spills a call at a queue over 1 while another pod is at or under 1, so this rule then
   # finds a pod full only when every pod's queue is over 1.
   parallel_queue_threshold: 2
+  # The least-work rule (P3.7b): a pod's work is the sum, over the live runs pinned to it, of max(expected - step, 1)
+  # as of each run's latest call (D2's count). A run's first call goes to the lightest pod when every other pod has more
+  # than this over it; pods within it are level and the default scorers choose among them. A first guess, in calls of
+  # work: within 2 calls the scorers' pick by queue and prefix stands; P3.7's runs that started on the heavier pod were
+  # 1-28 calls heavier, median 10-14 (experiments/log.md, P3.7b's spike).
+  least_work_slack: 2
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

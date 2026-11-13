@@ -5,10 +5,19 @@ import (
 	"time"
 )
 
-// pin is the pod a run's calls go to, and when a call of the run last went there.
+// progress is what a pin keeps of its run's latest call, which the first-call rules add up per pod (P3.7b): the run's
+// remaining work for least work first, and the call's body size in bytes, the context the run's next call brings to
+// its pod's KV cache, for least context first.
+type progress struct {
+	work int
+	size int
+}
+
+// pin is the pod a run's calls go to, when a call of the run last went there, and the run's progress as of that call.
 type pin struct {
 	pod  string
 	used time.Time
+	progress
 }
 
 // pins maps each active run to its pod (P3.3). They live in memory in the one picker pod: a picker restart forgets
@@ -41,34 +50,35 @@ func (p *pins) pod(runID string) string {
 	return entry.pod
 }
 
-// record pins the run to pod as of now and returns the pod it was pinned to before, "" if it had no live pin. It
-// also drops every pin that outlived the TTL, so the runs whose end never arrived do not pile up: one pass over the
-// active runs, a few dozen, per call.
-func (p *pins) record(runID, pod string) string {
+// record pins the run to pod with its progress as of now and returns the pod it was pinned to before, "" if it
+// had no live pin. It also drops every pin that outlived the TTL, so the runs whose end never arrived do not pile up:
+// one pass over the active runs, a few dozen, per call.
+func (p *pins) record(runID, pod string, now progress) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	now := p.now()
+	at := p.now()
 	before := ""
-	if entry, ok := p.byRun[runID]; ok && p.live(entry.used, now) {
+	if entry, ok := p.byRun[runID]; ok && p.live(entry.used, at) {
 		before = entry.pod
 	}
 	for id, entry := range p.byRun {
-		if !p.live(entry.used, now) {
+		if !p.live(entry.used, at) {
 			delete(p.byRun, id)
 		}
 	}
-	p.byRun[runID] = pin{pod: pod, used: now}
+	p.byRun[runID] = pin{pod: pod, used: at, progress: now}
 	return before
 }
 
-// renew restarts the TTL of the run's live pin and leaves its pod: a spilled call (P3.5) went elsewhere, but the run
-// is still active and stays pinned. A run with no live pin stays without one.
-func (p *pins) renew(runID string) {
+// renew restarts the TTL of the run's live pin and sets its progress, and leaves its pod: a spilled call (P3.5)
+// went elsewhere, but the run is still active, a step further on, and stays pinned. A run with no live pin stays
+// without one.
+func (p *pins) renew(runID string, now progress) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	now := p.now()
-	if entry, ok := p.byRun[runID]; ok && p.live(entry.used, now) {
-		p.byRun[runID] = pin{pod: entry.pod, used: now}
+	at := p.now()
+	if entry, ok := p.byRun[runID]; ok && p.live(entry.used, at) {
+		p.byRun[runID] = pin{pod: entry.pod, used: at, progress: now}
 	}
 }
 

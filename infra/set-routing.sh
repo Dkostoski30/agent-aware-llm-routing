@@ -49,7 +49,9 @@ fi
 # Captured first, since a failure inside <(...) would not stop the script.
 picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
 routing_values=$(bash "$REPO_ROOT/infra/routing-values.sh" "$profile" ${rules:+"$rules"})
-helm upgrade --install vllm-pool "$ROUTER_CHART" \
+# The local copy make up pulled (router_chart_path), so a switch needs no network.
+chart=$(router_chart_path)
+helm upgrade --install vllm-pool "$chart" \
   --namespace default \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
   --values <(echo "$picker_values") \

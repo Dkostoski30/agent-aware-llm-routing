@@ -157,6 +157,9 @@ class FakeCluster:
         self.gpu: list[tuple[str, int]] = []
         self.fail_gpu_check = fail_gpu_check
         self.gpu_exit = gpu_exit
+        # Each vLLM-log take, with the variant just replayed and how many cluster steps came
+        # before it, apart from asked for the same reason as the GPU log's (P3.7c).
+        self.vllm: list[tuple[str | None, int]] = []
         self.replays = replays
         self.fail_replay_of = fail_replay_of
         self.fail_restart_number = fail_restart_number
@@ -236,6 +239,10 @@ class FakeCluster:
     def picker_log(self) -> str:
         self.asked.append("picker log")
         return "the picker's log\n"
+
+    def vllm_logs(self) -> dict[str, str]:
+        self.vllm.append((self.replayed_variant, len(self.asked)))
+        return {"vllm-x-pod-a": "pod a's log\n", "vllm-x-pod-b": "pod b's log\n"}
 
     def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
         self.asked.append(f"stalls {since:.0f} {until:.0f} {seconds}")
@@ -2058,3 +2065,257 @@ def test_a_live_token_answer_with_no_pods_is_an_error_not_no_stalls(
     monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
     with pytest.raises(ExperimentError, match="pod-a"):
         LiveCluster(experiment, {"real": real}).pod_stalls(170.0, 400.0, 30)
+
+
+# P3.7b: the least-work rule, and the files that hold the plugin with it to faster runs.
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "least_work_first": True}),
+        ({"plugin": True, "least_work_first": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "least_work_first": True}, {"affinity": False}),
+    ],
+)
+def test_least_work_first_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The least-work rule adds up the work of pinned runs, and only affinity keeps pins: with
+    affinity off it would do nothing, and the variant would read as its result."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="least_work_first on, but affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_least_work_first_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "least_work_first": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+def test_a_variant_may_not_set_the_profiles_least_work_slack(tmp_path: Path) -> None:
+    """The slack is the profile's, as the parallel threshold is (P3.7b). True passes the loader's
+    check that rules are true or false, so the refusal is check_routing's."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "least_work_slack": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="least_work_slack"):
+        check_routing(experiment, {"real": real})
+
+
+def test_faster_by_and_the_reference_variant_go_into_the_meta(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], faster_by=0.05)
+    assert experiment.faster_by == 0.05
+    assert experiment.not_worse_tolerance is None
+    assert experiment.reference_variant == "default"
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["faster_by"] == 0.05
+    assert meta["reference_variant"] == "default"
+
+
+def test_without_faster_by_the_meta_has_none(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["faster_by"] is None
+
+
+@pytest.mark.parametrize("share", [-0.01, 1, 1.5, True, "0.05"])
+def test_faster_by_that_is_not_a_share_under_one_is_refused(tmp_path: Path, share: object) -> None:
+    with pytest.raises(ExperimentError, match="faster_by"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], faster_by=share)
+
+
+def test_faster_by_with_no_default_variant_to_hold_to_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="faster_by needs one variant on the default picker"):
+        loaded(tmp_path, variants=[ROUTER_VARIANT, other], faster_by=0.05)
+
+
+def test_faster_by_over_other_than_two_variants_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="faster_by compares two variants"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT, other], faster_by=0.05)
+
+
+ROUTING_FASTER = REPO_ROOT / "experiments" / "routing-faster.yaml"
+ROUTING_FASTER_REVERSED = REPO_ROOT / "experiments" / "routing-faster-reversed.yaml"
+
+
+@pytest.mark.parametrize(
+    "path", [ROUTING_FASTER, ROUTING_FASTER_REVERSED], ids=lambda path: path.stem
+)
+def test_the_routing_faster_files_are_routing_burst_with_the_least_work_rule(path: Path) -> None:
+    """The same replay, checks and variants as P3.7's, so the only change is the rule; the claim is
+    faster runs, by 5% of default's p95 averaged over both orders."""
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    check_stall_window(experiment, profiles)
+    assert experiment.faster_by == 0.05
+    assert experiment.reference_variant == "default"
+    faster = yaml.safe_load(path.read_text())
+    burst = yaml.safe_load(
+        (ROUTING_BURST if path == ROUTING_FASTER else ROUTING_BURST_REVERSED).read_text()
+    )
+    plugin = next(variant for variant in faster["variants"] if variant["name"] == "plugin")
+    assert plugin["routing"] == {**WHOLE_PLUGIN, "least_work_first": True}
+    plugin["routing"] = WHOLE_PLUGIN
+    assert faster.pop("faster_by") == 0.05
+    assert faster == burst
+
+
+def test_routing_faster_reversed_differs_only_in_the_order() -> None:
+    forward = yaml.safe_load(ROUTING_FASTER.read_text())
+    backward = yaml.safe_load(ROUTING_FASTER_REVERSED.read_text())
+    assert [variant["name"] for variant in forward["variants"]] == ["default", "plugin"]
+    assert backward["variants"] == list(reversed(forward["variants"]))
+
+
+# P3.7b's second try: the least-context rule.
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules", "says"),
+    [
+        ({}, {"plugin": True, "least_context_first": True}, "least_context_first on, but affinity"),
+        (
+            {},
+            {
+                "plugin": True,
+                "affinity": True,
+                "least_work_first": True,
+                "least_context_first": True,
+            },
+            "least_work_first and least_context_first",
+        ),
+    ],
+)
+def test_least_context_first_without_affinity_or_beside_least_work_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool], says: str
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match=says):
+        check_routing(experiment, {"real": real})
+
+
+def test_least_context_first_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "least_context_first": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+ROUTING_CONTEXT = REPO_ROOT / "experiments" / "routing-context.yaml"
+ROUTING_CONTEXT_REVERSED = REPO_ROOT / "experiments" / "routing-context-reversed.yaml"
+
+
+@pytest.mark.parametrize(
+    "path", [ROUTING_CONTEXT, ROUTING_CONTEXT_REVERSED], ids=lambda path: path.stem
+)
+def test_the_routing_context_files_are_routing_faster_with_the_other_first_call_rule(
+    path: Path,
+) -> None:
+    """The same replay, checks, claim and variants as routing-faster's, so the only change is
+    which first-call rule is on."""
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    check_stall_window(experiment, profiles)
+    assert experiment.faster_by == 0.05
+    context = yaml.safe_load(path.read_text())
+    faster = yaml.safe_load(
+        (ROUTING_FASTER if path == ROUTING_CONTEXT else ROUTING_FASTER_REVERSED).read_text()
+    )
+    plugin = next(variant for variant in context["variants"] if variant["name"] == "plugin")
+    assert plugin["routing"] == {**WHOLE_PLUGIN, "least_context_first": True}
+    plugin["routing"] = {**WHOLE_PLUGIN, "least_work_first": True}
+    assert context == faster
+
+
+# P3.7c: both vLLM pods' logs, kept per variant, so a pod stall comes with the engine's own numbers.
+
+
+def test_each_real_variant_keeps_both_vllm_pods_logs_after_its_replay(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    # One take per variant, each after that variant's replay and before the next restart wipes
+    # its pods.
+    replays = [index for index, step in enumerate(cluster.asked) if step.startswith("replay")]
+    restarts = [index for index, step in enumerate(cluster.asked) if step == "restart"]
+    takes = [steps for _, steps in cluster.vllm]
+    assert len(takes) == 2
+    assert replays[0] < takes[0] <= restarts[1] < replays[1] < takes[1]
+    for variant in ("default", "run-router"):
+        names = meta["variants"][variant]["vllm_logs"]
+        assert names == [
+            out.vllm(variant, "vllm-x-pod-a").name,
+            out.vllm(variant, "vllm-x-pod-b").name,
+        ]
+        assert out.vllm(variant, "vllm-x-pod-a").read_text() == "pod a's log\n"
+        assert out.vllm(variant, "vllm-x-pod-b").read_text() == "pod b's log\n"
+
+
+def test_a_stalled_replay_keeps_its_vllm_logs(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"default": [STALL]})
+    out = outputs(experiment, tmp_path)
+    with pytest.raises(ExperimentError):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.vllm("default", "vllm-x-pod-a").exists()
+    assert out.vllm("default", "vllm-x-pod-b").exists()
+    ((variant, steps),) = cluster.vllm
+    assert variant == "default"
+    assert cluster.asked[steps].startswith("stalls")
+
+
+def test_a_sim_variant_keeps_no_vllm_logs(tmp_path: Path) -> None:
+    """Simulated pods share no GPU, which is what the logs are kept for."""
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.vllm == []
+    assert all(variant["vllm_logs"] is None for variant in meta["variants"].values())
+
+
+def test_the_live_cluster_takes_each_vllm_pods_log_with_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        if args[:2] == ("get", "pods"):
+            return "vllm-x-pod-a vllm-x-pod-b"
+        return f"log of {args[-1]}\n"
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    assert LiveCluster(experiment, {}).vllm_logs() == {
+        "vllm-x-pod-a": "log of vllm-x-pod-a\n",
+        "vllm-x-pod-b": "log of vllm-x-pod-b\n",
+    }
+    assert asked[0][:4] == ("get", "pods", "-l", "app.kubernetes.io/name=vllm")
+    assert asked[1:] == [
+        ("logs", "--timestamps", "vllm-x-pod-a"),
+        ("logs", "--timestamps", "vllm-x-pod-b"),
+    ]

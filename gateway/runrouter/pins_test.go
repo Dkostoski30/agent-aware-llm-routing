@@ -24,10 +24,10 @@ func (c *fakeClock) advance(by time.Duration) { c.at = c.at.Add(by) }
 func TestPinsRecordReturnsThePodPinnedBefore(t *testing.T) {
 	clock := newFakeClock()
 	store := newPins(testTTL, clock.now)
-	if before := store.record("run-1", "pod-a"); before != "" {
+	if before := store.record("run-1", "pod-a", progress{work: 1}); before != "" {
 		t.Fatalf("a first record returned %q, want no pod", before)
 	}
-	if before := store.record("run-1", "pod-b"); before != "pod-a" {
+	if before := store.record("run-1", "pod-b", progress{work: 1}); before != "pod-a" {
 		t.Fatalf("got %q, want pod-a", before)
 	}
 	if got := store.pod("run-1"); got != "pod-b" {
@@ -49,7 +49,7 @@ func TestPinsHoldUpToTheTTLAndNotAfter(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clock := newFakeClock()
 			store := newPins(testTTL, clock.now)
-			store.record("run-1", "pod-a")
+			store.record("run-1", "pod-a", progress{work: 1})
 			clock.advance(tc.since)
 			if got := store.pod("run-1"); got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
@@ -61,9 +61,9 @@ func TestPinsHoldUpToTheTTLAndNotAfter(t *testing.T) {
 func TestPinsRecordAfterTheTTLReturnsNoPod(t *testing.T) {
 	clock := newFakeClock()
 	store := newPins(testTTL, clock.now)
-	store.record("run-1", "pod-a")
+	store.record("run-1", "pod-a", progress{work: 1})
 	clock.advance(testTTL + time.Second)
-	if before := store.record("run-1", "pod-b"); before != "" {
+	if before := store.record("run-1", "pod-b", progress{work: 1}); before != "" {
 		t.Fatalf("got %q, want no pod: the pin had expired", before)
 	}
 }
@@ -71,10 +71,10 @@ func TestPinsRecordAfterTheTTLReturnsNoPod(t *testing.T) {
 func TestPinsRecordDropsEveryExpiredPin(t *testing.T) {
 	clock := newFakeClock()
 	store := newPins(testTTL, clock.now)
-	store.record("run-1", "pod-a")
-	store.record("run-2", "pod-b")
+	store.record("run-1", "pod-a", progress{work: 1})
+	store.record("run-2", "pod-b", progress{work: 1})
 	clock.advance(testTTL + time.Second)
-	store.record("run-3", "pod-a")
+	store.record("run-3", "pod-a", progress{work: 1})
 	if len(store.byRun) != 1 {
 		t.Fatalf("%d pins kept, want only run-3's: %v", len(store.byRun), store.byRun)
 	}
@@ -83,8 +83,8 @@ func TestPinsRecordDropsEveryExpiredPin(t *testing.T) {
 func TestPinsEndRemovesOnlyThatRun(t *testing.T) {
 	clock := newFakeClock()
 	store := newPins(testTTL, clock.now)
-	store.record("run-1", "pod-a")
-	store.record("run-2", "pod-b")
+	store.record("run-1", "pod-a", progress{work: 1})
+	store.record("run-2", "pod-b", progress{work: 1})
 	if !store.end("run-1") {
 		t.Fatal("end reported no pin for run-1")
 	}
@@ -110,7 +110,7 @@ func TestPinsEndOfARunWithNoLivePinReportsNone(t *testing.T) {
 			clock := newFakeClock()
 			store := newPins(testTTL, clock.now)
 			if tc.record {
-				store.record("run-1", "pod-a")
+				store.record("run-1", "pod-a", progress{work: 1})
 			}
 			clock.advance(tc.since)
 			if store.end("run-1") {
@@ -123,9 +123,9 @@ func TestPinsEndOfARunWithNoLivePinReportsNone(t *testing.T) {
 func TestPinsRenewKeepsThePodAndRestartsTheTTL(t *testing.T) {
 	clock := newFakeClock()
 	store := newPins(testTTL, clock.now)
-	store.record("run-1", "pod-a")
+	store.record("run-1", "pod-a", progress{work: 1})
 	clock.advance(testTTL - time.Second)
-	store.renew("run-1")
+	store.renew("run-1", progress{work: 1})
 	clock.advance(testTTL - time.Second)
 	if got := store.pod("run-1"); got != "pod-a" {
 		t.Fatalf("got %q, want pod-a: the renew restarted the TTL", got)
@@ -146,13 +146,26 @@ func TestPinsRenewPinsNoRunWithoutALivePin(t *testing.T) {
 			clock := newFakeClock()
 			store := newPins(testTTL, clock.now)
 			if tc.record {
-				store.record("run-1", "pod-a")
+				store.record("run-1", "pod-a", progress{work: 1})
 			}
 			clock.advance(tc.since)
-			store.renew("run-1")
+			store.renew("run-1", progress{work: 1})
 			if got := store.pod("run-1"); got != "" {
 				t.Fatalf("got %q, want no pin: renew must not revive one", got)
 			}
 		})
+	}
+}
+
+func TestPinsRecordAndRenewKeepTheRunsLatestProgress(t *testing.T) {
+	clock := newFakeClock()
+	store := newPins(testTTL, clock.now)
+	store.record("run-1", "pod-a", progress{work: 8, size: 800})
+	if got := store.byRun["run-1"].progress; got != (progress{work: 8, size: 800}) {
+		t.Fatalf("progress %+v after record, want work 8 and size 800", got)
+	}
+	store.renew("run-1", progress{work: 3, size: 1200})
+	if got := store.byRun["run-1"]; got.progress != (progress{work: 3, size: 1200}) || got.pod != "pod-a" {
+		t.Fatalf("pin %+v after renew, want pod-a with work 3 and size 1200: a spilled call moves its run on", got)
 	}
 }

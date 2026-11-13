@@ -27,6 +27,13 @@ type Flags struct {
 	// Keeps the calls of one parallel group on their run's pod while it has room for them, and sends the rest to pods
 	// that have room (P3.6). Acts on pinned runs only, so it needs affinity.
 	ParallelSpill bool
+	// Sends a run's first call to the pod whose pinned runs have the least work left (P3.7b). Counts pins, so it needs
+	// affinity.
+	LeastWork bool
+	// Sends a run's first call to the pod whose pinned runs' latest calls are the smallest in bytes (P3.7b). Counts
+	// pins, so it needs affinity, and it is refused beside LeastWork, which would place the same calls by another
+	// measure.
+	LeastContext bool
 	// Serves runs close to finishing first (P4.1).
 	Priority bool
 	// Sends new runs to the newest pod right after scale-up (P4.2).
@@ -43,6 +50,9 @@ type Parameters struct {
 	// A pinned pod has room for a parallel group's call while its waiting queue plus the group's calls in flight on it
 	// are at or under this (routing.parallel_queue_threshold, P3.6).
 	ParallelQueueThreshold int
+	// A pod whose pinned remaining work is at most this over the lightest pod's is level with it for a run's first call
+	// (routing.least_work_slack, P3.7b).
+	LeastWorkSlack int
 	// The port POST /runs/{id}/end is served on (infra/routing-values.sh, which opens it on the picker's Service).
 	EndOfRunPort int
 }
@@ -60,6 +70,8 @@ type raw struct {
 	Affinity      *bool `json:"affinity"`
 	OverloadGuard *bool `json:"overloadGuard"`
 	ParallelSpill *bool `json:"parallelSpill"`
+	LeastWork     *bool `json:"leastWorkFirst"`
+	LeastContext  *bool `json:"leastContextFirst"`
 	Priority      *bool `json:"priority"`
 	Warmup        *bool `json:"warmup"`
 	RunTTLSeconds *int  `json:"runTTLSeconds"`
@@ -69,12 +81,15 @@ type raw struct {
 	OverloadSustainedSeconds *int `json:"overloadSustainedSeconds"`
 	// The parallel rule's threshold.
 	ParallelQueueThreshold *int `json:"parallelQueueThreshold"`
+	// The least-work rule's slack.
+	LeastWorkSlack *int `json:"leastWorkSlack"`
 }
 
 // parseParameters reads every parameter from the decoder the framework hands the factory. It refuses unknown keys
 // (the decoder is strict), missing or null ones, a TTL that is not a positive whole number of seconds, a port outside
 // 1-65535, a queue threshold or a parallel threshold that is not a whole number of calls, 0 or more, a sustained time
-// that is not a positive whole number of seconds, and no parameters at all.
+// that is not a positive whole number of seconds, a least-work slack that is not a whole number, 0 or more, both
+// first-call rules on, and no parameters at all.
 func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if decoder == nil {
 		return Parameters{}, errors.New("no parameters: every routing flag must be set")
@@ -92,6 +107,8 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 		{"parallelSpill", in.ParallelSpill},
 		{"priority", in.Priority},
 		{"warmup", in.Warmup},
+		{"leastWorkFirst", in.LeastWork},
+		{"leastContextFirst", in.LeastContext},
 	}
 	for _, flag := range flags {
 		if flag.value == nil {
@@ -116,11 +133,20 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if in.ParallelQueueThreshold == nil || *in.ParallelQueueThreshold < 0 {
 		return Parameters{}, errors.New("parameters: parallelQueueThreshold must be a number of calls, 0 or more")
 	}
+	if in.LeastWorkSlack == nil || *in.LeastWorkSlack < 0 {
+		return Parameters{}, errors.New("parameters: leastWorkSlack must be a whole number, 0 or more")
+	}
+	if *in.LeastWork && *in.LeastContext {
+		return Parameters{}, errors.New("parameters: leastWorkFirst and leastContextFirst are both on: each places a " +
+			"run's first call, by another measure")
+	}
 	return Parameters{
 		Flags: Flags{
 			Affinity:      *in.Affinity,
 			OverloadGuard: *in.OverloadGuard,
 			ParallelSpill: *in.ParallelSpill,
+			LeastWork:     *in.LeastWork,
+			LeastContext:  *in.LeastContext,
 			Priority:      *in.Priority,
 			Warmup:        *in.Warmup,
 		},
@@ -130,6 +156,7 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 			Sustained:      time.Duration(*in.OverloadSustainedSeconds) * time.Second,
 		},
 		ParallelQueueThreshold: *in.ParallelQueueThreshold,
+		LeastWorkSlack:         *in.LeastWorkSlack,
 		EndOfRunPort:           *in.EndOfRunPort,
 	}, nil
 }
