@@ -19,6 +19,7 @@ import httpx
 import pytest
 from agent_runtime.app import create_app, run_events
 from agent_runtime.config import AgentConfig, Sampling
+from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RunRecord, RunStatus, RunStore
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
@@ -102,10 +103,31 @@ class MemoryStore:
         return [call.fields() for call in found[-1]] if found else []
 
 
+class StoreDown(Exception):
+    """What a store raises when Redis is gone; nothing in the app catches it."""
+
+
+class FailingStore(MemoryStore):
+    """Fails every save after the first saves_left."""
+
+    def __init__(self, saves_left: int) -> None:
+        super().__init__()
+        self.saves_left = saves_left
+
+    async def save(
+        self, record: RunRecord, messages: list[dict[str, Any]], calls: Sequence[CallRecord]
+    ) -> None:
+        if self.saves_left == 0:
+            raise StoreDown("redis down")
+        self.saves_left -= 1
+        await super().save(record, messages, calls)
+
+
 class Service:
     """The app with a scripted LLM (or one failure for every call), a MemoryStore and a picker that
     records each end of run with the run's status saved at that moment (P3.3). picker_failure is the
-    picker's answer to every end of run, or the exception its connection raises."""
+    picker's answer to every end of run, or the exception its connection raises. Each LLM call also
+    notes what the run tracker read as it arrived (P3.8)."""
 
     def __init__(
         self,
@@ -113,6 +135,7 @@ class Service:
         failure: httpx.Response | None = None,
         end_of_run: bool = False,
         picker_failure: httpx.Response | httpx.HTTPError | None = None,
+        store: MemoryStore | None = None,
     ):
         self.replies = list(replies)
         self.failure = failure
@@ -120,7 +143,10 @@ class Service:
         self.requests: list[httpx.Request] = []
         # (method, path, the saved status of the run when the picker heard of its end)
         self.ends: list[tuple[str, str, str | None]] = []
-        self.store = MemoryStore()
+        self.store = MemoryStore() if store is None else store
+        self.tracker = RunTracker()
+        # (remaining work, active runs) as each LLM call arrived.
+        self.tracked: list[tuple[int, int]] = []
         http = httpx.AsyncClient(
             transport=httpx.MockTransport(self.handle), base_url="http://gateway"
         )
@@ -129,7 +155,7 @@ class Service:
         )
         schema = json.loads(RUN_REQUEST_SCHEMA.read_text())
         self.client = TestClient(
-            create_app(make_config(end_of_run), self.store, http, picker, schema)
+            create_app(make_config(end_of_run), self.store, http, picker, schema, self.tracker)
         )
 
     def handle_end(self, request: httpx.Request) -> httpx.Response:
@@ -143,6 +169,7 @@ class Service:
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
+        self.tracked.append((self.tracker.remaining_work(), self.tracker.active_runs()))
         if self.failure is not None:
             return self.failure
         message = self.replies.pop(0)
@@ -355,6 +382,44 @@ def test_with_the_plugin_off_no_end_of_run_is_sent() -> None:
     service = Service([text("59")])
     service.start({"task": TASK})
     assert service.ends == []
+
+
+def test_the_tracker_counts_a_run_from_its_first_call_to_its_end() -> None:
+    """P3.8: each call is counted as sent, by its x-step; the third call is past EXPECTED_STEPS 3's
+    work but still counts 1."""
+    service = Service([calc("7*8"), calc("56+3"), text("59")])
+    service.start({"task": TASK})
+    steps = [int(request.headers["x-step"]) for request in service.requests]
+    assert steps == [1, 2, 3]
+    assert service.tracked == [(EXPECTED_STEPS - 1, 1), (EXPECTED_STEPS - 2, 1), (1, 1)]
+    assert (service.tracker.remaining_work(), service.tracker.active_runs()) == (0, 0)
+
+
+def test_a_failed_run_leaves_the_tracker() -> None:
+    service = Service([], failure=httpx.Response(500, json={"error": "scripted failure"}))
+    service.start({"task": TASK})
+    assert service.tracked == [(EXPECTED_STEPS - 1, 1)]
+    assert service.tracker.active_runs() == 0
+
+
+def test_a_run_that_crashes_leaves_the_tracker() -> None:
+    """A store that fails after the first call raises out of the run; the run still ends, so the
+    metric does not count it forever."""
+    service = Service([calc("7*8"), text("56")], store=FailingStore(saves_left=1))
+    with pytest.raises(StoreDown):
+        service.client.post("/runs", json={"task": TASK})
+    assert len(service.requests) == 1
+    assert service.tracker.active_runs() == 0
+
+
+def test_metrics_serves_the_tracker_s_text() -> None:
+    service = Service([])
+    service.tracker.started("run-elsewhere", 4)
+    response = service.client.get("/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == METRICS_CONTENT_TYPE
+    assert response.text == service.tracker.exposition()
+    assert "thesis_remaining_work 4\n" in response.text
 
 
 @pytest.mark.parametrize(

@@ -8,10 +8,14 @@ headers.v1's contract tests for the replayer (D12).
 """
 
 import asyncio
+import contextlib
 import json
 import selectors
+import socket
 import sys
-from collections.abc import AsyncIterator, Callable, Coroutine
+import urllib.error
+import urllib.request
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,6 +23,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from jsonschema import Draft202012Validator
 from load_generator.plan import (
     FanOut,
@@ -38,6 +43,7 @@ from load_generator.replay import (
     measure_template_and_plan,
     output_path,
     replay_runs,
+    serve_metrics,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -849,6 +855,152 @@ def test_an_end_of_run_the_picker_misses_changes_no_line(
     assert all(f"{run.run_id}: end of run not delivered" in out for run in plan)
 
 
+# The run tracker (P3.8, D2).
+
+
+def expected_run(run_id: str, expected: tuple[int, ...]) -> TraceRun:
+    """A run of len(expected) calls, call n with x-expected-steps expected[n - 1]."""
+    calls = [
+        TraceCall(
+            step=step,
+            expected_steps=steps,
+            gap_before_ms=0 if step == 1 else 700,
+            prompt_tokens=60,
+            completion_tokens=5,
+        )
+        for step, steps in enumerate(expected, start=1)
+    ]
+    return TraceRun(run_id=run_id, task_type="csv", calls=calls)
+
+
+@dataclass
+class TrackedGateway:
+    """FakeGateway that notes, as each call arrives, its run and x-step with what the tracker
+    reads then: (run, step, remaining work, active runs)."""
+
+    tracker: RunTracker
+    gateway: FakeGateway = field(default_factory=FakeGateway)
+    tracked: list[tuple[str, int, int, int]] = field(default_factory=list)
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.tracked.append(
+            (
+                request.headers["x-run-id"],
+                int(request.headers["x-step"]),
+                self.tracker.remaining_work(),
+                self.tracker.active_runs(),
+            )
+        )
+        return await self.gateway(request)
+
+
+def replay_tracked(plan: list[PlannedRun], gateway: TrackedGateway) -> list[dict[str, Any]]:
+    async def go() -> list[dict[str, Any]]:
+        async with client_of(gateway) as client:
+            return await replay_runs(
+                client, MODEL, plan, DEADLINE_SECONDS, ignore_run, tracker=gateway.tracker
+            )
+
+    return run_virtual(go())
+
+
+def test_the_tracker_counts_each_run_by_the_x_step_it_sends() -> None:
+    plan = plan_of(runs=[expected_run("run-a", (4, 4, 4))])
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    run_id = plan[0].run_id
+    assert gateway.tracked == [(run_id, 1, 3, 1), (run_id, 2, 2, 1), (run_id, 3, 1, 1)]
+    assert (gateway.tracker.remaining_work(), gateway.tracker.active_runs()) == (0, 0)
+
+
+def test_a_run_past_its_expected_steps_still_counts_one() -> None:
+    plan = plan_of(runs=[expected_run("run-a", (2, 2, 2))])
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    assert [work for _, _, work, _ in gateway.tracked] == [1, 1, 1]
+
+
+def test_a_step_with_other_expected_steps_changes_the_runs_work() -> None:
+    """D13: the trace's later steps may carry the expected steps the scenario gave."""
+    plan = plan_of(runs=[expected_run("run-a", (2, 5, 5))])
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    assert [work for _, _, work, _ in gateway.tracked] == [1, 3, 2]
+
+
+def test_a_run_is_counted_from_its_start_time_to_its_end() -> None:
+    """Far apart, so the first run has ended before the second starts."""
+    runs = [expected_run("run-a", (3, 3)), expected_run("run-b", (3, 3))]
+    plan = plan_of(runs=runs, count=2, rate=0.0001)
+    assert plan[1].start_seconds > 100
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    assert [active for _, _, _, active in gateway.tracked] == [1, 1, 1, 1]
+    assert gateway.tracker.active_runs() == 0
+
+
+def test_runs_that_overlap_are_summed() -> None:
+    """Both start within a second and the first call takes 50 s, so the second call to arrive is
+    the other run's first, with both runs at step 1."""
+    runs = [expected_run("run-a", (3, 3)), expected_run("run-b", (5, 5))]
+    plan = plan_of(runs=runs, count=2, rate=1000.0)
+    gateway = TrackedGateway(RunTracker())
+    gateway.gateway.ttft = 50.0
+    replay_tracked(plan, gateway)
+    first, second = gateway.tracked[:2]
+    assert (first[1], first[3]) == (1, 1)
+    assert first[0] != second[0]
+    assert second[1:] == (1, (3 - 1) + (5 - 1), 2)
+
+
+def test_a_fanned_out_step_is_one_step() -> None:
+    plan = plan_of(runs=[expected_run("run-a", (4, 4))], fan_out=FanOut(share=1.0, k=2))
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    assert [(step, work) for _, step, work, _ in gateway.tracked] == [(1, 3), (2, 2), (2, 2)]
+
+
+def test_a_run_that_stopped_on_a_failed_call_leaves_the_tracker() -> None:
+    plan = plan_of(runs=[expected_run("run-a", (3, 3))])
+    gateway = TrackedGateway(RunTracker(), FakeGateway(fail=lambda seen: httpx.Response(500)))
+    lines = replay_tracked(plan, gateway)
+    assert failed_calls(lines) == 1
+    assert [(step, work, active) for _, step, work, active in gateway.tracked] == [(1, 2, 1)]
+    assert gateway.tracker.active_runs() == 0
+
+
+def get(port: int, path: str) -> tuple[int, str, str]:
+    """(status, content type, body) of a GET to this machine."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+            return response.status, response.headers["Content-Type"], response.read().decode()
+    except urllib.error.HTTPError as error:
+        return error.code, error.headers["Content-Type"], ""
+
+
+def test_serve_metrics_serves_the_trackers_text_until_the_block_ends() -> None:
+    tracker = RunTracker()
+    with serve_metrics(tracker, 0) as port:
+        tracker.started("run-a", 4)
+        assert get(port, "/metrics") == (200, METRICS_CONTENT_TYPE, tracker.exposition())
+        tracker.ended("run-a")
+        status, _, body = get(port, "/metrics")
+        assert (status, body) == (200, tracker.exposition())
+        assert "thesis_remaining_work 0\n" in body
+        assert get(port, "/other")[0] == 404
+    with pytest.raises(urllib.error.URLError):
+        get(port, "/metrics")
+
+
+def test_serve_metrics_on_a_port_in_use_fails_at_once() -> None:
+    with socket.socket() as taken:
+        taken.bind(("", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        with pytest.raises(OSError), serve_metrics(RunTracker(), port):
+            pass
+
+
 # The token check.
 
 
@@ -935,6 +1087,14 @@ def trace_file(tmp_path: Path) -> Path:
 
 # The arguments of each client main opens on the gateway.
 gateway_clients: list[dict[str, Any]] = []
+# The tracker and port of each serve_metrics main opens; fake_cluster's stand-in binds no port.
+metrics_served: list[tuple[RunTracker, int]] = []
+
+
+@contextlib.contextmanager
+def serve_nothing(tracker: RunTracker, port: int) -> Iterator[int]:
+    metrics_served.append((tracker, port))
+    yield port
 
 
 def fake_cluster(
@@ -952,6 +1112,7 @@ def fake_cluster(
     go to gateway_clients."""
     asked: list[str] = []
     gateway_clients.clear()
+    metrics_served.clear()
 
     def kubectl(*args: str) -> str:
         asked.append(" ".join(args))
@@ -975,6 +1136,7 @@ def fake_cluster(
         )
 
     monkeypatch.setattr("load_generator.replay.kubectl", kubectl)
+    monkeypatch.setattr("load_generator.replay.serve_metrics", serve_nothing)
     monkeypatch.setattr(httpx, "AsyncClient", client)
     monkeypatch.setattr(asyncio, "run", run_virtual)
     monkeypatch.setattr("sys.argv", ["replay", str(trace), "steady", "--out", str(out)])
@@ -1127,6 +1289,7 @@ def test_main_refuses_a_partial_file_left_by_a_replay_that_stopped(
 # A profile of its own, so that a test sees which of the profile's values main used.
 TINY_SEED = 5
 TINY_DEADLINE = 7.0
+TINY_TRACKER_PORT = 9999
 
 
 def use_tiny_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path) -> Path:
@@ -1141,6 +1304,7 @@ def use_tiny_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path)
             "shared_prefix_tokens": {"all_types": 8, "by_type": {"csv": 20}},
             # Far apart, so that the first run has ended when the second starts.
             "patterns": {"only-here": {"runs": 2, "rate_per_second": 0.0001}},
+            "tracker_port": TINY_TRACKER_PORT,
         },
     }
     (tmp_path / "config" / "tiny.yaml").write_text(yaml.safe_dump(profile))
@@ -1161,6 +1325,48 @@ def tiny_plan(trace: Path, seed: int) -> list[PlannedRun]:
         seed,
         TEMPLATE_TOKENS,
     )
+
+
+def test_main_serves_the_tracker_the_runs_feed_on_the_profiles_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "out.jsonl"
+    seen_work: list[int] = []
+    gateway = FakeGateway()
+
+    async def tracked(request: httpx.Request) -> httpx.Response:
+        ((tracker, _),) = metrics_served
+        seen_work.append(tracker.remaining_work())
+        return await gateway(request)
+
+    fake_cluster(monkeypatch, out, tracked, trace_file(tmp_path))
+    use_tiny_profile(monkeypatch, tmp_path, out)
+    main()
+    ((tracker, port),) = metrics_served
+    assert port == TINY_TRACKER_PORT
+    # trace_file's runs: two calls, expected steps 2, one run at a time.
+    assert seen_work == [1, 1, 1, 1]
+    assert tracker.active_runs() == 0
+
+
+def test_main_stops_before_any_call_when_it_cannot_serve_metrics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "out.jsonl"
+    gateway = FakeGateway()
+    fake_cluster(monkeypatch, out, gateway, trace_file(tmp_path))
+    use_tiny_profile(monkeypatch, tmp_path, out)
+
+    @contextlib.contextmanager
+    def port_in_use(tracker: RunTracker, port: int) -> Iterator[int]:
+        raise OSError(98, "Address already in use")
+        yield port
+
+    monkeypatch.setattr("load_generator.replay.serve_metrics", port_in_use)
+    with pytest.raises(OSError, match="in use"):
+        main()
+    assert gateway.seen == []
+    assert not out.exists()
 
 
 def test_main_uses_the_named_profiles_pattern_seed_and_served_model(

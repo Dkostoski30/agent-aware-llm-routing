@@ -44,6 +44,9 @@ if systemctl is-active --quiet k3s; then
   uninstall_release agentgateway agentgateway-system
   uninstall_release agentgateway-crds agentgateway-system
   uninstall_release vllm default
+  # The replayer's metrics target (infra/deploy-replayer-metrics.sh, P3.8), while the ServiceMonitor kind still exists.
+  kubectl delete -f "$REPO_ROOT/infra/manifests/replayer-metrics.yaml" --ignore-not-found --wait \
+    --timeout "$UNINSTALL_TIMEOUT"
   uninstall_release monitoring monitoring
   uninstall_release nvidia-device-plugin nvidia-device-plugin
   kubectl delete namespace agentgateway-system monitoring nvidia-device-plugin --ignore-not-found --wait \

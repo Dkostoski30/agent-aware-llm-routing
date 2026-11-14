@@ -89,6 +89,10 @@ replay:
   # are 1-21 ms with a median of 2 ms (P2.2b). A first guess with room: P2.3's replays stayed within 24 ms
   # (experiments/log.md).
   gap_tolerance_ms: 50
+  # Where the replayer serves the run tracker's /metrics on the node while a replay runs (D2, P3.8); Prometheus scrapes it
+  # through infra/manifests/replayer-metrics.yaml. Any port free on the node: k3s listens on 6443-6444, 10010 and
+  # 10248-10259, vLLM's Docker container on 8000 (make up stops it).
+  tracker_port: 9400
   # How many tokens two runs have in common at the start of a prompt.
   shared_prefix_tokens:
     # Any two runs: none, although inside vLLM real runs of different types share their system prompt (192-256 tokens,

@@ -13,6 +13,26 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-14 · P3.8 · green (the run tracker's sum reads in Prometheus from the replayer and the agent)
+Command: `make test`, `make lint` · `make down`, `make up PROFILE=sim`, `make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=steady-long PROFILE=sim OUT=experiments/results/replays/p3-8-tracker-steady-long-2.jsonl`, with a loop in a second terminal sending `sum(thesis_remaining_work)` to Prometheus's `/api/v1/query` every 15 s, from before make up ended until after the replay ended · `make down`, `make up`, the same query with `thesis_active_runs{pod=~"agent-.*"}`. Times local (UTC+1)
+Result:
+- `make test`: 1754 Python tests passed, Go ok; `make lint` passes.
+- **Sim, run 2** (2026-11-14; 20 runs, 81 calls, 0 failed; first call 10:38:16, last call ended 11:01:03):
+  | when | reading |
+  |---|---|
+  | 10:36:19-10:38:08, make up still running, no replayer | `[]` (no series) |
+  | 10:38:24-11:00:54, the replay | 0 between runs, 1-9 while runs were active |
+  | 11:01:10-11:03:16, after the replay | `[]` (no series) |
+  The readings while runs were active rose and fell with them; the highest was 9, at 10:54:54.
+- **Real, agent:** `thesis_active_runs{pod=~"agent-.*"}` returned one sample, 0, from `agent-775cf4bffc-bfpwh`, job `default/agent`. So Prometheus scrapes the agent through its PodMonitor.
+- **Mutation check** (Claude, before the run, one change at a time, then `make test`): 19 of 20 mutants caught. The survivor drops `server_close()` from `serve_metrics`: the port-in-use test still passes, because CPython closes the server socket once the server object is freed when the block ends. The explicit close stays, so the socket's closing does not depend on garbage collection.
+Notes:
+- **Run 1 did not check "after"** (2026-11-14 01:43:59-02:06:19, `p3-8-tracker-steady-long.jsonl`, also 81 calls, 0 failed): all three queries ran during the replay, at about 5, 109 and 190 s, and read 0, 6 and 0. The user chose to run sim again with the loop left running, and run 2 is the result above.
+- **0 mid-replay is a gap between runs, not idle time before them.** steady-long on sim has short runs with gaps between them. During the replay Claude first read the early 0s as the replayer counting prompt tokens before any run started. The file shows otherwise: the first run (`hotpotqa-13-1`, 1 call) ended at 10:38:17, and the next began at 10:39:11.
+- **Discovery, decided with the user 2026-11-13:** the replayer runs on the node, so Prometheus reaches it through a Service with no selector, a v1 Endpoints object naming the node's InternalIP (`infra/deploy-replayer-metrics.sh` writes it on every make up), and a ServiceMonitor labelled `release: monitoring`. A hand-written EndpointSlice, as the card first said, is never seen: this Prometheus discovers targets with role `endpoints`. kubectl warns that v1 Endpoints is deprecated; k3s v1.36 still serves it.
+- `sum()` drops every label, so the result shows `"metric":{}`; `sum by (job)` shows which source a value came from. Between replays the replayer's target is down and its series go stale, which is why the result is `[]` and not 0.
+- What it does not show: the sum over both sources at once with real agent runs. Here the agent read 0 with no run active, and the replayer ran alone on sim. P3.9b's ScaledObject reads the same sum.
+
 ### 2026-11-13 · P3.7b · red (neither first-call rule made runs faster in both orders); closed with the findings stated
 Command: the spike (P3.7's second-session files, a script outside the repo, numbers below) · sim: `make up PROFILE=sim`, `bash infra/set-routing.sh sim <rules>`, `make replay ... PATTERN=burst-fan-out PROFILE=sim SEED=6` for least_work_first and for least_context_first · real: `make experiment NAME=routing-faster`, `routing-faster-reversed`, `routing-context`, `routing-context-reversed` (the last three through the overnight script `p3-7b-overnight.txt`, outside the repo; its output in `experiments/results/p3-7b-*.log`) · `make experiment-compare CSVS="<both csv>" STALL_SECONDS=5` per rule · `make test`, `make lint` (green before every real run)
 Result:

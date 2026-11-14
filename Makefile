@@ -191,12 +191,14 @@ ui:
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 # PROFILE=sim deploys simulated pods and no model; it has no agent either, since nothing there can answer a tool call,
 # so make smoke is not expected to pass on it (P2.7), and no app backend, which only serves the agent's clients
-# (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use.
+# (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use. Every profile gets the replayer's metrics
+# target, since every profile replays (P3.8).
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
 	bash infra/picker-image.sh
 	bash infra/install-monitoring.sh $(or $(PROFILE),real)
+	bash infra/deploy-replayer-metrics.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" = sim ]; then \
 		$(MAKE) sim-deploy; \
 	else \
@@ -271,14 +273,16 @@ record:
 # values the profiles must hold, and a test fails until they do.
 convert:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make convert EXPERIMENT=experiments/convert-apb.yaml"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.convert $(EXPERIMENT)
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.convert $(EXPERIMENT)
 
 # A trace's LLM calls straight to the gateway, one trace.v1 line per call in experiments/results/replays/, with the
 # runs arriving by a pattern in config/$(PROFILE).yaml, replay.patterns (P2.3). Needs make up with that profile. An
 # existing output is refused; OUT= names another file. SEED= overrides replay.seed. Exits 1 if a call got no full reply.
+# While it runs, the run tracker's /metrics listens on replay.tracker_port (P3.8). PYTHONPATH: replay.py imports the
+# tracker from agent/, so every target that imports replay.py (convert, experiment, pod-removed, calibrate) has it too.
 replay:
 	@if [ -z "$(TRACE)" ] || [ -z "$(PATTERN)" ]; then echo "usage: make replay TRACE=<trace.jsonl> PATTERN=<name> [PROFILE=real] [SEED=n] [OUT=file]"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
 		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED)) $(if $(OUT),--out $(OUT))
 
 # Two replays of one trace: each the pattern's plan at its seed, the same call sequence, tokens as in the trace, every gap
@@ -293,7 +297,7 @@ replay-compare:
 # from sleeping, and the laptop idle: use during a variant shows in its speed. An earlier result of the same file is refused. The default picker is put back when it ends, or it says it could not.
 experiment:
 	@if [ -z "$(NAME)" ]; then echo "usage: make experiment NAME=baseline"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/$(NAME).yaml
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.experiment experiments/$(NAME).yaml
 
 # An experiment's graph again, from its CSV alone: no cluster, no replay file (P2.5).
 experiment-graph:
@@ -311,11 +315,11 @@ experiment-compare:
 # file's profile; it turns the file's rules on for the replay and puts the profile's back after.
 pod-removed:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make pod-removed EXPERIMENT=experiments/pod-removed.yaml"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.pod_removed $(EXPERIMENT)
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.pod_removed $(EXPERIMENT)
 
 # Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
 # Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys
 # real again. About 9-10 h, so it refuses to start unless Windows is on Performance with AC sleep and hibernate off. A
 # rerun skips finished files and redoes the others from their start.
 calibrate:
-	PYTHONPATH=loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml
+	PYTHONPATH=agent:loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml

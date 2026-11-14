@@ -67,3 +67,20 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+# Prometheus scrapes the agent runtime's run tracker (P3.8, D2) from GET /metrics on the container's port. Every
+# PodMonitor in the cluster is selected (infra/helm/monitoring-values.yaml); the interval is Prometheus's global one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: agent
+  namespace: default
+  labels:
+    app.kubernetes.io/name: agent
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics

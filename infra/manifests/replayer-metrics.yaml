@@ -1,0 +1,53 @@
+# The replayer's run tracker (P3.8, D2). make replay, make experiment and make pod-removed run on the node, outside the
+# cluster, and serve /metrics on replay.tracker_port while a replay runs. Prometheus reaches it through a Service with no
+# selector, an Endpoints object naming the node's InternalIP, and a ServiceMonitor. infra/deploy-replayer-metrics.sh
+# writes the IP and the port before it applies this file, since a WSL restart changes the IP; the placeholders below
+# are never applied as they are. Between replays nothing listens: the target is down and has no thesis_ series.
+apiVersion: v1
+kind: Service
+metadata:
+  name: replayer-metrics
+  namespace: default
+  labels:
+    app.kubernetes.io/name: replayer-metrics
+spec:
+  # No selector, so Kubernetes keeps no endpoints of its own for it: the Endpoints below name the node.
+  ports:
+    - name: metrics
+      port: 0
+---
+# v1 Endpoints, not an EndpointSlice: this Prometheus discovers ServiceMonitor targets through Endpoints objects
+# (kube-prometheus-stack 92.3.0's default role), and Kubernetes does not copy a hand-written EndpointSlice into one.
+# kubectl apply warns that v1 Endpoints is deprecated; k3s v1.36 still serves it (decided 2026-11-13, P3.8).
+apiVersion: v1
+kind: Endpoints
+metadata:
+  # The Service's name: that is what ties the two together.
+  name: replayer-metrics
+  namespace: default
+  labels:
+    app.kubernetes.io/name: replayer-metrics
+subsets:
+  - addresses:
+      - ip: set-by-deploy-replayer-metrics
+    ports:
+      - name: metrics
+        port: 0
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: replayer-metrics
+  namespace: default
+  labels:
+    # This Prometheus picks up only ServiceMonitors with its release's label (the chart's serviceMonitorSelector), so
+    # infra/helm/monitoring-values.yaml stays as it is.
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: replayer-metrics
+  # The interval is Prometheus's global one, from config/.
+  endpoints:
+    - port: metrics
+      path: /metrics
