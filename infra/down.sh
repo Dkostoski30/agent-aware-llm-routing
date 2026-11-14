@@ -4,7 +4,8 @@
 # is ~9 GB; pulling or importing it again is slow and crashed k3s once, P0.7), the HF model cache and the app's claim
 # app-data with its users and chats (P2.10b). make up installs every release again from the scripts. The Gateway API
 # and GAIE CRDs, applied with kubectl, stay; make up applies them again unchanged. agentgateway's CRDs are templates of
-# the agentgateway-crds release, so they go with it.
+# the agentgateway-crds release, so they go with it; KEDA's CRDs are templates of the keda release, so they go with it
+# too, and any ScaledObject with them (P3.9a).
 # Idempotent: with k3s already stopped only the stop step runs, and it finds nothing to stop.
 set -euo pipefail
 
@@ -47,9 +48,10 @@ if systemctl is-active --quiet k3s; then
   # The replayer's metrics target (infra/deploy-replayer-metrics.sh, P3.8), while the ServiceMonitor kind still exists.
   kubectl delete -f "$REPO_ROOT/infra/manifests/replayer-metrics.yaml" --ignore-not-found --wait \
     --timeout "$UNINSTALL_TIMEOUT"
+  uninstall_release keda keda
   uninstall_release monitoring monitoring
   uninstall_release nvidia-device-plugin nvidia-device-plugin
-  kubectl delete namespace agentgateway-system monitoring nvidia-device-plugin --ignore-not-found --wait \
+  kubectl delete namespace agentgateway-system keda monitoring nvidia-device-plugin --ignore-not-found --wait \
     --timeout "$NAMESPACE_DELETE_TIMEOUT"
 else
   echo "down: k3s is not running, no releases to uninstall"

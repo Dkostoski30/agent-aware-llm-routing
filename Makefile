@@ -192,12 +192,14 @@ ui:
 # PROFILE=sim deploys simulated pods and no model; it has no agent either, since nothing there can answer a tool call,
 # so make smoke is not expected to pass on it (P2.7), and no app backend, which only serves the agent's clients
 # (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use. Every profile gets the replayer's metrics
-# target, since every profile replays (P3.8).
+# target, since every profile replays (P3.8). KEDA too, before any pod starts, so its memory is in the baseline
+# before vLLM loads (P3.9a).
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
 	bash infra/picker-image.sh
 	bash infra/install-monitoring.sh $(or $(PROFILE),real)
+	bash infra/install-keda.sh
 	bash infra/deploy-replayer-metrics.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" = sim ]; then \
 		$(MAKE) sim-deploy; \

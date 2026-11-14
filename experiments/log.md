@@ -13,6 +13,20 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-14 · P3.9a · green (KEDA installed by make up; the operator restarted 3 times while vLLM loaded, then stayed up)
+Command: `make lint` · `make down`, `make up` (profile real) · `kubectl get pods -n keda` · `kubectl get apiservice v1beta1.external.metrics.k8s.io` · `kubectl top pods -n keda` · the pods' `imageID`s · `make smoke`. Then Claude, read only: the operator's `--previous` logs, `kubectl describe`, the restarts across the cluster, `journalctl -u k3s` from 11:13 to 11:19. Times local (UTC+1)
+Result:
+- `make lint` passes. `install-keda.sh` installed chart 2.21.0 at 11:12:18, before the vLLM pods. `--wait` passed, and the operator's first pull took 28 s (99 MB).
+- After `make up`: the metrics server was 1/1 Running with no restarts, and `v1beta1.external.metrics.k8s.io` showed `AVAILABLE True`. The operator was in `CrashLoopBackOff`, 2 restarts at that moment and 3 in all. It has run with no restarts since 11:18:47 (still true at 11:25:52).
+- `kubectl top`: operator 32Mi and 3m CPU, metrics server 72Mi then 84Mi and 3-5m CPU. Digests are in `versions.md`.
+- `make smoke`: every line `ok` (pods, agent, gateway, picker, redis, prometheus).
+Notes:
+- **Why the operator crashed: the host, not KEDA.** Its previous log ends with `Failed to renew lease ... context deadline exceeded`, then `leader election lost`, exit 1. A liveness probe also timed out (`/healthz`). This happened while both vLLM pods were loading the model (11:13:43-11:17). In the same minutes, k3s logged 40 `Slow SQL` and `took too long` lines; one was the INSERT of KEDA's own lease `keda/operator.keda.sh`. agentgateway's controller restarted at the same second as the operator's last crash, 11:18:20. This is the same starvation of k3s's SQLite datastore as P0.7, here from the model load.
+- **For P4.5 (real 1↔2):** a scale-up starts a model load on the second pod. That load can starve the API server and knock the operator over while it is scaling, so a scale-up or scale-down may come late. The operator recovers by itself, and its restarts are a number to record in P4.5. P3.9b runs on sim, where no model loads.
+- KEDA's CRDs are templates of the release (`crds.install`, no `helm.sh/resource-policy: keep`), so `make down` removes them with it, along with any ScaledObject.
+- Choices: the images come from the chart's tag, like the monitoring stack (the user, 2026-11-14). Claude set `image.pullPolicy: IfNotPresent`, since the chart's default `Always` pulls from ghcr.io on every pod start. The metrics server's memory request went from 64Mi to 96Mi after the measurement (the user's choice; requests are bookkeeping here, since no other pod requests memory).
+- The chart registers only `v1beta1.external.metrics.k8s.io`. k3s's own metrics-server keeps `v1beta1.metrics.k8s.io`, which `kubectl top` needs.
+
 ### 2026-11-14 · P3.8 · green (the run tracker's sum reads in Prometheus from the replayer and the agent)
 Command: `make test`, `make lint` · `make down`, `make up PROFILE=sim`, `make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=steady-long PROFILE=sim OUT=experiments/results/replays/p3-8-tracker-steady-long-2.jsonl`, with a loop in a second terminal sending `sum(thesis_remaining_work)` to Prometheus's `/api/v1/query` every 15 s, from before make up ended until after the replay ended · `make down`, `make up`, the same query with `thesis_active_runs{pod=~"agent-.*"}`. Times local (UTC+1)
 Result:
