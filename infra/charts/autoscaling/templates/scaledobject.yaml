@@ -1,0 +1,26 @@
+# KEDA scales the vLLM Deployment on one Prometheus number for the whole pool, divided by the threshold (AverageValue):
+# the HPA it makes wants ceil(value / threshold) pods, between the bounds (P3.9b). No pollingInterval and no
+# cooldownPeriod: with a floor of 1 pod both act only on scaling to and from 0 (KEDA 2.21's ScaledObject reference).
+# Scaling down is the HPA's, after the stabilization window; scaling up keeps the HPA's default behaviour.
+{{- $required := "make experiment hands this from config/<profile>.yaml's autoscaling section" }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm
+spec:
+  scaleTargetRef:
+    name: vllm
+  minReplicaCount: {{ required $required .Values.minReplicas }}
+  maxReplicaCount: {{ required $required .Values.maxReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ required $required .Values.scaleDownStabilizationSeconds }}
+  triggers:
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.prometheusAddress | quote }}
+        query: {{ required $required .Values.query | quote }}
+        threshold: {{ required $required .Values.threshold | quote }}

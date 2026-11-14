@@ -1,0 +1,7 @@
+# Local chart for the KEDA ScaledObject an experiment variant scales the vLLM Deployment by (P3.9b). Not published;
+# versioned with the repo.
+apiVersion: v2
+name: autoscaling
+description: A KEDA ScaledObject on the vLLM Deployment, from a profile's autoscaling section
+type: application
+version: 0.1.0

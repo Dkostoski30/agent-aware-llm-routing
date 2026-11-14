@@ -23,6 +23,14 @@ asked whether a pod made no tokens for that long while it had calls, and such a 
 run (P3.7, experiments/log.md). After each replay on real pods, both vLLM pods' logs are kept beside
 the results before that check, so a stall comes with the engine's own numbers (P3.7c).
 
+A variant may carry an autoscaler (P3.9b): the pods are scaled to the profile's
+autoscaling.min_replicas and KEDA's ScaledObject (infra/charts/autoscaling) is installed before the
+restart, so the floor's pods are the ones warmed. After the replay, Prometheus gives the spec and
+Ready replicas and both triggers over it into <stem>-<variant>-autoscale.csv, and the report says
+when remaining work passed its target, when the scale-up began and when the queue passed its own.
+The object is removed and the profile's count restored right after, and in the same finally as
+the routing.
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -42,6 +50,21 @@ from typing import Any, Protocol
 import httpx
 import yaml
 
+from load_generator.autoscale import (
+    CHART,
+    SERIES_QUERIES,
+    TRIGGER_QUERIES,
+    AutoscaleError,
+    AutoscaleRow,
+    Crossings,
+    check_section,
+    crossing_text,
+    first_crossings,
+    helm_values,
+    rows_from,
+    scale_up_before_queue,
+    write_autoscale_csv,
+)
 from load_generator.compare import max_gap_deviation
 from load_generator.graph import render
 from load_generator.plan import (
@@ -86,6 +109,14 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
+# The Helm release of infra/charts/autoscaling, and the ScaledObject it holds (P3.9b).
+AUTOSCALING_RELEASE = "autoscaling"
+SCALED_OBJECT = "scaledobject/vllm"
+# KEDA names the HPA it makes keda-hpa-<ScaledObject's name>.
+KEDA_HPA = "hpa/keda-hpa-vllm"
+# KEDA's operator builds the scaler and the HPA within seconds when idle. A wide margin: in P3.9a
+# it lost its leader lease three times while vLLM pods loaded, and each time waited to win it back.
+AUTOSCALER_TIMEOUT = "120s"
 # The picker's file when a variant runs the plugin (infra/routing-values.sh), whose log has a line
 # per call with the rule that picked it (P3.5, P3.6).
 PLUGIN_CONFIG = "thesis-plugins.yaml"
@@ -169,6 +200,9 @@ class Variant:
     replicas: int | None
     # Rules laid over the profile's routing section; None is the profile's own. Never with values.
     routing: Mapping[str, bool] | None
+    # A key of autoscale.TRIGGER_QUERIES: KEDA scales the pods from the profile's min_replicas
+    # (P3.9b). None is a fixed count. Never with replicas.
+    autoscaler: str | None
 
     @property
     def default(self) -> bool:
@@ -233,6 +267,9 @@ class Outputs:
     def vllm(self, variant: str, pod: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}-vllm-{pod}.log")
 
+    def autoscale(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-autoscale.csv")
+
 
 class Cluster(Protocol):
     """What an experiment asks of the cluster; LiveCluster is the real one."""
@@ -275,6 +312,16 @@ class Cluster(Protocol):
     # Each stretch from since to until in which a pod had calls and made no tokens for seconds.
     def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]: ...
 
+    # Scales the pods to the profile's min_replicas and has KEDA scale them from there; returns
+    # the profile's autoscaling section it applied.
+    def start_autoscaler(self, kind: str) -> Mapping[str, Any]: ...
+
+    # Removes the autoscaler and the HPA it made; nothing to remove is no error.
+    def stop_autoscaler(self) -> None: ...
+
+    # The replicas and both triggers from since to until, at the scrape step.
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]: ...
+
 
 def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
     profile: str | None = section.get("profile", spec.get("profile"))
@@ -306,6 +353,18 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
             raise ExperimentError(
                 f"variant {section['name']}: routing must map rules to true or false, got {routing}"
             )
+    autoscaler = section.get("autoscaler")
+    if autoscaler is not None:
+        if autoscaler not in TRIGGER_QUERIES:
+            raise ExperimentError(
+                f"variant {section['name']}: no autoscaler {autoscaler}, there are "
+                f"{', '.join(TRIGGER_QUERIES)}"
+            )
+        if replicas is not None:
+            raise ExperimentError(
+                f"variant {section['name']}: an autoscaler starts at the profile's min_replicas, "
+                f"so not replicas {replicas} too"
+            )
     return Variant(
         section["name"],
         values,
@@ -313,6 +372,7 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
         variant_profile(spec, section),
         replicas,
         routing,
+        autoscaler,
     )
 
 
@@ -367,6 +427,23 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
                 f"variant {variant.name}: least_work_first and least_context_first both on: each "
                 "places a run's first call"
             )
+
+
+def check_autoscaling(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Every variant with an autoscaler is on a profile whose autoscaling section KEDA can scale
+    by. Before the run: the variant's start may be hours into it."""
+    for variant in experiment.variants:
+        if variant.autoscaler is None:
+            continue
+        profile = profiles[variant.profile]
+        if "autoscaling" not in profile:
+            raise ExperimentError(
+                f"variant {variant.name}: profile {variant.profile} has no autoscaling section"
+            )
+        try:
+            check_section(profile["autoscaling"])
+        except AutoscaleError as error:
+            raise ExperimentError(f"variant {variant.name}: {error}") from error
 
 
 def plugin_on(
@@ -545,6 +622,7 @@ def _variant_meta(
     clock_jumps: int,
     picker_log: str | None,
     vllm_logs: list[str] | None,
+    autoscale: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
@@ -567,6 +645,23 @@ def _variant_meta(
         "picker_log": picker_log,
         # Each vLLM pod's log beside the results, None on simulated pods.
         "vllm_logs": vllm_logs,
+        # What KEDA scaled by and the moments the report reads; None at a fixed count.
+        "autoscale": autoscale,
+    }
+
+
+def _autoscale_meta(
+    variant: Variant, section: Mapping[str, Any], rows: Sequence[AutoscaleRow], out: Outputs
+) -> dict[str, Any]:
+    """The series beside the results, and when each crossing came (P3.9b)."""
+    write_autoscale_csv(out.autoscale(variant.name), rows)
+    crossings = first_crossings(rows, section)
+    return {
+        "autoscaler": variant.autoscaler,
+        "section": dict(section),
+        "csv": out.autoscale(variant.name).name,
+        "crossings": crossings.as_meta(),
+        "scale_up_before_queue": scale_up_before_queue(crossings),
     }
 
 
@@ -590,7 +685,9 @@ def _run_variant(
     cluster: Cluster,
     clock: Callable[[], float],
     profile_sha256: str,
+    autoscaling: Mapping[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """autoscaling is the section the variant's autoscaler applied, None at a fixed count."""
     running = cluster.epp_config_file()
     if running != variant.epp_config:
         raise ExperimentError(
@@ -601,6 +698,12 @@ def _run_variant(
     lines = cluster.replay(out.replay(variant.name), variant.routing)
     ended = clock()
     jumps = cluster.clock_jumps(started, ended)
+    # From the replay's start, so the warm-up's calls, which go straight to the pods, are left out.
+    # Before the stall check, so a stalled replay keeps its series too.
+    autoscale = None
+    if autoscaling is not None:
+        rows = cluster.autoscale_series(started, ended)
+        autoscale = _autoscale_meta(variant, autoscaling, rows, out)
     picker_log = None
     if variant.epp_config == PLUGIN_CONFIG:
         out.picker(variant.name).write_text(cluster.picker_log())
@@ -629,6 +732,7 @@ def _run_variant(
         jumps,
         picker_log,
         vllm_logs,
+        autoscale,
     )
     return lines, meta
 
@@ -663,6 +767,9 @@ def run_experiment(
     scaled = False
     # True from the GPU log's start until it is stopped.
     gpu_logging = False
+    # True from an autoscaler's start until it is stopped: a start that fails halfway may have
+    # installed it.
+    autoscaled = False
     try:
         if experiment.gpu_logged:
             cluster.start_gpu_log(out.gpu)
@@ -676,13 +783,32 @@ def run_experiment(
             if variant.replicas is not None:
                 cluster.scale(variant.replicas)
                 scaled = True
+            autoscaling = None
+            if variant.autoscaler is not None:
+                # Before the restart, so only the floor's pods restart and are warmed (P3.9b).
+                scaled = autoscaled = True
+                autoscaling = cluster.start_autoscaler(variant.autoscaler)
             cluster.restart_pods()
             off_default = off_default or not variant.default
             cluster.set_routing(variant.values, variant.routing)
             off_default = not variant.default
             lines, variant_meta = _run_variant(
-                experiment, variant, out, cluster, clock, profile_sha256[variant.profile]
+                experiment,
+                variant,
+                out,
+                cluster,
+                clock,
+                profile_sha256[variant.profile],
+                autoscaling,
             )
+            if autoscaled:
+                # Gone before the count is restored, or its HPA would set the count back; restored
+                # now, or the next variant would start from wherever KEDA left the pods.
+                # Each flag clears once its step is done, so one that fails is tried again below.
+                cluster.stop_autoscaler()
+                autoscaled = False
+                cluster.scale(None)
+                scaled = False
             rows += call_rows(
                 variant.name,
                 lines,
@@ -726,6 +852,9 @@ def run_experiment(
             cluster.stop_gpu_log()
         if off_default:
             cluster.set_routing(None, None)
+        # Before the count is restored, which its HPA would otherwise undo.
+        if autoscaled:
+            cluster.stop_autoscaler()
         if scaled:
             cluster.scale(None)
     return rows, meta
@@ -1049,6 +1178,50 @@ class LiveCluster:
         tokens = self._prometheus(TOKENS_QUERY.format(window=seconds), since, until, step)
         return pod_stalls_from(busy, tokens, seconds, step)
 
+    def start_autoscaler(self, kind: str) -> Mapping[str, Any]:
+        """The floor's pods first, so KEDA's HPA starts from them, then the object. Ready is KEDA's
+        condition that it built the scaler and made the HPA."""
+        section: Mapping[str, Any] = self.profile["autoscaling"]
+        self.scale(section["min_replicas"])
+        subprocess.run(
+            ["helm", "upgrade", "--install", AUTOSCALING_RELEASE, str(CHART), "--values", "-"],
+            input=yaml.safe_dump(helm_values(section, kind)),
+            text=True,
+            check=True,
+        )
+        kubectl("wait", SCALED_OBJECT, "--for=condition=Ready", f"--timeout={AUTOSCALER_TIMEOUT}")
+        return section
+
+    def stop_autoscaler(self) -> None:
+        """KEDA's finalizer deletes the HPA with the object; both are waited for, as helm 4's
+        uninstall --wait once returned before a deletion had finished (deploy above)."""
+        subprocess.run(
+            [
+                "helm",
+                "uninstall",
+                AUTOSCALING_RELEASE,
+                "--ignore-not-found",
+                "--wait",
+                "--timeout",
+                UNINSTALL_TIMEOUT,
+            ],
+            check=True,
+        )
+        timeout = f"--timeout={UNINSTALL_TIMEOUT}"
+        kubectl("wait", SCALED_OBJECT, "--for=delete", timeout)
+        kubectl("wait", KEDA_HPA, "--for=delete", timeout)
+
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
+        """At the profile's scrape interval, so each sample is a reading. Rounded as _prometheus
+        sends them, so the first sample is not taken for one before the replay."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        start, end = round(since, 3), round(until, 3)
+        answers = {
+            name: self._prometheus(query, start, end, step)
+            for name, query in SERIES_QUERIES.items()
+        }
+        return rows_from(answers, start, end)
+
 
 def _seconds_text(milliseconds: int | None) -> str:
     return "-" if milliseconds is None else f"{milliseconds / 1000:.2f} s"
@@ -1126,6 +1299,15 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
                     f"  {limit} the KV limit, {label}: {stats.calls} calls, TTFT p50 "
                     f"{_seconds_text(stats.p50_ms)}, p95 {_seconds_text(stats.p95_ms)}"
                 )
+        autoscale = extra["autoscale"]
+        if autoscale is not None:
+            report.append(
+                crossing_text(
+                    autoscale["autoscaler"],
+                    autoscale["section"],
+                    Crossings(**autoscale["crossings"]),
+                )
+            )
     return report
 
 
@@ -1167,6 +1349,7 @@ def main() -> None:
     patterns = load_replay_config(first["replay"]).patterns
     experiment = load_experiment(args.experiment, patterns)
     check_routing(experiment, profiles)
+    check_autoscaling(experiment, profiles)
     check_stall_window(experiment, profiles)
     out = outputs(experiment, REPO_ROOT)
     refuse_leftovers(experiment, out)

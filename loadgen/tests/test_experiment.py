@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from load_generator.autoscale import AutoscaleRow, Crossings, crossing_text
 from load_generator.experiment import (
     GPU_FIELDS,
     Experiment,
@@ -25,6 +26,7 @@ from load_generator.experiment import (
     LiveCluster,
     PodStall,
     Warmup,
+    check_autoscaling,
     check_journal_readable,
     check_routing,
     check_same_replay,
@@ -58,6 +60,22 @@ from load_generator.record import experiment_hash
 from load_generator.results import CallRow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# What the fake cluster's autoscaler applies, and the series it then reads from Prometheus:
+# remaining work passes 10 per pod at 5 s, spec replicas rise at 10 s, the queue passes 1 per pod
+# at 15 s.
+AUTOSCALING = {
+    "min_replicas": 1,
+    "max_replicas": 8,
+    "remaining_work_target": 10,
+    "queue_target": 1,
+    "scale_down_stabilization_seconds": 300,
+}
+AUTOSCALE_ROWS = [
+    AutoscaleRow(0.0, 1, 1, 0, 5),
+    AutoscaleRow(5.0, 1, 1, 0, 11),
+    AutoscaleRow(10.0, 2, 1, 2, 20),
+    AutoscaleRow(15.0, 2, 1, 3, 20),
+]
 ROUND_ROBIN_VALUES = REPO_ROOT / "infra" / "helm" / "router-round-robin-values.yaml"
 BASELINE = REPO_ROOT / "experiments" / "baseline.yaml"
 BASELINE_CHECK = REPO_ROOT / "experiments" / "baseline-check.yaml"
@@ -147,8 +165,10 @@ class FakeCluster:
         fail_gpu_check: bool = False,
         gpu_exit: int | None = None,
         stalls: Mapping[str, Sequence[PodStall]] | None = None,
+        fail_autoscaler_start: bool = False,
     ) -> None:
         self.asked: list[str] = []
+        self.fail_autoscaler_start = fail_autoscaler_start
         # Each variant's pod stalls, found after its replay (P3.7).
         self.stalls = stalls or {}
         self.replayed_variant: str | None = None
@@ -247,6 +267,19 @@ class FakeCluster:
     def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
         self.asked.append(f"stalls {since:.0f} {until:.0f} {seconds}")
         return list(self.stalls.get(self.replayed_variant or "", []))
+
+    def start_autoscaler(self, kind: str) -> dict[str, Any]:
+        self.asked.append(f"autoscaler {kind}")
+        if self.fail_autoscaler_start:
+            raise RuntimeError("the autoscaler start broke")
+        return dict(AUTOSCALING)
+
+    def stop_autoscaler(self) -> None:
+        self.asked.append("autoscaler off")
+
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
+        self.asked.append(f"autoscale series {since:.0f} {until:.0f}")
+        return list(AUTOSCALE_ROWS)
 
 
 def ticking_clock() -> Callable[[], float]:
@@ -2319,3 +2352,273 @@ def test_the_live_cluster_takes_each_vllm_pods_log_with_timestamps(
         ("logs", "--timestamps", "vllm-x-pod-a"),
         ("logs", "--timestamps", "vllm-x-pod-b"),
     ]
+
+
+# P3.9b: a variant scaled by KEDA on remaining work.
+AUTOSCALED_VARIANT = {
+    "name": "remaining",
+    "values": None,
+    "epp_config": "default-plugins.yaml",
+    "autoscaler": "remaining",
+}
+AUTOSCALE_REMAINING = REPO_ROOT / "experiments" / "autoscale-remaining.yaml"
+
+
+def test_a_variant_may_be_scaled_by_an_autoscaler(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    assert [variant.autoscaler for variant in experiment.variants] == ["remaining", None]
+
+
+def test_an_autoscaler_with_no_object_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ExperimentError, match="cpu"):
+        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "autoscaler": "cpu"}])
+
+
+def test_an_autoscaler_with_a_replica_count_of_its_own_is_refused(tmp_path: Path) -> None:
+    """It starts at the profile's min_replicas; a count of its own would say otherwise."""
+    with pytest.raises(ExperimentError, match="replicas"):
+        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "replicas": 2}])
+
+
+def test_an_autoscaler_on_a_profile_without_autoscaling_is_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    del real["autoscaling"]
+    with pytest.raises(ExperimentError, match="autoscaling"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_an_autoscaler_on_a_profile_whose_section_could_not_scale_is_refused(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["autoscaling"]["max_replicas"] = real["autoscaling"]["min_replicas"]
+    with pytest.raises(ExperimentError, match="max_replicas"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_without_an_autoscaler_a_profile_needs_no_section(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    demo = yaml.safe_load((REPO_ROOT / "config" / "demo.yaml").read_text())
+    check_autoscaling(experiment, {"real": demo})
+
+
+def test_main_refuses_an_autoscaler_the_profile_has_no_section_for_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = experiment_file(tmp_path, variants=[AUTOSCALED_VARIANT])
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    del profile["autoscaling"]
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="autoscaling"):
+        main()
+
+
+def test_an_autoscaled_variant_starts_at_the_floor_before_its_restart_and_ends_scaled_back(
+    tmp_path: Path,
+) -> None:
+    """The object is up before the warm-up, so the pods it starts with are the ones warmed, and
+    it is gone before the count is restored, which it would otherwise undo."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    assert cluster.asked == [
+        "check",
+        "autoscaler remaining",
+        "restart",
+        "routing default",
+        "config",
+        "warm",
+        f"replay {stem}-remaining.jsonl",
+        "jumps 101 102",
+        "autoscale series 101 102",
+        "autoscaler off",
+        "scale profile",
+    ]
+
+
+def test_the_variant_after_an_autoscaled_one_starts_at_the_profiles_count(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    second_restart = len(cluster.asked) - 1 - cluster.asked[::-1].index("restart")
+    assert cluster.asked[second_restart - 2 : second_restart] == ["autoscaler off", "scale profile"]
+    assert cluster.asked.count("autoscaler off") == 1
+    assert cluster.asked.count("scale profile") == 1
+
+
+def test_a_replay_that_breaks_still_removes_the_autoscaler_and_scales_back(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster(fail_replay_of="remaining")
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[-2:] == ["autoscaler off", "scale profile"]
+
+
+def test_a_start_that_breaks_halfway_is_removed_and_scaled_back_too(tmp_path: Path) -> None:
+    """It may have scaled the pods, or installed the object, before it failed."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster(fail_autoscaler_start=True)
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="autoscaler start broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[-3:] == ["autoscaler remaining", "autoscaler off", "scale profile"]
+
+
+def test_a_variant_without_an_autoscaler_never_touches_one(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert not any(step.startswith("autoscale") for step in cluster.asked)
+
+
+def test_an_autoscaled_variant_writes_its_series_and_the_meta_holds_the_crossings(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    assert out.autoscale("remaining") == out.csv.with_name(
+        f"exp-{experiment.hash}-remaining-autoscale.csv"
+    )
+    with out.autoscale("remaining").open() as file:
+        rows = list(csv.DictReader(file))
+    assert [row["seconds"] for row in rows] == ["0.0", "5.0", "10.0", "15.0"]
+    assert meta["variants"]["remaining"]["autoscale"] == {
+        "autoscaler": "remaining",
+        "section": AUTOSCALING,
+        "csv": out.autoscale("remaining").name,
+        "crossings": {"remaining_seconds": 5.0, "scale_up_seconds": 10.0, "queue_seconds": 15.0},
+        "scale_up_before_queue": True,
+    }
+    assert meta["variants"]["default"]["autoscale"] is None
+    assert not out.autoscale("default").exists()
+
+
+def test_the_report_gives_an_autoscaled_variants_crossings(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert crossing_text("remaining", AUTOSCALING, Crossings(5.0, 10.0, 15.0)) in report_lines(
+        rows, meta
+    )
+
+
+def test_the_live_cluster_asks_prometheus_for_the_four_series_at_the_scrape_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    asked: list[str] = []
+
+    def kubectl(*args: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[2]).query)
+        assert query["start"] == ["100.000"]
+        assert query["end"] == ["110.000"]
+        assert query["step"] == [str(real["monitoring"]["scrape_interval_seconds"])]
+        asked.append(query["query"][0])
+        return prometheus_answer([{"metric": {}, "values": [[100.0, "1"], [105.0, "2"]]}])
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    rows = LiveCluster(experiment, {"real": real}).autoscale_series(100.0, 110.0)
+    assert rows == [AutoscaleRow(0.0, 1, 1, 1, 1), AutoscaleRow(5.0, 2, 2, 2, 2)]
+    assert asked == [
+        'max(kube_deployment_spec_replicas{namespace="default",deployment="vllm"})',
+        'max(kube_deployment_status_replicas_ready{namespace="default",deployment="vllm"})',
+        "sum(vllm:num_requests_waiting)",
+        "sum(thesis_remaining_work)",
+    ]
+
+
+def test_the_live_cluster_scales_to_the_floor_then_installs_the_profiles_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    steps: list[Any] = []
+
+    def run(args: list[str], input: str, text: bool, check: bool) -> None:
+        assert text and check
+        steps.append((args, yaml.safe_load(input)))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: steps.append(args))
+    cluster = LiveCluster(experiment, {"real": real})
+    monkeypatch.setattr(cluster, "scale", lambda replicas: steps.append(("scale", replicas)))
+    section = cluster.start_autoscaler("remaining")
+    assert section == real["autoscaling"]
+    assert steps[0] == ("scale", real["autoscaling"]["min_replicas"])
+    args, values = steps[1]
+    assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
+    assert args[4] == str(REPO_ROOT / "infra" / "charts" / "autoscaling")
+    assert values["query"] == "sum(thesis_remaining_work)"
+    assert values["threshold"] == real["autoscaling"]["remaining_work_target"]
+    assert steps[2][:3] == ("wait", "scaledobject/vllm", "--for=condition=Ready")
+
+
+def test_the_live_cluster_removes_the_object_and_waits_for_its_hpa_to_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The HPA KEDA made would otherwise set the count back after it is restored."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    steps: list[Any] = []
+
+    def run(args: list[str], check: bool) -> None:
+        assert check
+        steps.append(args)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: steps.append(args))
+    LiveCluster(experiment, {}).stop_autoscaler()
+    assert steps[0][:4] == ["helm", "uninstall", "autoscaling", "--ignore-not-found"]
+    assert [step[:3] for step in steps[1:]] == [
+        ("wait", "scaledobject/vllm", "--for=delete"),
+        ("wait", "hpa/keda-hpa-vllm", "--for=delete"),
+    ]
+
+
+def test_the_autoscale_file_scales_sim_pods_on_remaining_work_through_the_burst() -> None:
+    experiment = committed(AUTOSCALE_REMAINING)
+    sim = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())
+    check_routing(experiment, {"sim": sim})
+    check_autoscaling(experiment, {"sim": sim})
+    assert experiment.profile == "sim"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == "burst"
+    assert experiment.seed == 6
+    [variant] = experiment.variants
+    assert (variant.name, variant.autoscaler, variant.default) == ("remaining", "remaining", True)
+    assert variant.epp_config == "default-plugins.yaml"
+    load_trace(experiment.trace)
+
+
+def test_the_autoscale_file_discards_the_runs_before_the_first_burst() -> None:
+    """As routing-burst's: the runs that start on empty caches and an empty queue."""
+    experiment = committed(AUTOSCALE_REMAINING)
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+def test_the_autoscale_files_kv_capacity_is_the_simulated_pods_cache() -> None:
+    simulator = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["simulator"]
+    experiment = committed(AUTOSCALE_REMAINING)
+    assert experiment.kv_capacity_tokens_per_pod == (
+        simulator["kv_cache_blocks"] * simulator["block_size"]
+    )

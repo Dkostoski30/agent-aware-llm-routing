@@ -13,6 +13,21 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-14 · P3.9b · green on the done-when's second branch (KEDA scaled on remaining work; only the pipeline's delay missed)
+Command: `make test` · `make lint` · `make down`, `make up PROFILE=sim` · `make experiment NAME=autoscale-remaining` (hash 3fb2040041ef, sim, converted trace, `burst`, seed 6, one variant `remaining` on the default picker). Then Claude, read only: `autoscale-remaining-3fb2040041ef-remaining-autoscale.csv` and the `.meta.json`. Times are seconds from the replay's start
+Result:
+- `make test` 1812 + 22 passed, `make lint` passes. The ScaledObject installed and turned Ready, KEDA scaled the pods 1 → 4 → 5 of 8, and the object was uninstalled after the replay. 252 calls, 0 failed. 26 of 26 kept runs finished, run time median 40.7 s.
+- Report: `remaining work passed 10 per pod at 125.0 s, spec replicas rose over 1 at 140.0 s, the queue passed 1 per pod at 130.0 s; the scale-up did not begin before the queue passed its target`.
+- Series: remaining work was 9 at 5 s, fell to 1 by 50 s, read 10 at 60 s (the next long run's start: at the target, not past it), then 4-8 until the burst. At 125 s it read 25 on 1 pod and the queue 0. At 130 s the queue read 5. At 135 s remaining work read 32, and spec replicas went to 4 at 140 s (ceil(32 / 10)). Ready replicas went to 4 at 290 s, 150 s after the scale-up (the 140 s simulated cold start plus a scrape). The queue peaked at 8 at 250-260 s, during the second burst, while the new pods were still starting. Spec went to 5 at 270 s, Ready to 5 at 420 s.
+- 13 clock jumps during the replay, many for a sim run; the series stay ordered.
+Notes:
+- **Why only the pipeline's delay misses.** Remaining work crossed 5 s (one scrape) before the queue, and the scale-up came 15 s after remaining work crossed (one HPA sync). With no delay it would have begun at 125 s, before the queue's 130 s. Card 45 takes the numbers and the cause instead of tuning (rule 8). k3s's HPA period is a machine-wide flag and would make it a tie at best.
+- **Why the lead was one scrape, which is the finding.** Remaining work counts runs already started, so it cannot see a burst before it arrives. On one sim pod with no queue a run of the converted trace finishes in about 50 s, so before the first burst runs never stacked: one run at a time, at most 10. The 5 runs arriving at once move both signals within one scrape. On this replay no target scales before the burst without also scaling on a single long run (9-10 remaining). Lowering the target to 5 would pass by giving every long run its own pod, which is tuning to the test at the cost of idle pods (decided 2026-11-14, not done).
+- **For P3.10:** the fair question is whether KEDA on remaining work scales before KEDA on the queue on the same replay. By these numbers the queue would cross at 130 s and scale around 145 s, about 5 s after remaining work. A ramp of long runs, where several are active before a queue builds, is where remaining work should lead; it is a candidate variant for P3.10 or P5.2.
+- **For P5.2:** time to capacity is mostly the 140 s cold start, against at most 15-20 s of signal difference. A thesis risk: on bursty traces remaining work and the queue may differ little on completion time.
+- KEDA asked for 4 pods in one step, not one at a time: the HPA's default scale-up policy allows that within 15 s.
+- Decided 2026-11-14 (the user): `scale_down_stabilization_seconds` instead of the card's `polling_seconds` and `cooldown_seconds`, which do nothing at a floor of 1 pod (KEDA 2.21's ScaledObject reference). Both KEDA objects, remaining and queue, are built here, and P3.10 adds cpu. demo has no autoscaling section. One variant only.
+
 ### 2026-11-14 · P3.9a · green (KEDA installed by make up; the operator restarted 3 times while vLLM loaded, then stayed up)
 Command: `make lint` · `make down`, `make up` (profile real) · `kubectl get pods -n keda` · `kubectl get apiservice v1beta1.external.metrics.k8s.io` · `kubectl top pods -n keda` · the pods' `imageID`s · `make smoke`. Then Claude, read only: the operator's `--previous` logs, `kubectl describe`, the restarts across the cluster, `journalctl -u k3s` from 11:13 to 11:19. Times local (UTC+1)
 Result:

@@ -1,0 +1,33 @@
+# P3.9b: KEDA scales simulated pods on remaining work through a burst (docs/task-cards/45-P3.9b-keda-remaining-work.md).
+# Run with make experiment NAME=autoscale-remaining after make down and make up PROFILE=sim. The question: did spec
+# replicas rise before the queue per pod passed autoscaling.queue_target? The report and the .meta.json give when
+# remaining work passed its target, when the scale-up began and when the queue passed its own; the series are in
+# <stem>-remaining-autoscale.csv. Results carry this file's hash (D11).
+profile: sim
+# The long runs (P2.4), as experiments/routing-burst.yaml: their 9-12 expected steps are the work remaining work sees
+# ahead of the queue.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# The base rate with 5 runs at once every 120 s. Not burst-fan-out: parallel calls add to the queue without adding
+# remaining work, a harder test for P3.10's comparison, not this one's (decided 2026-11-14).
+pattern: burst
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types, as routing-burst.yaml.
+seed: 6
+# The simulated pod's cache, simulator.kv_cache_blocks 512 x block_size 16 (config/sim.yaml); a test holds it there.
+# Calls that find more than this on their pod are reported apart (P2.4).
+kv_capacity_tokens_per_pod: 8192
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6, as routing-burst.yaml; a test holds the count to
+  # the seed's start times. Their calls are left out of the call rows, not of the autoscale series: their remaining
+  # work is load KEDA scales on.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# One variant on the default picker (decided 2026-11-14): autoscaling does not depend on the plugin (D2). It starts at
+# autoscaling.min_replicas; P3.10 adds KEDA on the queue on the same replay.
+variants:
+  - name: remaining
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: remaining

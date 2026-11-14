@@ -76,6 +76,27 @@ routing:
   # work: within 2 calls the scorers' pick by queue and prefix stands; P3.7's runs that started on the heavier pod were
   # 1-28 calls heavier, median 10-14 (experiments/log.md, P3.7b's spike).
   least_work_slack: 2
+# KEDA on the vLLM Deployment for an experiment variant with an autoscaler (P3.9b, D2): infra/charts/autoscaling, from
+# this section. A variant without one runs replicas pods. First guesses, which P3.10's and P4.5's replays measure.
+autoscaling:
+  # The floor (decided 2026-11-09): one pod stays, so no run waits on a cold start from zero. A variant with an
+  # autoscaler starts here, and its warm-up warms this pod.
+  min_replicas: 1
+  # The two pods that fit on the GPU (replicas above): real pods scale 1<->2 (D5).
+  max_replicas: 2
+  # Per pod, in calls of D2's remaining work, the sum of max(expected - step, 1) over active runs. As sim's, so one rule
+  # scales both (D5): a real pod's KV cache holds about 2 of the converted trace's prompts at once (sim.yaml,
+  # max_num_seqs), and a run of the burst pattern has one call in flight, so 2 runs fill it; over its life a run has
+  # about half its expected steps left, ~5 for the converted trace's 9-12-step types, so 2 x 5.
+  remaining_work_target: 10
+  # Per pod, in calls waiting (vllm:num_requests_waiting, which on a real pod also holds calls waiting for KV blocks):
+  # the queue autoscaler's threshold. A first guess, the overload guard's (routing.overload_queue_threshold): one call
+  # may wait, a second is a queue.
+  queue_target: 1
+  # How long the HPA waits on lower readings before it removes the second pod. A first guess, the HPA's own default:
+  # it outlasts the burst pattern's 120 s between bursts and a real pod's ~2 min cold start, so a pod added for one
+  # burst is still there for the next. A pod removed while it has calls can interrupt a run until P4.3's drain.
+  scale_down_stabilization_seconds: 300
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads
