@@ -45,6 +45,9 @@ spec:
               value: /etc/thesis/profile.yaml
             - name: THESIS_APP_DB
               value: /data/app.db
+            # The agent runtime's Service (infra/manifests/agent.yaml); one message starts one run there (D13).
+            - name: AGENT_URL
+              value: http://agent:8080
           ports:
             - name: http
               containerPort: 8080

@@ -324,3 +324,7 @@ app:
   # The session cookie travels over HTTPS only. Browsers treat http://localhost as secure, so the port-forwarded app
   # still works; false only to open the app over plain HTTP under another host name.
   cookie_secure: true
+  # How long the app waits for the agent runtime's POST /runs and GET /runs/{id} (P3.12a). Both answer from Redis
+  # without waiting on the model, so httpx's default of 5 s, which the agent's call to the picker also uses, is far
+  # above them; past it the message gets a failed reply (502) or a read leaves the reply running.
+  runtime_timeout_seconds: 5

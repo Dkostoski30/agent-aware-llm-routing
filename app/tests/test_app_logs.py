@@ -5,10 +5,12 @@ import json
 import logging
 from pathlib import Path
 
+import httpx
 import pytest
 from app_backend.app import create_app
 from app_backend.config import AppConfig, ScryptParams
 from app_backend.logs import JsonFormatter
+from app_backend.runtime import RuntimeClient
 from fastapi.testclient import TestClient
 
 EMAIL = "ana@example.com"
@@ -21,8 +23,18 @@ def make_client(tmp_path: Path) -> TestClient:
         scrypt=ScryptParams(n=2, r=1, p=1),
         min_password_length=15,
         cookie_secure=True,
+        max_files=5,
+        runtime_timeout_seconds=5.0,
     )
-    app = create_app(config, tmp_path / "app.db", lambda: 1000.0)
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"auth called the runtime: {request.method} {request.url}")
+
+    # Auth never calls the agent runtime; a call would fail the test.
+    runtime = RuntimeClient(
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent")
+    )
+    app = create_app(config, tmp_path / "app.db", runtime, lambda: 1000.0)
     return TestClient(app, base_url="https://testserver")
 
 

@@ -6,6 +6,8 @@ requires-python = "==3.12.*"
 # The agent's pins (versions.md). SQLite is Python's own sqlite3; passwords use hashlib.scrypt (no passlib, no ORM).
 dependencies = [
     "fastapi==0.143.0",
+    # Calls the agent runtime's POST /runs and GET /runs/{id} (P3.12a).
+    "httpx==0.28.1",
     "pyyaml==6.0.3",
     "uvicorn==0.54.0",
 ]

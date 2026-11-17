@@ -64,7 +64,7 @@ on the day it was added. Packages they pull in are pinned by `uv.lock` only.
 
 | Package | Version | Component, added in |
 |---|---|---|
-| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06); loadgen, P2.2b (the agent's API), the agent's pin; root dev group, P2.10a (FastAPI's TestClient in the app tests), the agent's pin |
+| httpx | 0.28.1 | agent, P1.3a-1 (LLM calls through the gateway; the newest release, 2024-12-06); loadgen, P2.2b (the agent's API), the agent's pin; root dev group, P2.10a (FastAPI's TestClient in the app tests), the agent's pin; app, P3.12a (starts runs on the agent runtime and reads how they ended), the agent's pin |
 | jsonschema | 4.26.0 | agent, P1.3a-1 (tool-call checks, D10); a dev tool since P0.0, runtime since P1.3a-1; loadgen, P2.2b (every trace line against trace.v1), the agent's pin |
 | PyYAML | 6.0.3 | agent, P1.3a-1 (reads the config/ profiles); loadgen, P2.2b (reads experiment files and profiles), the agent's pin; app, P2.10a (reads the profile's app section), the agent's pin |
 | fastapi | 0.143.0 | agent, P1.3a-2 (run API: POST /runs, GET /runs/{id}, /healthz; 2026-10-08). Pulls in starlette 1.10.0 and pydantic 2.14.1, pinned by uv.lock; app, P2.10a (register, login, logout), the agent's pin |
