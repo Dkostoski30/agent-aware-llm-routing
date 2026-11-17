@@ -1,0 +1,28 @@
+# P3.10: the CPU baseline, a plain HPA on the vLLM pods' CPU at real 1<->2 pods (D5,
+# docs/task-cards/46-P3.10-autoscaling-baselines.md). Run with make experiment NAME=autoscale-real after make down and
+# make up. The target is autoscaling.cpu_target_percent of pod.cpu_request (config/real.yaml). Whether it scaled at all
+# is the spec replicas in <stem>-cpu-autoscale.csv; why, the HPA's own reading in <stem>-cpu-cpu-hpa.csv; P5.2's
+# numbers in <stem>-autoscale-summary.csv. One run in one order here; P4.5 repeats. Results carry this file's hash (D11).
+profile: real
+# The same replay shape as experiments/autoscale-sim.yaml, the trace and pattern the CPU request was measured on.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, as experiments/routing-faster.yaml.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6; a test holds the count to the seed's start times.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As experiments/routing-faster.yaml: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused,
+# since the GPU-sharing stalls of 2026-11-12 (P3.7) would read as the autoscaler's result. The second pod shares the GPU.
+pod_stall_seconds: 30
+# On the default picker: autoscaling does not depend on the plugin (D2).
+variants:
+  - name: cpu
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: cpu

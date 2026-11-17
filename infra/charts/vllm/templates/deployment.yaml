@@ -79,11 +79,15 @@ spec:
             initialDelaySeconds: {{ required "pod.readiness_initial_delay_seconds from the profile" .Values.pod.readiness_initial_delay_seconds }}
             # A pod joins the Service within 5 s of finishing its load; one probe every 5 s costs nothing.
             periodSeconds: 5
-          {{- if eq .Values.gpuAccess "plugin" }}
           resources:
+            # The CPU baseline's HPA holds the pods' usage to a share of this (P3.10); the profile's comment says how it
+            # was measured. A request also raises the container's CPU weight against the node's other pods.
+            requests:
+              cpu: {{ required "pod.cpu_request from the profile" .Values.pod.cpu_request | quote }}
+            {{- if eq .Values.gpuAccess "plugin" }}
             limits:
               nvidia.com/gpu: 1
-          {{- end }}
+            {{- end }}
           volumeMounts:
             - name: hf-cache
               mountPath: /hf

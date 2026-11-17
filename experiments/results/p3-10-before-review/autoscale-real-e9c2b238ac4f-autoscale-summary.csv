@@ -1,0 +1,2 @@
+variant,autoscaler,runs,finished_runs,failed_runs,interrupted_runs,completion_p50_ms,completion_p95_ms,completion_total_ms,makespan_ms,runs_per_minute,time_to_capacity_seconds,idle_pod_minutes
+cpu,cpu,26,26,0,0,228288,480773,6595590,635876,2.4533085066899836,150.0,0.08333333333333333

@@ -1,0 +1,29 @@
+# The CPU baseline (P3.10): a plain HPA, no KEDA, on the vLLM pods' mean CPU as a percent of their request
+# (pod.cpu_request in infra/charts/vllm). It reads metrics-server, which k3s ships, every 15 s (k3s's sync period, as
+# KEDA's HPA) and wants ceil(pods x usage / target) pods. Real pods only (D5): make experiment refuses it on sim.
+# Rendered only with cpuTargetPercent, which only the cpu autoscaler's values carry; scaledobject.yaml renders otherwise.
+{{- if .Values.cpuTargetPercent }}
+{{- $required := "make experiment hands this from config/<profile>.yaml's autoscaling section" }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm
+  minReplicas: {{ required $required .Values.minReplicas }}
+  maxReplicas: {{ required $required .Values.maxReplicas }}
+  # As KEDA's object: scaling down waits out the profile's window, scaling up keeps the HPA's default behaviour.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ required $required .Values.scaleDownStabilizationSeconds }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.cpuTargetPercent }}
+{{- end }}

@@ -1,0 +1,150 @@
+{
+  "experiment": "autoscale-sim-fan-out",
+  "hash": "dc3f5b1ee9a0",
+  "profile": "sim",
+  "profile_sha256": "5774367e51bfa1cf90a905ee3e21d314b00584e0a6a505f4702eec7e52289b8a",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "variants": {
+    "remaining": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "5774367e51bfa1cf90a905ee3e21d314b00584e0a6a505f4702eec7e52289b8a",
+      "warmup_ttft_ms": {
+        "vllm-8f799bb98-szc96": [
+          358,
+          330,
+          331,
+          330,
+          331
+        ]
+      },
+      "started": 1794922057.6344538,
+      "ended": 1794922542.568161,
+      "clock_jumps": 13,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-8f799bb98-szc96": 163,
+        "vllm-8f799bb98-b64vr": 57,
+        "vllm-8f799bb98-jhhxg": 89,
+        "vllm-8f799bb98-q25s9": 48
+      },
+      "pod_switch_share": 0.3539325842696629,
+      "max_gap_deviation_ms": 4,
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "autoscale-sim-fan-out-dc3f5b1ee9a0-remaining-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 55.0,
+          "scale_up_seconds": 60.0,
+          "queue_seconds": 80.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 26,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 57148,
+        "completion_p95_ms": 185983,
+        "completion_total_ms": 1875496,
+        "makespan_ms": 382729,
+        "runs_per_minute": 4.075991105978382,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 140.0,
+        "idle_pod_minutes": 9.666666666666666
+      },
+      "cpu_hpa": null
+    },
+    "queue": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "5774367e51bfa1cf90a905ee3e21d314b00584e0a6a505f4702eec7e52289b8a",
+      "warmup_ttft_ms": {
+        "vllm-6bd897dc9f-nzcqd": [
+          334,
+          330,
+          330,
+          330,
+          330
+        ]
+      },
+      "started": 1794922735.9497938,
+      "ended": 1794923210.4898453,
+      "clock_jumps": 16,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6bd897dc9f-nzcqd": 179,
+        "vllm-6bd897dc9f-b9bch": 58,
+        "vllm-6bd897dc9f-tc9wh": 15,
+        "vllm-6bd897dc9f-jf654": 52,
+        "vllm-6bd897dc9f-8p77c": 3,
+        "vllm-6bd897dc9f-dnnqb": 3,
+        "vllm-6bd897dc9f-xf84w": 47
+      },
+      "pod_switch_share": 0.4101123595505618,
+      "max_gap_deviation_ms": 5,
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "queue",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "autoscale-sim-fan-out-dc3f5b1ee9a0-queue-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 55.0,
+          "scale_up_seconds": 90.0,
+          "queue_seconds": 75.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 26,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 49209,
+        "completion_p95_ms": 180549,
+        "completion_total_ms": 1703372,
+        "makespan_ms": 376065,
+        "runs_per_minute": 4.148219057875633,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 140.0,
+        "idle_pod_minutes": 19.0
+      },
+      "cpu_hpa": null
+    }
+  }
+}

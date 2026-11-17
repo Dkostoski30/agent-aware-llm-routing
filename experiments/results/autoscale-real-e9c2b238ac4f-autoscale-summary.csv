@@ -1,0 +1,2 @@
+variant,autoscaler,runs,finished_runs,failed_runs,interrupted_runs,completion_p50_ms,completion_p95_ms,completion_total_ms,makespan_ms,runs_per_minute,scaled_before_replay,time_to_capacity_seconds,idle_pod_minutes
+cpu,cpu,26,25,1,0,290394,471156,6391280,621141,2.4149106241578,False,145.0,0.3333333333333333

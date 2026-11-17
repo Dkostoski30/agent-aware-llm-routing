@@ -1,0 +1,36 @@
+# P3.10: KEDA on queue depth against KEDA on remaining work, on simulated pods through the same burst
+# (docs/task-cards/46-P3.10-autoscaling-baselines.md). The CPU baseline runs on real pods only (D5,
+# experiments/autoscale-real.yaml). Run with make experiment NAME=autoscale-sim after make down and make up PROFILE=sim.
+# Per variant: the series in <stem>-<variant>-autoscale.csv, P5.2's numbers in <stem>-autoscale-summary.csv, the
+# .meta.json and the report. No verdict here: P5.2 judges, with repetitions. Results carry this file's hash (D11).
+# experiments/autoscale-sim-fan-out.yaml is this file on burst-fan-out; a test holds them to differ only there.
+profile: sim
+# The long runs (P2.4), as experiments/autoscale-remaining.yaml: their 9-12 expected steps are the work remaining work
+# sees ahead of the queue.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# The base rate with 5 runs at once every 120 s, as autoscale-remaining.yaml.
+pattern: burst
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types, as autoscale-remaining.yaml.
+seed: 6
+# The simulated pod's cache, simulator.kv_cache_blocks 512 x block_size 16 (config/sim.yaml); a test holds it there.
+kv_capacity_tokens_per_pod: 8192
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6; a test holds the count to the seed's start times.
+  # Left out of the call rows and the summary's run times, not of the series: their load is what scales the pods.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# Both on the default picker: autoscaling does not depend on the plugin (D2). Each starts at autoscaling.min_replicas
+# after a restart, so the second finds nothing the first left. Remaining work first, as P3.9b ran it (decided
+# 2026-11-15); P5.2 repeats in both orders.
+variants:
+  - name: remaining
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: remaining
+  - name: queue
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: queue

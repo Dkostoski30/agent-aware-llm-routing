@@ -1,0 +1,85 @@
+{
+  "experiment": "autoscale-real",
+  "hash": "e9c2b238ac4f",
+  "profile": "real",
+  "profile_sha256": "a241c69ea94979fe683cd8ecf6bf88fc51624a7a6380d0d493fc9b5ce4a323cf",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "autoscale-real-e9c2b238ac4f-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "variants": {
+    "cpu": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "a241c69ea94979fe683cd8ecf6bf88fc51624a7a6380d0d493fc9b5ce4a323cf",
+      "warmup_ttft_ms": {
+        "vllm-5c7b79d77d-rtmxz": [
+          3264,
+          367,
+          372,
+          440,
+          360
+        ]
+      },
+      "started": 1794935298.3115802,
+      "ended": 1794936020.7187343,
+      "clock_jumps": 24,
+      "calls": 251,
+      "failed_calls": 1,
+      "calls_per_pod": {
+        "vllm-5c7b79d77d-rtmxz": 146,
+        "vllm-5c7b79d77d-j5r5s": 104
+      },
+      "pod_switch_share": 0.26104417670682734,
+      "max_gap_deviation_ms": 5,
+      "picker_log": null,
+      "vllm_logs": [
+        "autoscale-real-e9c2b238ac4f-cpu-vllm-vllm-5c7b79d77d-j5r5s.log",
+        "autoscale-real-e9c2b238ac4f-cpu-vllm-vllm-5c7b79d77d-rtmxz.log"
+      ],
+      "autoscale": {
+        "autoscaler": "cpu",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "autoscale-real-e9c2b238ac4f-cpu-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 125.0,
+          "scale_up_seconds": 35.0,
+          "queue_seconds": 125.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 25,
+        "failed_runs": 1,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 290394,
+        "completion_p95_ms": 471156,
+        "completion_total_ms": 6391280,
+        "makespan_ms": 621141,
+        "runs_per_minute": 2.4149106241578,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 145.0,
+        "idle_pod_minutes": 0.3333333333333333
+      },
+      "cpu_hpa": "autoscale-real-e9c2b238ac4f-cpu-cpu-hpa.csv"
+    }
+  }
+}

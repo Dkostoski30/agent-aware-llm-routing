@@ -2,6 +2,8 @@
 # the HPA it makes wants ceil(value / threshold) pods, between the bounds (P3.9b). No pollingInterval and no
 # cooldownPeriod: with a floor of 1 pod both act only on scaling to and from 0 (KEDA 2.21's ScaledObject reference).
 # Scaling down is the HPA's, after the stabilization window; scaling up keeps the HPA's default behaviour.
+# Not with cpuTargetPercent, which only the cpu autoscaler's values carry: then hpa.yaml is the one object (P3.10).
+{{- if not .Values.cpuTargetPercent }}
 {{- $required := "make experiment hands this from config/<profile>.yaml's autoscaling section" }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -24,3 +26,4 @@ spec:
         serverAddress: {{ .Values.prometheusAddress | quote }}
         query: {{ required $required .Values.query | quote }}
         threshold: {{ required $required .Values.threshold | quote }}
+{{- end }}

@@ -1,0 +1,3 @@
+variant,autoscaler,runs,finished_runs,failed_runs,interrupted_runs,completion_p50_ms,completion_p95_ms,completion_total_ms,makespan_ms,runs_per_minute,time_to_capacity_seconds,idle_pod_minutes
+remaining,remaining,26,26,0,0,40467,153925,1495857,376089,4.147954340594912,145.0,7.0
+queue,queue,26,26,0,0,42337,152921,1547860,376065,4.148219057875633,145.0,15.833333333333334

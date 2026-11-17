@@ -24,12 +24,22 @@ run (P3.7, experiments/log.md). After each replay on real pods, both vLLM pods' 
 the results before that check, so a stall comes with the engine's own numbers (P3.7c).
 
 A variant may carry an autoscaler (P3.9b): the pods are scaled to the profile's
-autoscaling.min_replicas and KEDA's ScaledObject (infra/charts/autoscaling) is installed before the
-restart, so the floor's pods are the ones warmed. After the replay, Prometheus gives the spec and
+autoscaling.min_replicas before the restart, so the floor's pods are the ones warmed, and KEDA's
+ScaledObject (infra/charts/autoscaling) is installed after the warm-up, just before the replay: the
+warm-up's calls go straight to the pods, and a CPU HPA up during them scaled before the replay
+(P3.10's review, 2026-11-17). After the replay, Prometheus gives the spec and
 Ready replicas and both triggers over it into <stem>-<variant>-autoscale.csv, and the report says
 when remaining work passed its target, when the scale-up began and when the queue passed its own.
 The object is removed and the profile's count restored right after, and in the same finally as
 the routing.
+
+An autoscaler may also be cpu (P3.10): a plain HPA on the pods' CPU, real pods only (D5), whose own
+reading goes into <stem>-<variant>-cpu-hpa.csv. It is installed only once metrics-server, which it
+reads, has a sample of each pod from after the warm-up under its target: its reading lags the
+pods by up to a sample's 32 s window, and installed at once it scaled on the warm-up (2026-11-17).
+Each autoscaled variant gets P5.2's numbers from its series and calls
+(autoscale.summarise_autoscale): in its .meta.json, in the report, and as a row of
+<stem>-autoscale-summary.csv.
 
 Usage: python -m load_generator.experiment EXPERIMENT
 """
@@ -52,18 +62,31 @@ import yaml
 
 from load_generator.autoscale import (
     CHART,
+    CPU,
+    CPU_QUERY,
+    CPU_TARGET_KEY,
+    KINDS,
     SERIES_QUERIES,
-    TRIGGER_QUERIES,
     AutoscaleError,
     AutoscaleRow,
+    AutoscaleSummary,
+    CpuRow,
     Crossings,
+    check_cpu_target,
     check_section,
+    cpu_cores,
+    cpu_quiet,
+    cpu_rows_from,
     crossing_text,
     first_crossings,
     helm_values,
     rows_from,
     scale_up_before_queue,
+    summarise_autoscale,
+    summary_text,
     write_autoscale_csv,
+    write_cpu_csv,
+    write_summary_csv,
 )
 from load_generator.compare import max_gap_deviation
 from load_generator.graph import render
@@ -114,6 +137,17 @@ AUTOSCALING_RELEASE = "autoscaling"
 SCALED_OBJECT = "scaledobject/vllm"
 # KEDA names the HPA it makes keda-hpa-<ScaledObject's name>.
 KEDA_HPA = "hpa/keda-hpa-vllm"
+# The plain HPA of the cpu autoscaler (P3.10), infra/charts/autoscaling/templates/hpa.yaml.
+PLAIN_HPA = "hpa/vllm"
+# metrics-server's latest CPU sample of each vLLM pod, the one a plain HPA reads.
+POD_METRICS = "/apis/metrics.k8s.io/v1beta1/namespaces/default/pods?" + urllib.parse.urlencode(
+    {"labelSelector": VLLM_SELECTOR}
+)
+# metrics-server samples every 15 s (k3s's --metric-resolution) over a window that reached 32 s on
+# 2026-11-17, so a sample wholly after the warm-up comes within about 50 s of it; 120 s is a wide
+# margin. Polled at a third of that resolution, so a new sample is seen within 5 s.
+QUIET_CPU_TIMEOUT_SECONDS = 120
+QUIET_CPU_POLL_SECONDS = 5
 # KEDA's operator builds the scaler and the HPA within seconds when idle. A wide margin: in P3.9a
 # it lost its leader lease three times while vLLM pods loaded, and each time waited to win it back.
 AUTOSCALER_TIMEOUT = "120s"
@@ -200,8 +234,8 @@ class Variant:
     replicas: int | None
     # Rules laid over the profile's routing section; None is the profile's own. Never with values.
     routing: Mapping[str, bool] | None
-    # A key of autoscale.TRIGGER_QUERIES: KEDA scales the pods from the profile's min_replicas
-    # (P3.9b). None is a fixed count. Never with replicas.
+    # One of autoscale.KINDS: KEDA (P3.9b) or a plain HPA on CPU (P3.10) scales the pods from the
+    # profile's min_replicas. None is a fixed count. Never with replicas.
     autoscaler: str | None
 
     @property
@@ -270,6 +304,13 @@ class Outputs:
     def autoscale(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}-autoscale.csv")
 
+    def cpu_hpa(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-cpu-hpa.csv")
+
+    @property
+    def autoscale_summary(self) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-autoscale-summary.csv")
+
 
 class Cluster(Protocol):
     """What an experiment asks of the cluster; LiveCluster is the real one."""
@@ -312,15 +353,21 @@ class Cluster(Protocol):
     # Each stretch from since to until in which a pod had calls and made no tokens for seconds.
     def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]: ...
 
-    # Scales the pods to the profile's min_replicas and has KEDA scale them from there; returns
-    # the profile's autoscaling section it applied.
-    def start_autoscaler(self, kind: str) -> Mapping[str, Any]: ...
+    # Keeps the autoscaler's kind and scales the pods to the profile's min_replicas; returns the
+    # profile's autoscaling section the autoscaler will apply.
+    def floor_autoscaler(self, kind: str) -> Mapping[str, Any]: ...
+
+    # Installs the kind the floor kept, which scales the pods from there.
+    def start_autoscaler(self) -> None: ...
 
     # Removes the autoscaler and the HPA it made; nothing to remove is no error.
     def stop_autoscaler(self) -> None: ...
 
     # The replicas and both triggers from since to until, at the scrape step.
     def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]: ...
+
+    # The plain HPA's reading of the pods' CPU from since to until (P3.10).
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]: ...
 
 
 def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
@@ -355,10 +402,10 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
             )
     autoscaler = section.get("autoscaler")
     if autoscaler is not None:
-        if autoscaler not in TRIGGER_QUERIES:
+        if autoscaler not in KINDS:
             raise ExperimentError(
                 f"variant {section['name']}: no autoscaler {autoscaler}, there are "
-                f"{', '.join(TRIGGER_QUERIES)}"
+                f"{', '.join(KINDS)}"
             )
         if replicas is not None:
             raise ExperimentError(
@@ -430,8 +477,8 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
 
 
 def check_autoscaling(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
-    """Every variant with an autoscaler is on a profile whose autoscaling section KEDA can scale
-    by. Before the run: the variant's start may be hours into it."""
+    """Every variant with an autoscaler is on a profile whose autoscaling section it can scale by,
+    and cpu only on real pods. Before the run: the variant's start may be hours into it."""
     for variant in experiment.variants:
         if variant.autoscaler is None:
             continue
@@ -440,8 +487,15 @@ def check_autoscaling(experiment: Experiment, profiles: Mapping[str, Mapping[str
             raise ExperimentError(
                 f"variant {variant.name}: profile {variant.profile} has no autoscaling section"
             )
+        if variant.autoscaler == CPU and variant.profile == SIM_PROFILE:
+            raise ExperimentError(
+                f"variant {variant.name}: cpu on simulated pods, whose CPU says nothing of their "
+                "load (D5); the simulator compares remaining and queue"
+            )
         try:
             check_section(profile["autoscaling"])
+            if variant.autoscaler == CPU:
+                check_cpu_target(profile["autoscaling"])
         except AutoscaleError as error:
             raise ExperimentError(f"variant {variant.name}: {error}") from error
 
@@ -623,6 +677,8 @@ def _variant_meta(
     picker_log: str | None,
     vllm_logs: list[str] | None,
     autoscale: Mapping[str, Any] | None,
+    autoscale_summary: Mapping[str, Any] | None,
+    cpu_hpa: str | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
@@ -647,6 +703,10 @@ def _variant_meta(
         "vllm_logs": vllm_logs,
         # What KEDA scaled by and the moments the report reads; None at a fixed count.
         "autoscale": autoscale,
+        # P5.2's numbers for the variant (P3.10); None at a fixed count.
+        "autoscale_summary": autoscale_summary,
+        # The file of the plain HPA's CPU reading, None but for the cpu autoscaler.
+        "cpu_hpa": cpu_hpa,
     }
 
 
@@ -678,6 +738,23 @@ def stall_text(variant: str, stalls: Sequence[PodStall], started: float) -> str:
     )
 
 
+def _summary_timing(profile: str) -> tuple[int, float]:
+    """The profile's scrape step, one sample of the series, and its call deadline, which the
+    replay holds each call to (agent.llm_timeout_seconds)."""
+    loaded: dict[str, Any] = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())
+    return loaded["monitoring"]["scrape_interval_seconds"], loaded["agent"]["llm_timeout_seconds"]
+
+
+@dataclass(frozen=True)
+class Autoscaling:
+    """An autoscaled variant's: the section its autoscaler applies, and the profile's scrape step
+    and call deadline, which its summary reads."""
+
+    section: Mapping[str, Any]
+    step_seconds: int
+    deadline_seconds: float
+
+
 def _run_variant(
     experiment: Experiment,
     variant: Variant,
@@ -685,25 +762,42 @@ def _run_variant(
     cluster: Cluster,
     clock: Callable[[], float],
     profile_sha256: str,
-    autoscaling: Mapping[str, Any] | None,
+    autoscaling: Autoscaling | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """autoscaling is the section the variant's autoscaler applied, None at a fixed count."""
+    """autoscaling is None at a fixed count. Otherwise the pods are at its floor, and its
+    autoscaler is started after the warm-up, so the warm-up's calls cannot scale it."""
     running = cluster.epp_config_file()
     if running != variant.epp_config:
         raise ExperimentError(
             f"variant {variant.name} wants the picker on {variant.epp_config}, it runs {running}"
         )
     warmup_ttft = cluster.warm_pods()
+    if autoscaling is not None:
+        cluster.start_autoscaler()
     started = clock()
     lines = cluster.replay(out.replay(variant.name), variant.routing)
     ended = clock()
     jumps = cluster.clock_jumps(started, ended)
     # From the replay's start, so the warm-up's calls, which go straight to the pods, are left out.
     # Before the stall check, so a stalled replay keeps its series too.
-    autoscale = None
+    starts = start_times(experiment.pattern, experiment.seed)
+    autoscale = summary = cpu_hpa = None
     if autoscaling is not None:
         rows = cluster.autoscale_series(started, ended)
-        autoscale = _autoscale_meta(variant, autoscaling, rows, out)
+        autoscale = _autoscale_meta(variant, autoscaling.section, rows, out)
+        summary = summarise_autoscale(
+            rows,
+            lines,
+            starts,
+            started,
+            experiment.warmup.runs_discarded,
+            autoscaling.section,
+            autoscaling.step_seconds,
+            autoscaling.deadline_seconds,
+        ).as_meta()
+        if variant.autoscaler == CPU:
+            write_cpu_csv(out.cpu_hpa(variant.name), cluster.cpu_series(started, ended))
+            cpu_hpa = out.cpu_hpa(variant.name).name
     picker_log = None
     if variant.epp_config == PLUGIN_CONFIG:
         out.picker(variant.name).write_text(cluster.picker_log())
@@ -727,12 +821,14 @@ def _run_variant(
         warmup_ttft,
         lines,
         _trace_lines(experiment.trace),
-        start_times(experiment.pattern, experiment.seed),
+        starts,
         (started, ended),
         jumps,
         picker_log,
         vllm_logs,
         autoscale,
+        summary,
+        cpu_hpa,
     )
     return lines, meta
 
@@ -754,6 +850,12 @@ def run_experiment(
     # Now and not at the end: the profiles were loaded just before, and a run takes hours.
     profile_sha256 = {
         name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
+    }
+    # Also now, and only for the profiles an autoscaler runs on, the only ones it is read for.
+    timing = {
+        variant.profile: _summary_timing(variant.profile)
+        for variant in experiment.variants
+        if variant.autoscaler is not None
     }
     starts = start_times(experiment.pattern, experiment.seed)
     rows: list[CallRow] = []
@@ -785,9 +887,12 @@ def run_experiment(
                 scaled = True
             autoscaling = None
             if variant.autoscaler is not None:
-                # Before the restart, so only the floor's pods restart and are warmed (P3.9b).
+                # The floor before the restart, so only its pods restart and are warmed (P3.9b);
+                # _run_variant starts the autoscaler after the warm-up.
                 scaled = autoscaled = True
-                autoscaling = cluster.start_autoscaler(variant.autoscaler)
+                autoscaling = Autoscaling(
+                    cluster.floor_autoscaler(variant.autoscaler), *timing[variant.profile]
+                )
             cluster.restart_pods()
             off_default = off_default or not variant.default
             cluster.set_routing(variant.values, variant.routing)
@@ -861,7 +966,15 @@ def run_experiment(
 
 
 def write_results(out: Outputs, rows: Sequence[CallRow], meta: Mapping[str, Any]) -> None:
+    """The summary CSV only when a variant was autoscaled."""
     write_csv(out.csv, rows)
+    summaries = {
+        name: (variant["autoscale"]["autoscaler"], variant["autoscale_summary"])
+        for name, variant in meta["variants"].items()
+        if variant["autoscale_summary"] is not None
+    }
+    if summaries:
+        write_summary_csv(out.autoscale_summary, summaries)
     with out.meta.open("x") as file:
         json.dump(meta, file, indent=2)
         file.write("\n")
@@ -990,6 +1103,11 @@ class LiveCluster:
         self.replicas: int | None = None
         # nvidia-smi while it samples the GPU.
         self.gpu: subprocess.Popen[bytes] | None = None
+        # The kind of the autoscaler last started and not yet stopped, which says what its stop
+        # waits for; None is KEDA's, as before any start.
+        self.autoscaler: str | None = None
+        # When the last warm-up ended, which a CPU HPA's first reading must not reach back into.
+        self.warmed_at: float | None = None
 
     @property
     def profile(self) -> Mapping[str, Any]:
@@ -1069,7 +1187,9 @@ class LiveCluster:
         )
 
     def warm_pods(self) -> dict[str, list[int]]:
-        return asyncio.run(self._warm(self._ready_pods()))
+        times = asyncio.run(self._warm(self._ready_pods()))
+        self.warmed_at = time.time()
+        return times
 
     async def _warm(self, pods: Mapping[str, str]) -> dict[str, list[int]]:
         warmup = self.experiment.warmup
@@ -1178,19 +1298,59 @@ class LiveCluster:
         tokens = self._prometheus(TOKENS_QUERY.format(window=seconds), since, until, step)
         return pod_stalls_from(busy, tokens, seconds, step)
 
-    def start_autoscaler(self, kind: str) -> Mapping[str, Any]:
-        """The floor's pods first, so KEDA's HPA starts from them, then the object. Ready is KEDA's
-        condition that it built the scaler and made the HPA."""
+    def floor_autoscaler(self, kind: str) -> Mapping[str, Any]:
+        """The kind is kept first, so a run that fails from here on stops the right objects. Until
+        start_autoscaler there are none, and stop_autoscaler passes: helm's --ignore-not-found, and
+        kubectl wait --for=delete returns at once on what is gone."""
+        self.autoscaler = kind
         section: Mapping[str, Any] = self.profile["autoscaling"]
         self.scale(section["min_replicas"])
+        return section
+
+    def start_autoscaler(self) -> None:
+        """At the floor, so the HPA starts from its pods. Ready is KEDA's condition that it built
+        the scaler and made the HPA; ScalingActive is the plain HPA's that it read the pods' CPU."""
+        kind = self.autoscaler
+        if kind is None:
+            raise ExperimentError("no autoscaler to start: floor_autoscaler names its kind first")
+        if kind == CPU:
+            self._wait_for_quiet_cpu()
         subprocess.run(
             ["helm", "upgrade", "--install", AUTOSCALING_RELEASE, str(CHART), "--values", "-"],
-            input=yaml.safe_dump(helm_values(section, kind)),
+            input=yaml.safe_dump(helm_values(self.profile["autoscaling"], kind)),
             text=True,
             check=True,
         )
-        kubectl("wait", SCALED_OBJECT, "--for=condition=Ready", f"--timeout={AUTOSCALER_TIMEOUT}")
-        return section
+        timeout = f"--timeout={AUTOSCALER_TIMEOUT}"
+        if kind == CPU:
+            kubectl("wait", PLAIN_HPA, "--for=condition=ScalingActive", timeout)
+        else:
+            kubectl("wait", SCALED_OBJECT, "--for=condition=Ready", timeout)
+
+    def _wait_for_quiet_cpu(self) -> None:
+        """Until the plain HPA's first reading would be the pods after the warm-up, not the
+        warm-up: installed at once after it on 2026-11-17, the HPA scaled on it (P3.10's review).
+        KEDA's signals need no wait: the replay's tracker and the queue are empty until it
+        starts."""
+        if self.warmed_at is None:
+            raise ExperimentError("no warm-up yet, so none for the CPU HPA to wait out")
+        section = self.profile["autoscaling"]
+        request = cpu_cores(self.profile["pod"]["cpu_request"])
+        began = time.monotonic()
+        while not cpu_quiet(
+            json.loads(kubectl("get", "--raw", POD_METRICS)),
+            request,
+            section[CPU_TARGET_KEY],
+            self.warmed_at,
+        ):
+            if time.monotonic() - began >= QUIET_CPU_TIMEOUT_SECONDS:
+                raise ExperimentError(
+                    f"the vLLM pods' CPU was not quiet {QUIET_CPU_TIMEOUT_SECONDS} s after the "
+                    "warm-up, so the CPU HPA would scale on it"
+                )
+            time.sleep(QUIET_CPU_POLL_SECONDS)
+        waited = time.monotonic() - began
+        print(f"experiment: the pods' CPU was quiet {waited:.0f} s into the wait", flush=True)
 
     def stop_autoscaler(self) -> None:
         """KEDA's finalizer deletes the HPA with the object; both are waited for, as helm 4's
@@ -1208,8 +1368,12 @@ class LiveCluster:
             check=True,
         )
         timeout = f"--timeout={UNINSTALL_TIMEOUT}"
-        kubectl("wait", SCALED_OBJECT, "--for=delete", timeout)
-        kubectl("wait", KEDA_HPA, "--for=delete", timeout)
+        if self.autoscaler == CPU:
+            kubectl("wait", PLAIN_HPA, "--for=delete", timeout)
+        else:
+            kubectl("wait", SCALED_OBJECT, "--for=delete", timeout)
+            kubectl("wait", KEDA_HPA, "--for=delete", timeout)
+        self.autoscaler = None
 
     def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
         """At the profile's scrape interval, so each sample is a reading. Rounded as _prometheus
@@ -1221,6 +1385,12 @@ class LiveCluster:
             for name, query in SERIES_QUERIES.items()
         }
         return rows_from(answers, start, end)
+
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]:
+        """As autoscale_series, for the plain HPA's reading."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        start, end = round(since, 3), round(until, 3)
+        return cpu_rows_from(self._prometheus(CPU_QUERY, start, end, step), start, end)
 
 
 def _seconds_text(milliseconds: int | None) -> str:
@@ -1308,6 +1478,7 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
                     Crossings(**autoscale["crossings"]),
                 )
             )
+            report.append(summary_text(AutoscaleSummary(**extra["autoscale_summary"])))
     return report
 
 

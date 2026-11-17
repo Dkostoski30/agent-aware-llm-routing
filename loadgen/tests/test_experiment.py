@@ -18,7 +18,15 @@ from typing import Any
 import httpx
 import pytest
 import yaml
-from load_generator.autoscale import AutoscaleRow, Crossings, crossing_text
+from load_generator.autoscale import (
+    AutoscaleRow,
+    AutoscaleSummary,
+    CpuRow,
+    Crossings,
+    crossing_text,
+    helm_values,
+    summary_text,
+)
 from load_generator.experiment import (
     GPU_FIELDS,
     Experiment,
@@ -76,6 +84,8 @@ AUTOSCALE_ROWS = [
     AutoscaleRow(10.0, 2, 1, 2, 20),
     AutoscaleRow(15.0, 2, 1, 3, 20),
 ]
+# The plain HPA's reading of the pods' CPU over the same replay (P3.10).
+CPU_ROWS = [CpuRow(0.0, 12), CpuRow(5.0, 97.5)]
 ROUND_ROBIN_VALUES = REPO_ROOT / "infra" / "helm" / "router-round-robin-values.yaml"
 BASELINE = REPO_ROOT / "experiments" / "baseline.yaml"
 BASELINE_CHECK = REPO_ROOT / "experiments" / "baseline-check.yaml"
@@ -268,11 +278,14 @@ class FakeCluster:
         self.asked.append(f"stalls {since:.0f} {until:.0f} {seconds}")
         return list(self.stalls.get(self.replayed_variant or "", []))
 
-    def start_autoscaler(self, kind: str) -> dict[str, Any]:
-        self.asked.append(f"autoscaler {kind}")
+    def floor_autoscaler(self, kind: str) -> dict[str, Any]:
+        self.asked.append(f"floor {kind}")
+        return dict(AUTOSCALING)
+
+    def start_autoscaler(self) -> None:
+        self.asked.append("autoscaler on")
         if self.fail_autoscaler_start:
             raise RuntimeError("the autoscaler start broke")
-        return dict(AUTOSCALING)
 
     def stop_autoscaler(self) -> None:
         self.asked.append("autoscaler off")
@@ -280,6 +293,10 @@ class FakeCluster:
     def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
         self.asked.append(f"autoscale series {since:.0f} {until:.0f}")
         return list(AUTOSCALE_ROWS)
+
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]:
+        self.asked.append(f"cpu series {since:.0f} {until:.0f}")
+        return list(CPU_ROWS)
 
 
 def ticking_clock() -> Callable[[], float]:
@@ -2370,8 +2387,9 @@ def test_a_variant_may_be_scaled_by_an_autoscaler(tmp_path: Path) -> None:
 
 
 def test_an_autoscaler_with_no_object_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ExperimentError, match="cpu"):
-        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "autoscaler": "cpu"}])
+    """P3.10 made cpu a kind, so an unknown name is now memory (spec change, experiments/log.md)."""
+    with pytest.raises(ExperimentError, match="memory"):
+        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "autoscaler": "memory"}])
 
 
 def test_an_autoscaler_with_a_replica_count_of_its_own_is_refused(tmp_path: Path) -> None:
@@ -2427,19 +2445,22 @@ def test_main_refuses_an_autoscaler_the_profile_has_no_section_for_before_the_cl
 def test_an_autoscaled_variant_starts_at_the_floor_before_its_restart_and_ends_scaled_back(
     tmp_path: Path,
 ) -> None:
-    """The object is up before the warm-up, so the pods it starts with are the ones warmed, and
-    it is gone before the count is restored, which it would otherwise undo."""
+    """The floor before the restart, so its pods are the ones warmed; the autoscaler after the
+    warm-up, whose calls go straight to the pods and scaled a CPU HPA before the replay on
+    2026-11-17 (P3.10's review); and it is gone before the count is restored, which it would
+    otherwise undo."""
     experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
     cluster = FakeCluster()
     run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
     stem = f"exp-{experiment.hash}"
     assert cluster.asked == [
         "check",
-        "autoscaler remaining",
+        "floor remaining",
         "restart",
         "routing default",
         "config",
         "warm",
+        "autoscaler on",
         f"replay {stem}-remaining.jsonl",
         "jumps 101 102",
         "autoscale series 101 102",
@@ -2476,7 +2497,7 @@ def test_a_start_that_breaks_halfway_is_removed_and_scaled_back_too(tmp_path: Pa
     out.csv.parent.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="autoscaler start broke"):
         run_experiment(experiment, out, cluster, ticking_clock())
-    assert cluster.asked[-3:] == ["autoscaler remaining", "autoscaler off", "scale profile"]
+    assert cluster.asked[-3:] == ["autoscaler on", "autoscaler off", "scale profile"]
 
 
 def test_a_variant_without_an_autoscaler_never_touches_one(tmp_path: Path) -> None:
@@ -2502,7 +2523,12 @@ def test_an_autoscaled_variant_writes_its_series_and_the_meta_holds_the_crossing
         "autoscaler": "remaining",
         "section": AUTOSCALING,
         "csv": out.autoscale("remaining").name,
-        "crossings": {"remaining_seconds": 5.0, "scale_up_seconds": 10.0, "queue_seconds": 15.0},
+        "crossings": {
+            "remaining_seconds": 5.0,
+            "scale_up_seconds": 10.0,
+            "queue_seconds": 15.0,
+            "scaled_before_replay": False,
+        },
         "scale_up_before_queue": True,
     }
     assert meta["variants"]["default"]["autoscale"] is None
@@ -2560,15 +2586,26 @@ def test_the_live_cluster_scales_to_the_floor_then_installs_the_profiles_object(
     monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: steps.append(args))
     cluster = LiveCluster(experiment, {"real": real})
     monkeypatch.setattr(cluster, "scale", lambda replicas: steps.append(("scale", replicas)))
-    section = cluster.start_autoscaler("remaining")
+    section = cluster.floor_autoscaler("remaining")
     assert section == real["autoscaling"]
-    assert steps[0] == ("scale", real["autoscaling"]["min_replicas"])
+    assert steps == [("scale", real["autoscaling"]["min_replicas"])]
+    cluster.start_autoscaler()
     args, values = steps[1]
     assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
     assert args[4] == str(REPO_ROOT / "infra" / "charts" / "autoscaling")
     assert values["query"] == "sum(thesis_remaining_work)"
     assert values["threshold"] == real["autoscaling"]["remaining_work_target"]
     assert steps[2][:3] == ("wait", "scaledobject/vllm", "--for=condition=Ready")
+
+
+def test_the_live_cluster_starts_no_autoscaler_before_its_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor names the kind; without it there is nothing to install."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    with pytest.raises(ExperimentError, match="floor"):
+        LiveCluster(experiment, {"real": profile_file("real")}).start_autoscaler()
 
 
 def test_the_live_cluster_removes_the_object_and_waits_for_its_hpa_to_go(
@@ -2622,3 +2659,385 @@ def test_the_autoscale_files_kv_capacity_is_the_simulated_pods_cache() -> None:
     assert experiment.kv_capacity_tokens_per_pod == (
         simulator["kv_cache_blocks"] * simulator["block_size"]
     )
+
+
+# P3.10: a plain HPA on CPU (real pods only, D5), each autoscaled variant's summary, and the files.
+# 2026-11-17T16:41:00Z: the warm-up's end in the LiveCluster's quiet-CPU tests (P3.10's review).
+WARMED = 1794933660.0
+# metrics-server's samples of one vLLM pod: wholly after the warm-up and idle, and one whose 32 s
+# window reaches back into the warm-up, at its CPU.
+QUIET_SAMPLE = {"timestamp": "2026-11-17T16:41:30Z", "window": "15s", "cpu": "140m"}
+LOUD_SAMPLE = {"timestamp": "2026-11-17T16:41:30Z", "window": "32s", "cpu": "1150m"}
+
+
+def metrics_answer(sample: Mapping[str, str]) -> str:
+    return json.dumps(
+        {
+            "kind": "PodMetricsList",
+            "items": [
+                {
+                    "metadata": {"name": "vllm-a"},
+                    "timestamp": sample["timestamp"],
+                    "window": sample["window"],
+                    "containers": [{"name": "vllm", "usage": {"cpu": sample["cpu"]}}],
+                }
+            ],
+        }
+    )
+
+
+def answering_kubectl(steps: list[Any], metrics: list[str]) -> Callable[..., str]:
+    """Records each call; the metrics API gets the next of metrics, anything else ''."""
+
+    def kubectl(*args: str) -> str:
+        steps.append(args)
+        if args[:2] == ("get", "--raw"):
+            return metrics.pop(0)
+        return ""
+
+    return kubectl
+
+
+def quiet_kubectl(steps: list[Any]) -> Callable[..., str]:
+    return answering_kubectl(steps, [metrics_answer(QUIET_SAMPLE)])
+
+
+CPU_VARIANT = {
+    "name": "cpu",
+    "values": None,
+    "epp_config": "default-plugins.yaml",
+    "autoscaler": "cpu",
+}
+CPU_QUERY = (
+    'max(kube_horizontalpodautoscaler_status_target_metric{namespace="default",'
+    'horizontalpodautoscaler="vllm",metric_name="cpu",metric_target_type="utilization"})'
+)
+AUTOSCALE_SIM = REPO_ROOT / "experiments" / "autoscale-sim.yaml"
+AUTOSCALE_SIM_FAN_OUT = REPO_ROOT / "experiments" / "autoscale-sim-fan-out.yaml"
+AUTOSCALE_REAL = REPO_ROOT / "experiments" / "autoscale-real.yaml"
+
+
+def profile_file(name: str) -> dict[str, Any]:
+    loaded_profile: dict[str, Any] = yaml.safe_load(
+        (REPO_ROOT / "config" / f"{name}.yaml").read_text()
+    )
+    return loaded_profile
+
+
+def test_a_variant_may_be_scaled_by_a_plain_hpa_on_cpu(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    check_autoscaling(experiment, {"real": profile_file("real")})
+    assert [variant.autoscaler for variant in experiment.variants] == ["cpu"]
+
+
+def test_cpu_on_simulated_pods_is_refused(tmp_path: Path) -> None:
+    """A simulated pod's CPU says nothing of its load (D5)."""
+    experiment = loaded(tmp_path, profile="sim", variants=[CPU_VARIANT])
+    with pytest.raises(ExperimentError, match="D5"):
+        check_autoscaling(experiment, {"sim": profile_file("sim")})
+
+
+def test_cpu_on_a_profile_with_no_cpu_target_is_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    del real["autoscaling"]["cpu_target_percent"]
+    with pytest.raises(ExperimentError, match="cpu_target_percent"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_keda_on_a_profile_with_no_cpu_target_is_not_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = profile_file("real")
+    del real["autoscaling"]["cpu_target_percent"]
+    check_autoscaling(experiment, {"real": real})
+
+
+def test_a_cpu_variant_writes_the_hpas_reading_beside_its_series(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT, AUTOSCALED_VARIANT])
+    out = outputs(experiment, tmp_path)
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.cpu_hpa("cpu") == out.csv.with_name(f"exp-{experiment.hash}-cpu-cpu-hpa.csv")
+    with out.cpu_hpa("cpu").open() as file:
+        assert list(csv.DictReader(file)) == [
+            {"seconds": "0.0", "cpu_utilization_percent": "12"},
+            {"seconds": "5.0", "cpu_utilization_percent": "97.5"},
+        ]
+    assert meta["variants"]["cpu"]["cpu_hpa"] == out.cpu_hpa("cpu").name
+    assert meta["variants"]["remaining"]["cpu_hpa"] is None
+    assert not out.cpu_hpa("remaining").exists()
+    assert sum(step.startswith("cpu series") for step in cluster.asked) == 1
+
+
+def test_an_autoscaled_variant_has_its_summary_in_the_meta(tmp_path: Path) -> None:
+    """Run 1 is discarded; run 2, the kept one, is one call of 1 ms gap and 100 ms, timed from its
+    planned start. On the VM's clock the replay starts at 101 s (the ticking clock's first
+    reading in the variant), run 1's call runs 1-101 ms in and run 2's 9.95-10.05 s in, so the one
+    Ready pod is busy at the 10 s sample and idle at the other 3. Spec replicas rise to 2 at 10 s
+    and Ready never follows, so capacity never came."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    lines = replay_lines()
+    lines[0]["ts_start"] = 101_001
+    lines[1]["ts_start"] = 110_950
+    cluster = FakeCluster(replays={"remaining": lines})
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert meta["variants"]["remaining"]["autoscale_summary"] == {
+        "runs": 1,
+        "finished_runs": 1,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 101,
+        "completion_p95_ms": 101,
+        "completion_total_ms": 101,
+        "makespan_ms": 101,
+        "runs_per_minute": pytest.approx(60_000 / 101),
+        "scaled_before_replay": False,
+        "time_to_capacity_seconds": None,
+        "idle_pod_minutes": pytest.approx(15 / 60),
+    }
+    assert meta["variants"]["default"]["autoscale_summary"] is None
+
+
+def test_the_results_have_a_summary_csv_with_a_row_per_autoscaled_variant(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    write_results(out, rows, meta)
+    assert out.autoscale_summary == out.csv.with_name(
+        f"exp-{experiment.hash}-autoscale-summary.csv"
+    )
+    with out.autoscale_summary.open() as file:
+        summary_rows = list(csv.DictReader(file))
+    assert [(row["variant"], row["autoscaler"]) for row in summary_rows] == [
+        ("remaining", "remaining")
+    ]
+    assert summary_rows[0]["makespan_ms"] == "101"
+
+
+def test_results_with_no_autoscaled_variant_have_no_summary_csv(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    write_results(out, rows, meta)
+    assert not out.autoscale_summary.exists()
+
+
+def test_the_report_gives_an_autoscaled_variants_summary(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    summary = AutoscaleSummary(**meta["variants"]["remaining"]["autoscale_summary"])
+    assert summary_text(summary) in report_lines(rows, meta)
+
+
+def test_the_live_cluster_installs_a_plain_hpa_for_cpu_and_waits_until_it_reads_the_cpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ScalingActive: the HPA could compute a count from the pods' CPU."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    steps: list[Any] = []
+
+    def run(args: list[str], input: str, text: bool, check: bool) -> None:
+        assert text and check
+        steps.append((args, yaml.safe_load(input)))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", quiet_kubectl(steps))
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: steps.append(("scale", replicas)))
+    assert cluster.floor_autoscaler("cpu") == real["autoscaling"]
+    cluster.start_autoscaler()
+    assert steps[0] == ("scale", real["autoscaling"]["min_replicas"])
+    assert steps[1][:2] == ("get", "--raw")
+    args, values = steps[2]
+    assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
+    assert values == helm_values(real["autoscaling"], "cpu")
+    assert steps[3][:3] == ("wait", "hpa/vllm", "--for=condition=ScalingActive")
+
+
+def test_the_live_cluster_installs_the_cpu_hpa_once_the_pods_cpu_is_quiet_after_the_warm_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its first reading is metrics-server's latest sample, whose window reached into the warm-up
+    on 2026-11-17 and scaled it (P3.10's review). Asked again each poll until it is quiet."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    steps: list[Any] = []
+    answers = [metrics_answer(LOUD_SAMPLE), metrics_answer(QUIET_SAMPLE)]
+    monkeypatch.setattr(
+        "load_generator.experiment.subprocess.run",
+        lambda args, **_: steps.append(args[:2]),
+    )
+    monkeypatch.setattr("load_generator.experiment.kubectl", answering_kubectl(steps, answers))
+    monkeypatch.setattr(
+        "load_generator.experiment.time.sleep", lambda s: steps.append(("sleep", s))
+    )
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    cluster.start_autoscaler()
+    metrics = (
+        "get",
+        "--raw",
+        "/apis/metrics.k8s.io/v1beta1/namespaces/default/pods"
+        "?labelSelector=app.kubernetes.io%2Fname%3Dvllm",
+    )
+    assert steps[:4] == [metrics, ("sleep", 5), metrics, ["helm", "upgrade"]]
+
+
+def test_the_live_cluster_gives_up_on_cpu_that_stays_busy_after_the_warm_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    now = [0.0]
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    monkeypatch.setattr(
+        "load_generator.experiment.kubectl", lambda *args: metrics_answer(LOUD_SAMPLE)
+    )
+    monkeypatch.setattr("load_generator.experiment.time.sleep", sleep)
+    monkeypatch.setattr("load_generator.experiment.time.monotonic", lambda: now[0])
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    with pytest.raises(ExperimentError, match="not quiet 120 s after the warm-up"):
+        cluster.start_autoscaler()
+    assert now[0] == 120
+
+
+def test_the_live_cluster_installs_no_cpu_hpa_without_a_warm_up_to_wait_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    with pytest.raises(ExperimentError, match="warm"):
+        cluster.start_autoscaler()
+
+
+def test_the_live_cluster_keeps_when_its_warm_up_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+
+    async def warm(pods: Mapping[str, str]) -> dict[str, list[int]]:
+        return {name: [1] for name in pods}
+
+    monkeypatch.setattr(cluster, "_ready_pods", lambda: {"vllm-a": "10.0.0.1"})
+    monkeypatch.setattr(cluster, "_warm", warm)
+    monkeypatch.setattr("load_generator.experiment.time.time", lambda: WARMED)
+    assert cluster.warm_pods() == {"vllm-a": [1]}
+    assert cluster.warmed_at == WARMED
+
+
+def test_after_a_cpu_start_the_live_cluster_waits_for_the_plain_hpa_to_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No KEDA object was made, so it has none to wait for; the plain HPA would set the count
+    back after it is restored."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    steps: list[Any] = []
+
+    def run(args: list[str], check: bool, **_: Any) -> None:
+        steps.append(args)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", quiet_kubectl(steps))
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    cluster.start_autoscaler()
+    steps.clear()
+    cluster.stop_autoscaler()
+    assert steps[0][:4] == ["helm", "uninstall", "autoscaling", "--ignore-not-found"]
+    assert [step[:3] for step in steps[1:]] == [("wait", "hpa/vllm", "--for=delete")]
+
+
+def test_the_live_cluster_asks_prometheus_for_the_hpas_cpu_at_the_scrape_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    asked: list[str] = []
+
+    def kubectl(*args: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[2]).query)
+        assert (query["start"], query["end"]) == (["100.000"], ["110.000"])
+        assert query["step"] == [str(real["monitoring"]["scrape_interval_seconds"])]
+        asked.append(query["query"][0])
+        return prometheus_answer([{"metric": {}, "values": [[100.0, "12"], [105.0, "97.5"]]}])
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    rows = LiveCluster(experiment, {"real": real}).cpu_series(100.0, 110.0)
+    assert rows == [CpuRow(0.0, 12), CpuRow(5.0, 97.5)]
+    assert asked == [CPU_QUERY]
+
+
+@pytest.mark.parametrize(
+    ("path", "pattern"),
+    [(AUTOSCALE_SIM, "burst"), (AUTOSCALE_SIM_FAN_OUT, "burst-fan-out")],
+    ids=["burst", "burst-fan-out"],
+)
+def test_the_sim_autoscale_files_run_remaining_then_queue_on_one_replay(
+    path: Path, pattern: str
+) -> None:
+    experiment = committed(path)
+    sim = profile_file("sim")
+    check_routing(experiment, {"sim": sim})
+    check_autoscaling(experiment, {"sim": sim})
+    assert experiment.profile == "sim"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == pattern
+    assert experiment.seed == 6
+    assert [(v.name, v.autoscaler, v.default) for v in experiment.variants] == [
+        ("remaining", "remaining", True),
+        ("queue", "queue", True),
+    ]
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+    simulator = sim["simulator"]
+    assert experiment.kv_capacity_tokens_per_pod == (
+        simulator["kv_cache_blocks"] * simulator["block_size"]
+    )
+    load_trace(experiment.trace)
+
+
+def test_the_sim_autoscale_files_differ_only_in_the_pattern() -> None:
+    burst = yaml.safe_load(AUTOSCALE_SIM.read_text())
+    fan_out = yaml.safe_load(AUTOSCALE_SIM_FAN_OUT.read_text())
+    assert {**burst, "pattern": fan_out["pattern"]} == fan_out
+
+
+def test_the_real_autoscale_file_runs_cpu_on_real_pods_through_the_burst() -> None:
+    experiment = committed(AUTOSCALE_REAL)
+    real = profile_file("real")
+    check_routing(experiment, {"real": real})
+    check_autoscaling(experiment, {"real": real})
+    check_stall_window(experiment, {"real": real})
+    assert experiment.profile == "real"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert (experiment.pattern_name, experiment.seed) == ("burst", 6)
+    [variant] = experiment.variants
+    assert (variant.name, variant.autoscaler, variant.default) == ("cpu", "cpu", True)
+    assert experiment.pod_stall_seconds == 30
+    assert (
+        experiment.kv_capacity_tokens_per_pod
+        == committed(ROUTING_FASTER).kv_capacity_tokens_per_pod
+    )
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
