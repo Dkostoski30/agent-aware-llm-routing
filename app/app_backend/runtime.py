@@ -1,8 +1,11 @@
-"""The agent runtime as the app backend calls it (P3.12a): start a run, read how it ended.
+"""The agent runtime as the app backend calls it: start a run, read how it ended (P3.12a), pass
+a run's detail, calls and events on as the runtime sent them (P3.12b).
 
-Sync httpx: the chat endpoints are sync and run in FastAPI's threadpool, like the sqlite3 calls
-beside them. The client is built by from_env with AGENT_URL and app.runtime_timeout_seconds; tests
-build it on an httpx.MockTransport.
+Sync httpx for everything but the events: those endpoints are sync and run in FastAPI's threadpool,
+like the sqlite3 calls beside them. The events stream is async, so a browser that leaves cancels it
+and closes the runtime's stream at once, where a sync stream would hold a threadpool thread until
+the runtime's next byte. Both clients are built by from_env with AGENT_URL and
+app.runtime_timeout_seconds; tests build them on an httpx.MockTransport.
 """
 
 from dataclasses import dataclass
@@ -28,9 +31,19 @@ class RunState:
     error: str | None
 
 
+@dataclass(frozen=True)
+class Forwarded:
+    """A runtime answer as it came: its status, body and content type."""
+
+    status: int
+    body: bytes
+    content_type: str
+
+
 class RuntimeClient:
-    def __init__(self, http: httpx.Client) -> None:
+    def __init__(self, http: httpx.Client, events_http: httpx.AsyncClient) -> None:
         self._http = http
+        self._events_http = events_http
 
     def _send(self, method: str, path: str, body: dict[str, Any] | None = None) -> httpx.Response:
         try:
@@ -58,3 +71,26 @@ class RuntimeClient:
         response.raise_for_status()
         run = response.json()
         return RunState(status=run["status"], answer=run["answer"], error=run["error"])
+
+    def forward(self, path: str) -> Forwarded:
+        """GET path on the runtime, answered as it came, a 404 included."""
+        response = self._send("GET", path)
+        return Forwarded(
+            status=response.status_code,
+            body=response.content,
+            content_type=response.headers["content-type"],
+        )
+
+    async def open_events(self, run_id: str) -> httpx.Response:
+        """GET /runs/{id}/events, opened but not read: the caller reads the stream and closes it.
+        RuntimeUnavailable like _send, the stream closed first."""
+        path = f"/runs/{run_id}/events"
+        request = self._events_http.build_request("GET", path)
+        try:
+            response = await self._events_http.send(request, stream=True)
+        except httpx.HTTPError as error:
+            raise RuntimeUnavailable(f"GET {path}: {error!r}") from error
+        if response.is_server_error:
+            await response.aclose()
+            raise RuntimeUnavailable(f"GET {path}: {response.status_code}")
+        return response

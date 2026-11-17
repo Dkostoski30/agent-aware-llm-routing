@@ -1,5 +1,5 @@
-"""The app backend's HTTP API: register, login, logout, the logged-in user, health (P2.10a), and
-the chats (P3.12a, app_backend/chats.py).
+"""The app backend's HTTP API: register, login, logout, the logged-in user, health (P2.10a), the
+chats (P3.12a) and their runs' detail, calls and events (P3.12b), both in app_backend/chats.py.
 
 A login sets a session cookie holding a random token; the database keeps only the token's sha256,
 so a copy of the file holds no usable session. Sessions last app.session_ttl_seconds from login.
@@ -214,8 +214,15 @@ def from_env() -> FastAPI:
     """The app as P2.10b's Deployment runs it: the profile, the database file and the agent
     runtime's URL from the environment."""
     config = load_config(Path(os.environ["THESIS_CONFIG"]))
-    http = httpx.Client(base_url=os.environ["AGENT_URL"], timeout=config.runtime_timeout_seconds)
-    return create_app(config, Path(os.environ["THESIS_APP_DB"]), RuntimeClient(http))
+    agent_url = os.environ["AGENT_URL"]
+    http = httpx.Client(base_url=agent_url, timeout=config.runtime_timeout_seconds)
+    # A run's event stream lasts as long as the run, with steps minutes apart under load, so its
+    # reads wait without limit (P3.12b): the runtime ends the stream when the run ends, and a
+    # browser that leaves cancels it. Connecting and sending keep the runtime timeout.
+    events_http = httpx.AsyncClient(
+        base_url=agent_url, timeout=httpx.Timeout(config.runtime_timeout_seconds, read=None)
+    )
+    return create_app(config, Path(os.environ["THESIS_APP_DB"]), RuntimeClient(http, events_http))
 
 
 def main() -> None:

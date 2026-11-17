@@ -32,7 +32,8 @@ def make_client(tmp_path: Path) -> TestClient:
 
     # Auth never calls the agent runtime; a call would fail the test.
     runtime = RuntimeClient(
-        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent")
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent"),
+        httpx.AsyncClient(transport=httpx.MockTransport(refuse), base_url="http://agent"),
     )
     app = create_app(config, tmp_path / "app.db", runtime, lambda: 1000.0)
     return TestClient(app, base_url="https://testserver")

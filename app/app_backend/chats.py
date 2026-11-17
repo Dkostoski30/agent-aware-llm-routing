@@ -8,15 +8,20 @@ nothing and the SQLite file has one writer (D7).
 
 The runtime is called before anything is written: Python's sqlite3 opens a transaction only at the
 first INSERT or UPDATE, so no write lock is held while the app waits on the network.
+
+A run's detail, calls and events (P3.12b) are the runtime's, passed on unchanged, so run-calls.v1
+and run-events.v1 hold here too; the browser has no login at the runtime, so it asks the app, which
+passes them on only to the user whose chat started the run.
 """
 
 import logging
 import sqlite3
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app_backend import logs
@@ -32,6 +37,12 @@ RUN_EXPIRED = (
 )
 # One body for another user's chat and a missing one, so ids do not reveal which chats exist.
 NO_CHAT = "no such chat"
+# The same for runs: another user's run and an unknown id get this one body.
+NO_RUN = "no such run"
+# A run's detail, calls or events asked for while the runtime cannot answer; asking again may work.
+RUNTIME_DOWN = "The agent runtime could not be reached."
+# The headers of the runtime's event stream that the browser acts on, passed on with it.
+STREAM_HEADERS = ("content-type", "cache-control")
 # A file's id in schemas/run-request.v1.json: a lowercase slug of at most 64 characters.
 FILE_ID_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 MAX_FILE_ID_LENGTH = 64
@@ -65,6 +76,9 @@ class NewMessage(BaseModel):
 
     task: str = Field(min_length=1)
     files: list[RunFile] = []
+    # run-request.v1's seed, sent with this message's run only and not saved: make smoke sends one
+    # so its answer repeats (P3.12b); the UI sends none.
+    seed: int | None = None
 
 
 class FileInfo(BaseModel):
@@ -121,10 +135,15 @@ def owned_chat(conn: sqlite3.Connection, chat_id: int, user_id: int) -> Chat:
 
 
 def run_request(
-    conn: sqlite3.Connection, chat_id: int, task: str, files: list[RunFile], max_files: int
+    conn: sqlite3.Connection,
+    chat_id: int,
+    message: NewMessage,
+    files: list[RunFile],
+    max_files: int,
 ) -> dict[str, Any]:
-    """The run-request.v1 body: this message's files, then the chat's earlier ones, newest first,
-    max_files in all. A message without files sends none, like a run request without them."""
+    """The run-request.v1 body: the message's task and seed, its files (renamed where taken), then
+    the chat's earlier ones, newest first, max_files in all. A message without files or seed
+    sends none, like a run request without them."""
     earlier = conn.execute(
         "SELECT file_id, name, type, content FROM attachments WHERE chat_id = ?"
         " ORDER BY message_id DESC, id LIMIT ?",
@@ -134,7 +153,9 @@ def run_request(
         {"id": row[0], "name": row[1], "type": row[2], "content": row[3].decode()}
         for row in earlier
     ]
-    request: dict[str, Any] = {"task": task}
+    request: dict[str, Any] = {"task": message.task}
+    if message.seed is not None:
+        request["seed"] = message.seed
     if run_files:
         request["files"] = run_files
     return request
@@ -220,6 +241,21 @@ def chat_messages(conn: sqlite3.Connection, chat_id: int) -> list[Message]:
     ]
 
 
+async def passed_on(response: httpx.Response, run_id: str) -> AsyncGenerator[bytes]:
+    """The runtime's event stream, each piece as it arrives, then closed. A runtime that drops
+    mid-stream ends it after what it sent; the browser's EventSource then opens it again and the
+    runtime sends the run's events from the start (agent_runtime/app.py, run_events)."""
+    try:
+        async for chunk in response.aiter_bytes():
+            yield chunk
+    except httpx.TransportError as error:
+        logs.log(
+            logger, logging.WARNING, "run events dropped", **{"run-id": run_id}, error=repr(error)
+        )
+    finally:
+        await response.aclose()
+
+
 def router(
     config: AppConfig,
     runtime: RuntimeClient,
@@ -227,11 +263,66 @@ def router(
     use_conn: Any,
     use_user_id: Any,
 ) -> APIRouter:
-    """The chat endpoints. use_conn and use_user_id are app.py's dependencies: the request's
-    connection and the logged-in user's id (401 without a session)."""
+    """The chat and run endpoints. use_conn and use_user_id are app.py's dependencies: the
+    request's connection and the logged-in user's id (401 without a session)."""
     chats = APIRouter()
     Conn = Annotated[sqlite3.Connection, use_conn]
     UserId = Annotated[int, use_user_id]
+
+    def owned_run(run_id: str, user_id: UserId, conn: Conn) -> str:
+        """run_id, if a message in one of the user's chats holds it (only assistant rows hold
+        one, save_message); else 404. A dependency, so the async events endpoint gets it from
+        FastAPI's threadpool, off the event loop, and the connection is closed before the stream
+        starts (use_conn's scope)."""
+        row = conn.execute(
+            "SELECT 1 FROM messages JOIN chats ON chats.id = messages.chat_id"
+            " WHERE messages.run_id = ? AND chats.user_id = ?",
+            (run_id, user_id),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=NO_RUN)
+        return run_id
+
+    OwnedRun = Annotated[str, Depends(owned_run)]
+
+    def unreachable(run_id: str, error: RuntimeUnavailable) -> HTTPException:
+        logs.log(
+            logger, logging.WARNING, "runtime unavailable", **{"run-id": run_id}, error=str(error)
+        )
+        return HTTPException(status_code=502, detail=RUNTIME_DOWN)
+
+    def forwarded(run_id: str, path: str) -> Response:
+        try:
+            answer = runtime.forward(path)
+        except RuntimeUnavailable as error:
+            raise unreachable(run_id, error) from error
+        return Response(answer.body, status_code=answer.status, media_type=answer.content_type)
+
+    @chats.get("/runs/{run_id}")
+    def read_run(run_id: OwnedRun) -> Response:
+        return forwarded(run_id, f"/runs/{run_id}")
+
+    @chats.get("/runs/{run_id}/calls")
+    def read_calls(run_id: OwnedRun) -> Response:
+        return forwarded(run_id, f"/runs/{run_id}/calls")
+
+    @chats.get("/runs/{run_id}/events")
+    async def read_events(run_id: OwnedRun) -> Response:
+        try:
+            response = await runtime.open_events(run_id)
+        except RuntimeUnavailable as error:
+            raise unreachable(run_id, error) from error
+        if response.status_code != httpx.codes.OK:
+            # The runtime's 404 for a run its Redis TTL dropped: a short JSON body, read whole.
+            body = await response.aread()
+            await response.aclose()
+            return Response(
+                body, status_code=response.status_code, media_type=response.headers["content-type"]
+            )
+        return StreamingResponse(
+            passed_on(response, run_id),
+            headers={name: response.headers[name] for name in STREAM_HEADERS},
+        )
 
     @chats.post("/chats", status_code=201)
     def create_chat(body: NewChat, user_id: UserId, conn: Conn) -> Chat:
@@ -284,7 +375,7 @@ def router(
             file_id = unique_id(file.id, taken)
             taken.add(file_id)
             files.append(file.model_copy(update={"id": file_id}))
-        request = run_request(conn, chat_id, body.task, files, config.max_files)
+        request = run_request(conn, chat_id, body, files, config.max_files)
         try:
             run_id = runtime.start_run(request)
         except RunRefused as refused:

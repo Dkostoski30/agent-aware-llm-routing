@@ -48,7 +48,8 @@ def no_runtime() -> RuntimeClient:
         raise AssertionError(f"auth called the runtime: {request.method} {request.url}")
 
     return RuntimeClient(
-        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent")
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent"),
+        httpx.AsyncClient(transport=httpx.MockTransport(refuse), base_url="http://agent"),
     )
 
 
