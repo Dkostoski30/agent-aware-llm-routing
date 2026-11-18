@@ -56,14 +56,16 @@ export const OPEN_EVENT_STREAM = new InjectionToken<(url: string) => EventStream
 // EventSource.CLOSED: the browser gave up on the stream and will not reconnect.
 const CLOSED = 2;
 
-/** A run's events from the agent runtime over SSE (D6), through the dev server's /api proxy. */
+/** A run's events over SSE (D6): the agent runtime's, passed on by the app backend to the user whose chat started
+ * the run (P3.12b), through the dev server's /api proxy. */
 @Injectable({ providedIn: 'root' })
 export class RunEvents {
   private readonly open = inject(OPEN_EVENT_STREAM);
 
   /** Completes after the end event. A dropped connection is reconnected by the browser, and the agent replays
-   * the run from its run event. It errors once the browser gives up: the agent answered 404 (unknown or expired
-   * run) or another error, or the dev server could not reach it (make agent-forward stopped). */
+   * the run from its run event. It errors once the browser gives up: the app backend answered 404 (unknown,
+   * expired or another user's run), 502 (no agent runtime) or another error, or the dev server could not reach it
+   * (make app-forward stopped). */
   watch(runId: string): Observable<RunEvent> {
     return new Observable<RunEvent>((subscriber) => {
       const stream = this.open(`/api/runs/${encodeURIComponent(runId)}/events`);

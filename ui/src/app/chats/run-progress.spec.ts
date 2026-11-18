@@ -1,8 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Subject, of } from 'rxjs';
-import { RunCall, RunCalls } from './run-calls';
-import { RunEnd, RunEvent, RunEvents, RunStarted, RunStep } from './run-events';
-import { RunScreen } from './run-screen';
+import { RunCall, RunCalls } from '../runs/run-calls';
+import { RunEnd, RunEvent, RunEvents, RunStarted, RunStep } from '../runs/run-events';
+import { RunProgress } from './run-progress';
 
 const RUN: RunStarted = {
   run_id: 'run-0a1b2c3d4e5f',
@@ -31,8 +31,8 @@ const END: RunEnd = {
   elapsed_ms: 2_100,
 };
 
-describe('RunScreen', () => {
-  let fixture: ComponentFixture<RunScreen>;
+describe('RunProgress', () => {
+  let fixture: ComponentFixture<RunProgress>;
   let page: HTMLElement;
   let events: Subject<RunEvent>;
   let watched: string[];
@@ -63,13 +63,13 @@ describe('RunScreen', () => {
         { provide: RunCalls, useValue: { read: () => of([]) } },
       ],
     });
-    fixture = TestBed.createComponent(RunScreen);
-    fixture.componentRef.setInput('id', RUN.run_id);
+    fixture = TestBed.createComponent(RunProgress);
+    fixture.componentRef.setInput('runId', RUN.run_id);
     page = fixture.nativeElement;
     await fixture.whenStable();
   });
 
-  it('watches the run of its route', () => {
+  it('watches the run it is given', () => {
     expect(watched).toEqual([RUN.run_id]);
   });
 
@@ -176,9 +176,97 @@ describe('RunScreen', () => {
     await fixture.whenStable();
     expect(text('.ag-notice--fail')).toContain('The run events could not be read.');
   });
+
+  it('tells the chat when the run ends, so it can read the saved answer', async () => {
+    const ended = vi.fn();
+    fixture.componentRef.instance.runEnded.subscribe(ended);
+    await send({ kind: 'run', data: RUN });
+    await send({ kind: 'step', data: STEP_1 });
+    expect(ended).not.toHaveBeenCalled();
+    await send({ kind: 'end', data: END });
+    expect(ended).toHaveBeenCalledOnce();
+  });
+
+  it('tells the chat when the run events cannot be read', async () => {
+    const ended = vi.fn();
+    fixture.componentRef.instance.runEnded.subscribe(ended);
+    events.error(new Error('closed'));
+    await fixture.whenStable();
+    expect(ended).toHaveBeenCalledOnce();
+  });
 });
 
-describe('RunScreen badges', () => {
+describe('RunProgress given another run', () => {
+  const OTHER: RunStarted = { ...RUN, run_id: 'run-ffffffffffff', task: 'What is 2 plus 2?' };
+  let fixture: ComponentFixture<RunProgress>;
+  let page: HTMLElement;
+  // One stream per watched run, in order.
+  let streams: Subject<RunEvent>[];
+  let watched: string[];
+  let asked: string[];
+
+  async function switchTo(runId: string) {
+    fixture.componentRef.setInput('runId', runId);
+    await fixture.whenStable();
+  }
+
+  beforeEach(async () => {
+    streams = [];
+    watched = [];
+    asked = [];
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: RunEvents,
+          useValue: {
+            watch: (id: string) => {
+              watched.push(id);
+              const stream = new Subject<RunEvent>();
+              streams.push(stream);
+              return stream.asObservable();
+            },
+          },
+        },
+        { provide: RunCalls, useValue: { read: (id: string) => (asked.push(id), of([])) } },
+      ],
+    });
+    fixture = TestBed.createComponent(RunProgress);
+    fixture.componentRef.setInput('runId', RUN.run_id);
+    page = fixture.nativeElement;
+    await fixture.whenStable();
+    streams[0].next({ kind: 'run', data: RUN });
+    streams[0].next({ kind: 'step', data: STEP_1 });
+    await fixture.whenStable();
+  });
+
+  it('stops following the old run and follows the new one', async () => {
+    await switchTo(OTHER.run_id);
+    expect(watched).toEqual([RUN.run_id, OTHER.run_id]);
+    expect(streams[0].observed).toBe(false);
+    expect(streams[1].observed).toBe(true);
+  });
+
+  it('draws only the new run, and asks for the calls of the new run', async () => {
+    await switchTo(OTHER.run_id);
+    expect(page.querySelector('.ag-run-head')).toBeNull();
+
+    streams[1].next({ kind: 'run', data: OTHER });
+    streams[1].next({ kind: 'step', data: { ...STEP_1, run_id: OTHER.run_id } });
+    await fixture.whenStable();
+    expect(page.querySelector('.ag-run-head h1')?.textContent?.trim()).toBe('What is 2 plus 2?');
+    expect(asked).toEqual([RUN.run_id, OTHER.run_id]);
+  });
+
+  it('clears a lost stream when it follows another run', async () => {
+    streams[0].error(new Error('closed'));
+    await fixture.whenStable();
+    expect(page.querySelector('.ag-notice--fail')).not.toBeNull();
+    await switchTo(OTHER.run_id);
+    expect(page.querySelector('.ag-notice--fail')).toBeNull();
+  });
+});
+
+describe('RunProgress badges', () => {
   const CALL_1: RunCall = {
     step: 1,
     ts_start: 1_793_600_000_000,
@@ -192,7 +280,7 @@ describe('RunScreen badges', () => {
   };
   const CALL_2: RunCall = { ...CALL_1, step: 2, duration_ms: 1_600, cached_tokens: 0 };
 
-  let fixture: ComponentFixture<RunScreen>;
+  let fixture: ComponentFixture<RunProgress>;
   let page: HTMLElement;
   let events: Subject<RunEvent>;
   // One per request, in order, so a test decides what each answers and when.
@@ -236,8 +324,8 @@ describe('RunScreen badges', () => {
         },
       ],
     });
-    fixture = TestBed.createComponent(RunScreen);
-    fixture.componentRef.setInput('id', RUN.run_id);
+    fixture = TestBed.createComponent(RunProgress);
+    fixture.componentRef.setInput('runId', RUN.run_id);
     page = fixture.nativeElement;
     await fixture.whenStable();
     await send({ kind: 'run', data: RUN });

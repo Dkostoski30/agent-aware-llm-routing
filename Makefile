@@ -1,11 +1,14 @@
 .PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
-# training environment is installed (uv sync --locked --project training, P1.7).
+# training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
+# watching (P3.13b); a clone without ui/node_modules installs the locked packages first, as make ui does.
 test:
 	uv run --locked pytest
 	if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
 	if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
+	if [ ! -d ui/node_modules ]; then cd ui && npm ci --no-audit --no-fund; fi
+	cd ui && npx --no-install ng test --watch=false
 
 lint:
 	uv run --locked pre-commit run --all-files
@@ -178,8 +181,8 @@ reset-app:
 	kubectl rollout status deployment/app --timeout=$(APP_RESTART_TIMEOUT)
 
 # The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
-# forwarding; it proxies /api/auth to make app-forward and the rest of /api to make agent-forward (ui/proxy.conf.json,
-# where the first matching path wins, so /api/auth comes first; P3.13a). profile.json feeds the top bar's chip, so
+# forwarding; it proxies all of /api to make app-forward (ui/proxy.conf.json), since the app backend passes a run's
+# detail, calls and events on from the agent runtime (P3.12b, P3.13b). profile.json feeds the top bar's chip, so
 # PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
 ui:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make ui PROFILE=real|sim|demo"; exit 2; fi

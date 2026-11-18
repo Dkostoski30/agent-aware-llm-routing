@@ -1,12 +1,8 @@
-import { Component, DestroyRef, OnInit, computed, inject, input, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, catchError, of, switchMap } from 'rxjs';
-import { Answer } from '../ui/answer';
-import { Icon } from '../ui/icon';
-import { RunHeader } from '../ui/run-header';
-import { StepCard } from '../ui/step-card';
-import { RunCall, RunCalls } from './run-calls';
-import { RunEvents } from './run-events';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { EMPTY, Observable, Subject, catchError, merge, of, switchMap, tap } from 'rxjs';
+import { RunCall, RunCalls } from '../runs/run-calls';
+import { RunEvent, RunEvents } from '../runs/run-events';
 import {
   NO_RUN,
   answerUnbacked,
@@ -17,11 +13,17 @@ import {
   segments,
   stepCards,
   stepInFlight,
-} from './run-view';
+} from '../runs/run-view';
+import { Answer } from '../ui/answer';
+import { Icon } from '../ui/icon';
+import { RunHeader } from '../ui/run-header';
+import { StepCard } from '../ui/step-card';
 
-/** A run as its events arrive (RunScreen card): the header, the step cards filling the grid, then the answer. */
+/** An answer still running in a chat, as its events arrive (RunScreen card, moved from /runs/:id in P3.13b): the
+ * header, the step cards filling the grid, then the answer. The chat reads its saved answer once this says the run
+ * ended, and shows that instead. */
 @Component({
-  selector: 'app-run-screen',
+  selector: 'app-run-progress',
   imports: [Answer, Icon, RunHeader, StepCard],
   template: `
     <div class="ag-scroll">
@@ -96,7 +98,7 @@ import {
               <app-icon name="warn" />
               <div>
                 <b>The run events could not be read.</b> The stream for
-                <code>{{ id() }}</code> stopped: the run is unknown or expired, or the agent did not
+                <code>{{ runId() }}</code> stopped: the agent runtime or the app backend did not
                 answer. Reloading the page tries again.
               </div>
             </div>
@@ -114,13 +116,12 @@ import {
     }
   `,
 })
-export class RunScreen implements OnInit {
-  // Bound from the route's :id (withComponentInputBinding in app.config.ts).
-  readonly id = input.required<string>();
+export class RunProgress {
+  readonly runId = input.required<string>();
+  /** The end event came, or the events can no longer be read: either way the saved message now says more. */
+  readonly runEnded = output();
   private readonly events = inject(RunEvents);
   private readonly runCalls = inject(RunCalls);
-  private readonly destroyRef = inject(DestroyRef);
-  private readonly stepLanded = new Subject<void>();
   protected readonly view = signal(NO_RUN);
   // The stream failed for good (unknown or expired run, agent unreachable).
   protected readonly lost = signal(false);
@@ -142,28 +143,46 @@ export class RunScreen implements OnInit {
       : `${this.view().steps.length} done · ${this.expected()} expected`,
   );
 
-  // The id input is set before ngOnInit, not in the constructor.
-  ngOnInit(): void {
-    // Every answer holds all the calls so far, so a newer step replaces a request still waiting (switchMap), and the
-    // next answer makes up for a failed one.
-    this.stepLanded
+  // A new run id stops following the old run and starts from nothing (P2.6: a reused component re-watches its id).
+  constructor() {
+    toObservable(this.runId)
       .pipe(
-        switchMap(() => this.runCalls.read(this.id()).pipe(catchError(() => of(undefined)))),
-        takeUntilDestroyed(this.destroyRef),
+        switchMap((runId) => {
+          this.view.set(NO_RUN);
+          this.lost.set(false);
+          this.calls.set([]);
+          this.callsLost.set(false);
+          return this.follow(runId);
+        }),
+        takeUntilDestroyed(),
       )
-      .subscribe((calls) => {
+      .subscribe();
+  }
+
+  /** The run's events, and its calls after each step. Every answer holds all the calls so far, so a newer step
+   * replaces a request still waiting (switchMap), and the next answer makes up for a failed one. */
+  private follow(runId: string): Observable<unknown> {
+    const stepLanded = new Subject<void>();
+    const calls = stepLanded.pipe(
+      switchMap(() => this.runCalls.read(runId).pipe(catchError(() => of(undefined)))),
+      tap((calls) => {
         this.callsLost.set(calls === undefined);
         if (calls !== undefined) this.calls.set(calls);
-      });
-    this.events
-      .watch(this.id())
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (event) => {
-          this.view.update((view) => applyEvent(view, event));
-          if (event.kind === 'step') this.stepLanded.next();
-        },
-        error: () => this.lost.set(true),
-      });
+      }),
+    );
+    const events = this.events.watch(runId).pipe(
+      tap((event: RunEvent) => {
+        this.view.update((view) => applyEvent(view, event));
+        if (event.kind === 'step') stepLanded.next();
+        if (event.kind === 'end') this.runEnded.emit();
+      }),
+      catchError(() => {
+        this.lost.set(true);
+        this.runEnded.emit();
+        return EMPTY;
+      }),
+    );
+    // calls first, so it listens before the first step lands.
+    return merge(calls, events);
   }
 }

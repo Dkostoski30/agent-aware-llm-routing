@@ -1,13 +1,14 @@
 import { Component, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
 import { Auth } from '../auth/auth';
+import { ChatListToggle } from '../chats/chat-list-toggle';
 import { Theme } from '../theme/theme';
 import { Horse } from './horse';
 import { Icon } from './icon';
 
 /** Across the top of every screen (TopBar card). The chip names the profile and model, so a screenshot says
- * which setup produced it; it is left out when the UI was started without a profile. New task and Log out show
- * only to a logged-in user (P3.13a). */
+ * which setup produced it; it is left out when the UI was started without a profile. Chats, New chat and Log out
+ * show only to a logged-in user (P3.13a); Chats shows or hides the chat list (P3.13b). */
 @Component({
   selector: 'app-top-bar',
   imports: [Horse, Icon],
@@ -15,8 +16,16 @@ import { Icon } from './icon';
     <header class="ag-topbar">
       <span class="ag-brand"><app-horse [state]="working() ? 'working' : 'idle'" />Tenax</span>
       @if (auth.user()) {
-        <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="newTask()">
-          <app-icon name="plus" />New task
+        <button
+          type="button"
+          class="ag-btn ag-btn--ghost ag-btn--sm"
+          [attr.aria-pressed]="chatList.shown()"
+          (click)="chatList.toggle()"
+        >
+          <app-icon name="chat" />Chats
+        </button>
+        <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="newChat()">
+          <app-icon name="plus" />New chat
         </button>
       }
       <span class="ag-spacer"></span>
@@ -48,10 +57,11 @@ export class TopBar {
   readonly working = input(false);
   protected readonly theme = inject(Theme);
   protected readonly auth = inject(Auth);
+  protected readonly chatList = inject(ChatListToggle);
   private readonly router = inject(Router);
 
-  protected newTask(): void {
-    void this.router.navigate(['/']);
+  protected newChat(): void {
+    void this.router.navigate(['/chats']);
   }
 
   /** Back to /login once the backend has deleted the session; a failed logout leaves the user logged in. */
