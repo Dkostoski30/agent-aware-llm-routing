@@ -307,8 +307,9 @@ app:
     n: 16384
     r: 8
     p: 5
-  # NIST SP 800-63B-4: at least 15 characters when the password is the only factor, as it is here.
-  min_password_length: 15
+  # 8, the user's choice on 2026-11-18, so a password is quick to type during the demo. NIST SP 800-63B-4 asks for 15
+  # when the password is the only factor, as it is here, so this is below it; like NIST, no rule on capitals or symbols.
+  min_password_length: 8
   # The session cookie travels over HTTPS only. Browsers treat http://localhost as secure, so the port-forwarded app
   # still works; false only to open the app over plain HTTP under another host name.
   cookie_secure: true

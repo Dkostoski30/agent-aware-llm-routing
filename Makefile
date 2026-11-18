@@ -178,7 +178,8 @@ reset-app:
 	kubectl rollout status deployment/app --timeout=$(APP_RESTART_TIMEOUT)
 
 # The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
-# forwarding; it proxies /api to make agent-forward (ui/proxy.conf.json). profile.json feeds the top bar's chip, so
+# forwarding; it proxies /api/auth to make app-forward and the rest of /api to make agent-forward (ui/proxy.conf.json,
+# where the first matching path wins, so /api/auth comes first; P3.13a). profile.json feeds the top bar's chip, so
 # PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
 ui:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make ui PROFILE=real|sim|demo"; exit 2; fi

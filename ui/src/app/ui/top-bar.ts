@@ -1,20 +1,24 @@
 import { Component, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
+import { Auth } from '../auth/auth';
 import { Theme } from '../theme/theme';
 import { Horse } from './horse';
 import { Icon } from './icon';
 
 /** Across the top of every screen (TopBar card). The chip names the profile and model, so a screenshot says
- * which setup produced it; it is left out when the UI was started without a profile. */
+ * which setup produced it; it is left out when the UI was started without a profile. New task and Log out show
+ * only to a logged-in user (P3.13a). */
 @Component({
   selector: 'app-top-bar',
   imports: [Horse, Icon],
   template: `
     <header class="ag-topbar">
       <span class="ag-brand"><app-horse [state]="working() ? 'working' : 'idle'" />Tenax</span>
-      <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="newTask()">
-        <app-icon name="plus" />New task
-      </button>
+      @if (auth.user()) {
+        <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="newTask()">
+          <app-icon name="plus" />New task
+        </button>
+      }
       <span class="ag-spacer"></span>
       @if (profile()) {
         <span class="ag-profile"
@@ -29,6 +33,11 @@ import { Icon } from './icon';
       >
         <app-icon name="moon" />
       </button>
+      @if (auth.user()) {
+        <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="logOut()">
+          Log out
+        </button>
+      }
     </header>
   `,
   styles: ':host { display: contents; }',
@@ -38,9 +47,15 @@ export class TopBar {
   readonly model = input<string>();
   readonly working = input(false);
   protected readonly theme = inject(Theme);
+  protected readonly auth = inject(Auth);
   private readonly router = inject(Router);
 
   protected newTask(): void {
     void this.router.navigate(['/']);
+  }
+
+  /** Back to /login once the backend has deleted the session; a failed logout leaves the user logged in. */
+  protected logOut(): void {
+    this.auth.logout().subscribe(() => void this.router.navigate(['/login']));
   }
 }
