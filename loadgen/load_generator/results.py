@@ -53,7 +53,7 @@ FEWEST_TOKENS_FOR_SPEED = load_report_config().fewest_tokens_for_speed
 
 
 @dataclass(frozen=True)
-class _Timed:
+class Timed:
     """In milliseconds from the replay's start. ended is None for a failed call."""
 
     line: Line
@@ -106,13 +106,13 @@ class VariantTotals:
     over_limit_ttft_ms: int
 
 
-def _timed_calls(lines: Sequence[Line], starts: Sequence[float]) -> list[_Timed]:
+def timed_calls(lines: Sequence[Line], starts: Sequence[float]) -> list[Timed]:
     """In the order of the lines. A step starts when the step before it ended, its last reply when
     it fanned out, plus its gap (D9)."""
     by_run: dict[str, list[int]] = {}
     for index, line in enumerate(lines):
         by_run.setdefault(line["run_id"], []).append(index)
-    timed: dict[int, _Timed] = {}
+    timed: dict[int, Timed] = {}
     for run_id, indexes in by_run.items():
         clock = round(starts[run_position(run_id) - 1] * 1000)
         for _, step_indexes in groupby(indexes, key=lambda index: lines[index]["step"]):
@@ -121,11 +121,11 @@ def _timed_calls(lines: Sequence[Line], starts: Sequence[float]) -> list[_Timed]
                 line = lines[index]
                 begun = clock + line["gap_before_ms"]
                 if "duration_ms" not in line:
-                    timed[index] = _Timed(line, begun, None, None)
+                    timed[index] = Timed(line, begun, None, None)
                     continue
                 ended = begun + line["duration_ms"]
                 first_token = begun + line["ttft_ms"] if "ttft_ms" in line else ended
-                timed[index] = _Timed(line, begun, first_token, ended)
+                timed[index] = Timed(line, begun, first_token, ended)
                 ends.append(ended)
             if ends:
                 clock = max(ends)
@@ -137,7 +137,7 @@ def _tokens(line: Line) -> int:
     return tokens
 
 
-def _tokens_on_pod(call: _Timed, answered: Sequence[_Timed]) -> int:
+def _tokens_on_pod(call: Timed, answered: Sequence[Timed]) -> int:
     """Its own tokens, and those of each call on its pod that was in flight between its start and
     its first token. A call that ended exactly as this one began has left."""
     until = call.first_token
@@ -170,7 +170,7 @@ def call_rows(
 ) -> list[CallRow]:
     """One row per line, in their order, without the first runs by start time. The dropped runs
     still count in tokens_on_pod, since their calls did fill the pods."""
-    timed = _timed_calls(lines, starts)
+    timed = timed_calls(lines, starts)
     answered = [call for call in timed if call.ended is not None and "pod" in call.line]
     pods = _pods_by_step(lines)
     rows = []
@@ -206,7 +206,7 @@ def pod_switch_share(lines: Sequence[Line], starts: Sequence[float]) -> float | 
     """The share of picks that went to another pod than the pick before, in order of arrival at the
     gateway. Strict round-robin on 2 pods gives 1, a coin toss 0.5. None with under 2 picks."""
     picks = sorted(
-        (call for call in _timed_calls(lines, starts) if "pod" in call.line),
+        (call for call in timed_calls(lines, starts) if "pod" in call.line),
         key=lambda call: call.begun,
     )
     if len(picks) < 2:

@@ -18,6 +18,22 @@ def test_each_profile_loads_and_its_scrypt_cost_hashes(profile: str) -> None:
     password = "p" * config.min_password_length
     assert verify_password(password, hash_password(password, config.scrypt))
     assert config.session_ttl_seconds > 0
+    assert config.runtime_timeout_seconds > 0
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_file_limit_is_the_agents(profile: str) -> None:
+    """The app never sends a run more files than the agent runtime accepts."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    assert load_config(path).max_files == yaml.safe_load(path.read_text())["agent"]["max_files"]
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_cluster_poll_is_the_scrape_interval(profile: str) -> None:
+    """The panel asks as often as Prometheus has something new (P3.11)."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    scrape = yaml.safe_load(path.read_text())["monitoring"]["scrape_interval_seconds"]
+    assert load_config(path).cluster_poll_seconds == scrape
 
 
 def test_a_missing_key_raises(tmp_path: Path) -> None:

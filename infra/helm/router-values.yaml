@@ -1,6 +1,7 @@
 # llm-d-router-gateway chart v0.11.0 (P1.2). Release vllm-pool creates the InferencePool vllm-pool over the vLLM pods
 # and its Endpoint Picker (EPP) vllm-pool-epp. The EPP runs the chart's default scheduling profile (queue,
-# KV-cache and prefix-cache scorers), the "default picker" baseline; P3.1 replaces the image with a self-built one.
+# KV-cache and prefix-cache scorers), the "default picker" baseline, on the image built from gateway/ (P3.1);
+# infra/helm/router-upstream-values.yaml puts upstream's image back.
 router:
   modelServers:
     # The labels of the vllm chart's pods (infra/charts/vllm/templates/deployment.yaml).
@@ -15,9 +16,13 @@ router:
     # fail the request instead.
     failureMode: FailClose
   epp:
+    # infra/picker-image.sh builds it into k3s. The tag, a hash of gateway/, is not here: infra/install-gateway.sh and
+    # infra/set-routing.sh take it from that script, so no variant can run on another build than the repo's. Never: an
+    # image missing from k3s fails the rollout instead of being looked for in a registry.
     image:
-      # Pinned by digest, so P3.1 compares its self-built picker against exactly this image.
-      tag: v0.11.0@sha256:39257d24552d16d8f215d3de25cc734fd44af3b282b67032db01aff900c610cf
+      registry: thesis
+      repository: picker
+      pullPolicy: Never
     flags:
       # 3 (VERBOSE) is the lowest level that logs "Request handled" with the chosen endpoint
       # (pkg/epp/requestcontrol/director.go in llm-d-router v0.11.0); infra/checks/gateway_check.sh reads it.

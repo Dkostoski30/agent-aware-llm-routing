@@ -15,7 +15,8 @@ export interface RunCall {
   pod?: string;
 }
 
-/** A run's call records from the agent runtime, through the dev server's /api proxy. */
+/** A run's call records from the agent runtime, passed on by the app backend (P3.12b), through the dev server's
+ * /api proxy. */
 @Injectable({ providedIn: 'root' })
 export class RunCalls {
   private readonly http = inject(HttpClient);

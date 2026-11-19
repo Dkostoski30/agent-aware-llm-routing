@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/cluster.v1.json",
+  "title": "Cluster v1",
+  "description": "Body of GET /cluster on the app backend (P3.11): the vLLM pods, their queues and the cluster's remaining work, read from Prometheus with the Grafana panels' queries, so the two differ by at most one scrape.",
+  "type": "object",
+  "properties": {
+    "remaining_work": {
+      "description": "sum(thesis_remaining_work): every active run's max(expected-steps - step, 1) (D2, P3.8). 0 when no run is active.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "active_runs": {
+      "description": "sum(thesis_active_runs). 0 when no run is active.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "poll_seconds": {
+      "description": "How long the UI waits before asking again: the profile's Prometheus scrape interval, since nothing changes sooner.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "pods": {
+      "description": "One entry per vLLM pod Kubernetes lists, sorted by name.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "state": {
+            "description": "D14's pod states. draining: Kubernetes is deleting the pod (until P4.3 adds a drain before it). failed: phase Failed or Unknown. ready: Running and Ready. starting: anything else.",
+            "enum": ["ready", "starting", "draining", "failed"]
+          },
+          "queue": {
+            "description": "vllm:num_requests_waiting; null until the pod's metrics are scraped, so it never reads as 0.",
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "running": {
+            "description": "vllm:num_requests_running; null like queue.",
+            "type": ["integer", "null"],
+            "minimum": 0
+          }
+        },
+        "required": ["name", "state", "queue", "running"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["remaining_work", "active_runs", "poll_seconds", "pods"],
+  "additionalProperties": false
+}

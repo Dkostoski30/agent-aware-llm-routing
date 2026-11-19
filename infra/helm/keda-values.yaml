@@ -1,0 +1,32 @@
+# Values for the KEDA chart 2.21.0 (P3.9a), on top of the chart defaults. KEDA's targets are not here: the ScaledObjects
+# take them from config/<profile>.yaml (D11, P3.9b).
+
+# The admission webhooks only validate ScaledObjects, which the thesis writes itself; turning them off saves their pod
+# on the 9.7 GiB WSL VM and also turns off the operator's patching of the webhook configuration.
+webhooks:
+  enabled: false
+
+image:
+  # The chart's default, Always, pulls from ghcr.io on every pod start, so make up would fail without network; the
+  # tag is the chart's appVersion, pinned by the chart version (versions.md).
+  pullPolicy: IfNotPresent
+
+# No other pod in the cluster requests memory, so the requests are bookkeeping for the scheduler. Each memory request
+# sits above what the pod used idle on make up (P3.9a, versions.md: operator 32Mi, metrics server 72-84Mi); CPU is 50m,
+# half the chart's 100m, since both pods used 3-5m idle. The limits stop a leak at 500Mi, half the chart's 1000Mi: the
+# real profile's VM once had only 1.4 GB available (Gate 2's first try).
+resources:
+  operator:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 1
+      memory: 500Mi
+  metricServer:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 1
+      memory: 500Mi

@@ -4,12 +4,13 @@
 # Since GAIE v1.6.0 the full Endpoint Picker lives in llm-d-router; GAIE keeps the InferencePool API (spike
 # 2026-10-27, experiments/log.md).
 # Idempotent: kubectl apply and helm upgrade --install converge to the same state on every run.
+# Usage: install-gateway.sh PROFILE. The picker runs the profile's routing section (infra/routing-values.sh, P3.2).
 set -euo pipefail
 
 # The newest releases at least two weeks old on 2026-10-27 (versions.md, Container and cluster). Manifests are
 # sha256-checked and charts pinned by digest, so a re-pushed tag can't change what make up installs. The charts'
-# images come from the chart, as for the monitoring stack (P1.1); only the EPP image is pinned by digest on top
-# (infra/helm/router-values.yaml).
+# images come from the chart, as for the monitoring stack (P1.1), except the EPP's: built from gateway/ (P3.1), so make up
+# runs infra/picker-image.sh first.
 GATEWAY_API_VERSION=v1.6.3
 GATEWAY_API_SHA256=356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5
 GAIE_VERSION=v1.6.2
@@ -29,11 +30,15 @@ CRD_TIMEOUT=60s
 # a slow connection, a cached install is Ready in seconds.
 INSTALL_TIMEOUT=300s
 
+profile=${1:?usage: infra/install-gateway.sh PROFILE   (real | real-plain | sim | demo)}
+
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=infra/router-chart.sh
 source "$REPO_ROOT/infra/router-chart.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+# Before anything is installed, so a profile that is not there or a routing section refused stops the script at once.
+routing_values=$(bash "$REPO_ROOT/infra/routing-values.sh" "$profile")
 
 # apply_crds <url> <sha256>: applies a release's CRD manifest once its checksum matches (as infra/bootstrap.sh does).
 apply_crds() {
@@ -60,10 +65,16 @@ helm upgrade --install agentgateway "$AGENTGATEWAY_CHART" \
   --values "$REPO_ROOT/infra/helm/agentgateway-values.yaml" \
   --wait --timeout "$INSTALL_TIMEOUT"
 
-# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp).
-helm upgrade --install vllm-pool "$ROUTER_CHART" \
+# The release name names the InferencePool (vllm-pool) and the EPP (vllm-pool-epp). The image's tag and the profile's
+# routing as infra/set-routing.sh passes them; captured first, since a failure inside <(...) would not stop the script.
+picker_values=$(bash "$REPO_ROOT/infra/picker-image.sh" --values)
+# Pulled here into the local copy every later routing switch installs from (router_chart_path).
+chart=$(router_chart_path)
+helm upgrade --install vllm-pool "$chart" \
   --namespace "$POOL_NAMESPACE" \
   --values "$REPO_ROOT/infra/helm/router-values.yaml" \
+  --values <(echo "$picker_values") \
+  --values <(echo "$routing_values") \
   --wait --timeout "$INSTALL_TIMEOUT"
 
 kubectl apply -f "$REPO_ROOT/infra/manifests/inference-gateway.yaml"

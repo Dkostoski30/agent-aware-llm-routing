@@ -1,25 +1,36 @@
 """make experiment-compare (P2.5): numbers across CSVs of one load, from the CSVs alone.
 
 A variant's medians say little about where a difference came from, so this gives sums, the runs
-paired one by one, and the slow first tokens. Over files, the same runs averaged per variant cancel
-a steady drift when the files run the variants in opposite orders. The same variant between files
-says how large a difference can be with no routing change at all.
+paired one by one on time and on hit rate, and the slow first tokens. Over files, the same runs
+averaged per variant cancel a steady drift when the files run the variants in opposite orders. The
+same variant between files says how large a difference can be with no routing change at all.
+
+When make experiment wrote a not_worse_tolerance into each file's .meta.json (P3.7), the report ends
+with the verdict: the other variant's p95 against the reference variant's, run completion and first
+token apart, each side's p95 averaged over the files. When it wrote a faster_by (P3.7b), the
+report ends with the faster verdict on run completion: the other variant's total run time lower
+than the reference's in each file, and averaged over the files lower by at least that share. Each
+side's run-completion p95 is printed beside it, not judged: at 26 runs a file's p95 is its
+second-slowest run (P3.7b, decided 2026-11-12).
 
 Usage: python -m load_generator.experiment_compare --stall-seconds N CSV [CSV ...]
 """
 
 import argparse
+import json
 import statistics
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from load_generator.report_config import load_report_config
 from load_generator.results import (
     CallRow,
+    percentile,
     read_csv,
     run_times_ms,
     slow_first_tokens,
+    summarise,
     variant_rows,
     variant_totals,
 )
@@ -27,6 +38,10 @@ from load_generator.results import (
 RUNS_LEFT_OUT = load_report_config().runs_left_out
 # Not a setting: every number here is one side against the other.
 VARIANTS_COMPARED = 2
+# Not a setting: PLAN.md's P3.7 row and card 42 state the claim at p95.
+NOT_WORSE_SHARE = 0.95
+# The measures the verdict covers, as card 42 names them.
+MEASURES = ("run completion", "first token")
 
 
 @dataclass(frozen=True)
@@ -38,6 +53,16 @@ class RunDifferences:
     # None with no runs to pair.
     median_ms: float | None
     total_ms: float
+
+
+@dataclass(frozen=True)
+class HitRateCounts:
+    """Runs whose hit rate was higher on each side or the same, and those a side has no rate for."""
+
+    first_higher: int
+    second_higher: int
+    same: int
+    without_count: int
 
 
 def _seconds(milliseconds: float) -> str:
@@ -66,6 +91,39 @@ def run_differences_summary(differences: Mapping[str, float]) -> RunDifferences:
     )
 
 
+def run_hit_rates(rows: Iterable[CallRow]) -> dict[str, float | None]:
+    """Each run's hit rate in one variant, as the variant's own is counted. None for a run with no
+    cached count."""
+    by_run: dict[str, list[CallRow]] = {}
+    for row in rows:
+        by_run.setdefault(row.run, []).append(row)
+    return {
+        run: summary.hit_rate
+        for run, calls in by_run.items()
+        for summary in summarise(calls).values()
+    }
+
+
+def moved_runs(rows: Iterable[CallRow]) -> set[str]:
+    """The runs of one variant with a later step on another pod than the step before it."""
+    return {row.run for row in rows if row.moved is True}
+
+
+def hit_rate_counts(
+    first: Mapping[str, float | None], second: Mapping[str, float | None], runs: Iterable[str]
+) -> HitRateCounts:
+    """Over the named runs. With no tolerance: a run that nothing changed for finds the same cached
+    tokens, so the same rate, and a difference of any size is one."""
+    pairs = [(first[run], second[run]) for run in runs]
+    rated = [(one, other) for one, other in pairs if one is not None and other is not None]
+    return HitRateCounts(
+        first_higher=sum(one > other for one, other in rated),
+        second_higher=sum(one < other for one, other in rated),
+        same=sum(one == other for one, other in rated),
+        without_count=len(pairs) - len(rated),
+    )
+
+
 def without_largest(
     first: Mapping[str, float], second: Mapping[str, float], count: int
 ) -> tuple[float, float]:
@@ -74,6 +132,207 @@ def without_largest(
     ordered = sorted(first, key=lambda run: (first[run] - second[run]) * direction, reverse=True)
     kept = ordered[count:]
     return sum(first[run] for run in kept), sum(second[run] for run in kept)
+
+
+def p95_ms(rows: Iterable[CallRow], measure: str) -> int | None:
+    """Over the finished runs for run completion, the answered calls for first token. None with
+    none to take it over."""
+    calls = list(rows)
+    if measure == "run completion":
+        values = [time for time in run_times_ms(calls).values() if time is not None]
+    else:
+        values = [call.ttft_ms for call in calls if call.ttft_ms is not None]
+    return percentile(values, NOT_WORSE_SHARE) if values else None
+
+
+@dataclass(frozen=True)
+class NotWorse:
+    """Each side's p95 per file, in the files' order."""
+
+    measure: str
+    reference: str
+    candidate: str
+    reference_ms: list[int]
+    candidate_ms: list[int]
+    tolerance: float
+
+    @property
+    def limit_ms(self) -> float:
+        return statistics.mean(self.reference_ms) * (1 + self.tolerance)
+
+    @property
+    def not_worse(self) -> bool:
+        return statistics.mean(self.candidate_ms) <= self.limit_ms
+
+
+def not_worse_setting(csvs: Sequence[Path]) -> tuple[float, str] | None:
+    """The tolerance and reference variant from the .meta.json beside each CSV (_meta_setting)."""
+    return _meta_setting(csvs, "not_worse_tolerance")
+
+
+def _not_worse_lines(
+    csvs: Sequence[Path],
+    files: Mapping[Path, Mapping[str, Sequence[CallRow]]],
+    labels: Mapping[Path, str],
+    setting: tuple[float, str],
+) -> list[str]:
+    tolerance, reference = setting
+    candidate = _candidate(sorted(files[csvs[0]]), reference)
+    lines = [
+        f"p95 over {len(csvs)} files, {candidate} against {reference}, "
+        f"tolerance {100 * tolerance:g}%:"
+    ]
+    for measure in MEASURES:
+        times = {
+            variant: [p95_ms(files[path][variant], measure) for path in csvs]
+            for variant in (reference, candidate)
+        }
+        missing = [
+            (variant, labels[path])
+            for variant in (candidate, reference)
+            for path, time in zip(csvs, times[variant], strict=True)
+            if time is None
+        ]
+        if missing:
+            variant, label = missing[0]
+            lines.append(f"  {measure}: no verdict, {variant} has no p95 in {label}")
+            continue
+        verdict = NotWorse(
+            measure,
+            reference,
+            candidate,
+            [time for time in times[reference] if time is not None],
+            [time for time in times[candidate] if time is not None],
+            tolerance,
+        )
+
+        def side(values: Sequence[int]) -> str:
+            each = ", ".join(_two_places(value) for value in values)
+            return f"{_two_places(statistics.mean(values))} ({each})"
+
+        lines.append(
+            f"  {measure}: {candidate} {side(verdict.candidate_ms)}, {reference} "
+            f"{side(verdict.reference_ms)}, limit {_two_places(verdict.limit_ms)} -> "
+            f"{'not worse' if verdict.not_worse else 'worse'}"
+        )
+    return lines
+
+
+@dataclass(frozen=True)
+class Faster:
+    """Each side's run-completion p95 and total run time per file, in the files' order (P3.7b). The
+    verdict is on total run time; the p95 is reported beside it."""
+
+    reference: str
+    candidate: str
+    reference_p95_ms: list[int]
+    candidate_p95_ms: list[int]
+    reference_total_ms: list[int]
+    candidate_total_ms: list[int]
+    share: float
+
+    @property
+    def limit_ms(self) -> float:
+        return statistics.mean(self.reference_total_ms) * (1 - self.share)
+
+    @property
+    def lower_in_each(self) -> bool:
+        pairs = zip(self.candidate_total_ms, self.reference_total_ms, strict=True)
+        return all(candidate < reference for candidate, reference in pairs)
+
+    @property
+    def faster(self) -> bool:
+        return self.lower_in_each and statistics.mean(self.candidate_total_ms) <= self.limit_ms
+
+
+def _meta_setting(csvs: Sequence[Path], key: str) -> tuple[float, str] | None:
+    """key and the reference variant from the .meta.json beside each CSV; None if no file has key.
+    A file without it beside one with it, or two that differ, are refused: their verdict would not
+    be the one the experiment files state."""
+    settings = []
+    for path in csvs:
+        meta_path = path.with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        value = meta.get(key)
+        settings.append(None if value is None else (value, meta["reference_variant"]))
+    if len(set(settings)) > 1:
+        pairs = zip(csvs, settings, strict=True)
+        found = ", ".join(f"{path.name} {setting}" for path, setting in pairs)
+        raise ValueError(f"{key} and reference_variant differ between files: {found}")
+    return settings[0]
+
+
+def _candidate(variants: Sequence[str], reference: str) -> str:
+    if reference not in variants:
+        raise ValueError(f"the reference variant {reference} is not among {variants}")
+    (candidate,) = [variant for variant in variants if variant != reference]
+    return candidate
+
+
+def _faster_lines(
+    csvs: Sequence[Path],
+    files: Mapping[Path, Mapping[str, Sequence[CallRow]]],
+    labels: Mapping[Path, str],
+    setting: tuple[float, str],
+) -> list[str]:
+    """No verdict when a run did not finish on either side in any file: a failed run has no time,
+    and leaving it out could leave out the slowest run (P3.7's first session)."""
+    share, reference = setting
+    candidate = _candidate(sorted(files[csvs[0]]), reference)
+    lines = [f"faster by {100 * share:g}% over {len(csvs)} files, {candidate} against {reference}:"]
+    times = {
+        path: {variant: run_times_ms(files[path][variant]) for variant in (reference, candidate)}
+        for path in csvs
+    }
+    for path in csvs:
+        for variant in (candidate, reference):
+            unfinished = sum(time is None for time in times[path][variant].values())
+            if unfinished:
+                return [
+                    *lines,
+                    f"  run completion: no verdict, {variant} did not finish {unfinished} of its "
+                    f"runs in {labels[path]}",
+                ]
+
+    def finished(path: Path, variant: str) -> list[int]:
+        return [time for time in times[path][variant].values() if time is not None]
+
+    def p95(path: Path, variant: str) -> int:
+        return percentile(finished(path, variant), NOT_WORSE_SHARE)
+
+    verdict = Faster(
+        reference,
+        candidate,
+        [p95(path, reference) for path in csvs],
+        [p95(path, candidate) for path in csvs],
+        [sum(finished(path, reference)) for path in csvs],
+        [sum(finished(path, candidate)) for path in csvs],
+        share,
+    )
+
+    def lower(candidate_ms: int, reference_ms: int) -> str:
+        return "lower" if candidate_ms < reference_ms else "not lower"
+
+    for index, path in enumerate(csvs):
+        p95s = verdict.candidate_p95_ms[index], verdict.reference_p95_ms[index]
+        totals = verdict.candidate_total_ms[index], verdict.reference_total_ms[index]
+        lines.append(
+            f"  {labels[path]}: total run time {candidate} {_two_places(totals[0])}, {reference} "
+            f"{_two_places(totals[1])} -> {lower(*totals)}; run completion p95 {candidate} "
+            f"{_two_places(p95s[0])}, {reference} {_two_places(p95s[1])} (reported, not judged)"
+        )
+    lines += [
+        f"  total run time averaged: {candidate} "
+        f"{_two_places(statistics.mean(verdict.candidate_total_ms))}, {reference} "
+        f"{_two_places(statistics.mean(verdict.reference_total_ms))}, limit "
+        f"{_two_places(verdict.limit_ms)}",
+        f"  run completion: {'faster' if verdict.faster else 'not faster'}",
+    ]
+    return lines
+
+
+def _two_places(milliseconds: float) -> str:
+    return f"{milliseconds / 1000:.2f} s"
 
 
 def _load(csvs: Sequence[Path]) -> dict[Path, dict[str, list[CallRow]]]:
@@ -106,6 +365,38 @@ def _difference_line(first: str, second: str, summary: RunDifferences, runs: int
         f"{first} faster in {summary.first_faster} of {runs} runs, {second} in "
         f"{summary.second_faster}; {first} minus {second} per run: median {median}"
     )
+
+
+def _counts_text(first: str, second: str, counts: HitRateCounts) -> str:
+    return (
+        f"{first} higher in {counts.first_higher}, {second} in {counts.second_higher}, the same "
+        f"in {counts.same}"
+    )
+
+
+def _hit_rate_lines(
+    first: str, second: str, variants: Mapping[str, Sequence[CallRow]]
+) -> list[str]:
+    """Over every run, then over the runs each side moved a step in: where a rule that keeps a run
+    on its pod can change its cache at all."""
+    rates = {variant: run_hit_rates(variants[variant]) for variant in (first, second)}
+    every = hit_rate_counts(rates[first], rates[second], rates[first])
+    rated = every.first_higher + every.second_higher + every.same
+    line = (
+        f"  hit rate per run: {first} higher in {every.first_higher} of {rated} runs, {second} in "
+        f"{every.second_higher}, the same in {every.same}"
+    )
+    if every.without_count:
+        line += f"; {every.without_count} runs with no count on a side left out"
+    lines = [line]
+    for variant in (first, second):
+        runs = moved_runs(variants[variant])
+        counts = hit_rate_counts(rates[first], rates[second], sorted(runs))
+        lines.append(
+            f"    of the {len(runs)} runs {variant} moved a step in: "
+            f"{_counts_text(first, second, counts)}"
+        )
+    return lines
 
 
 def _variant_lines(variant: str, rows: Sequence[CallRow], stall_ms: int) -> list[str]:
@@ -192,6 +483,8 @@ def _between_files_lines(
 
 def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
     files = _load(csvs)
+    setting = not_worse_setting(csvs)
+    faster = _meta_setting(csvs, "faster_by")
     first, second = sorted(files[csvs[0]])
     labels = _labels(csvs)
     lines = []
@@ -204,6 +497,7 @@ def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
         )
         summary = run_differences_summary(differences)
         lines.append(f"  {_difference_line(first, second, summary, len(differences))}")
+        lines += _hit_rate_lines(first, second, variants)
     times = {
         variant: [run_times_ms(files[path][variant]) for path in csvs]
         for variant in (first, second)
@@ -211,6 +505,10 @@ def report_lines(csvs: Sequence[Path], stall_ms: int) -> list[str]:
     lines += _average_lines(first, second, times)
     for variant in (first, second):
         lines += _between_files_lines(list(labels.values()), variant, times[variant])
+    if setting is not None:
+        lines += _not_worse_lines(csvs, files, labels, setting)
+    if faster is not None:
+        lines += _faster_lines(csvs, files, labels, faster)
     return lines
 
 

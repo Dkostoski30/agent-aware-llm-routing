@@ -1,0 +1,53 @@
+{
+  "experiment": "pod-removed",
+  "hash": "346f89bc516e",
+  "profile": "sim",
+  "profile_sha256": "6ce10ca47a3706b56bd407bba0c6734dc91b62cd7d72ff5d2b1e49ed1e2165b7",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "steady-long",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "delete_after_seconds": 120,
+  "settle_seconds": 5,
+  "deleted_pod": "vllm-66c49d9b9b-nw4h2",
+  "live_pins_at_delete": {
+    "vllm-66c49d9b9b-5lqzg": 0,
+    "vllm-66c49d9b9b-nw4h2": 3
+  },
+  "delete_requested_ms": 1794395517890,
+  "pod_gone_ms": 1794395528359,
+  "groups": {
+    "finished before": {
+      "calls": 23,
+      "failed": 0
+    },
+    "running at the delete": {
+      "calls": 2,
+      "failed": 0
+    },
+    "sent during the settle": {
+      "calls": 2,
+      "failed": 0
+    },
+    "sent after": {
+      "calls": 126,
+      "failed": 0
+    }
+  },
+  "affected_runs": [
+    "hotpotqa-124-4",
+    "tau2_telecom-963-2"
+  ],
+  "tested_runs": [
+    "hotpotqa-124-4",
+    "tau2_telecom-963-2"
+  ],
+  "sent_after_on_deleted": 0,
+  "remap_misses": [],
+  "runs": 20,
+  "ended_runs": 20,
+  "passed": true
+}

@@ -1,0 +1,92 @@
+{
+  "experiment": "routing-burst",
+  "hash": "e7ba766de6cd",
+  "profile": "real",
+  "profile_sha256": "a412d5f1cbf764f26af5516593e71384fe4018bc4e92988a88fc7b7652a7f7b4",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "routing-burst-e7ba766de6cd-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": 0.05,
+  "reference_variant": "default",
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "a412d5f1cbf764f26af5516593e71384fe4018bc4e92988a88fc7b7652a7f7b4",
+      "warmup_ttft_ms": {
+        "vllm-78c956f6bf-r7qn5": [
+          20926,
+          456,
+          410,
+          500,
+          495
+        ],
+        "vllm-78c956f6bf-srjvk": [
+          3713,
+          337,
+          396,
+          450,
+          442
+        ]
+      },
+      "started": 1794484991.734848,
+      "ended": 1794485645.3617864,
+      "clock_jumps": 0,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-78c956f6bf-r7qn5": 172,
+        "vllm-78c956f6bf-srjvk": 185
+      },
+      "pod_switch_share": 0.23314606741573032,
+      "max_gap_deviation_ms": 6,
+      "picker_log": null
+    },
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true
+      },
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "a412d5f1cbf764f26af5516593e71384fe4018bc4e92988a88fc7b7652a7f7b4",
+      "warmup_ttft_ms": {
+        "vllm-589cd8b584-2f9jf": [
+          18941,
+          375,
+          406,
+          394,
+          444
+        ],
+        "vllm-589cd8b584-zhd92": [
+          3801,
+          389,
+          414,
+          395,
+          369
+        ]
+      },
+      "started": 1794485928.0006392,
+      "ended": 1794486625.1492903,
+      "clock_jumps": 5,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-589cd8b584-2f9jf": 161,
+        "vllm-589cd8b584-zhd92": 196
+      },
+      "pod_switch_share": 0.31741573033707865,
+      "max_gap_deviation_ms": 18,
+      "picker_log": "routing-burst-e7ba766de6cd-plugin-picker.log"
+    }
+  }
+}

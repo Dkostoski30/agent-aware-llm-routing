@@ -9,18 +9,15 @@ interface ProfileFile {
   model: string;
 }
 
-/** The split view of every screen (README: Layout): the conversation on the left, the cluster panel's column on
- * the right, empty until P3.11 fills it. */
+/** Every screen: the top bar over the routed screen. The chat screens hold the cluster panel beside the chat
+ * (ChatsLayout, P3.13c); the login screens have none, since only a logged-in user can read the cluster. */
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, TopBar],
   template: `
     <div class="ag-root ag-app">
       <app-top-bar [profile]="chip()?.profile" [model]="chip()?.model" />
-      <div class="ag-split">
-        <main class="ag-main"><router-outlet /></main>
-        <aside class="ag-panel" aria-label="Cluster"></aside>
-      </div>
+      <main class="ag-main"><router-outlet /></main>
     </div>
   `,
   styles: ':host { display: block; height: 100%; }',

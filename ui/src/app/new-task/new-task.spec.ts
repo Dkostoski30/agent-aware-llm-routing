@@ -1,10 +1,18 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import { RunScreen } from '../runs/run-screen';
+import { TestRequest } from '@angular/common/http/testing';
+import { Chats } from '../chats/chats';
 import { NewTask } from './new-task';
 import { SCENARIOS } from './scenarios';
+
+@Component({ template: '' })
+class OpenChat {}
+
+const CHAT = { id: 7, title: 'What is 7 times 8?', created: 1_794_950_000 };
+const SENT = { user_message_id: 1, assistant_message_id: 2, run_id: 'run-0a1b2c3d4e5f' };
 
 describe('NewTask', () => {
   let fixture: ComponentFixture<NewTask>;
@@ -14,6 +22,14 @@ describe('NewTask', () => {
   const textarea = () => page.querySelector('textarea') as HTMLTextAreaElement;
   const send = () => page.querySelector('[aria-label="Send"]') as HTMLButtonElement;
   const cards = () => Array.from(page.querySelectorAll<HTMLElement>('.ag-scenario'));
+  const url = () => TestBed.inject(Router).url;
+
+  /** Answers the chat's creation and returns the message request that follows it. */
+  async function created(): Promise<TestRequest> {
+    http.expectOne({ method: 'POST', url: '/api/chats' }).flush(CHAT);
+    await fixture.whenStable();
+    return http.expectOne('/api/chats/7/messages');
+  }
 
   async function type(text: string) {
     textarea().value = text;
@@ -31,7 +47,7 @@ describe('NewTask', () => {
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
-        provideRouter([{ path: 'runs/:id', component: RunScreen }]),
+        provideRouter([{ path: 'chats/:id', component: OpenChat }]),
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -75,48 +91,79 @@ describe('NewTask', () => {
     await type('   ');
     expect(send().disabled).toBe(true);
     await press({});
-    http.expectNone('/api/runs');
+    http.expectNone('/api/chats');
     await type('What is 7 times 8?');
     expect(send().disabled).toBe(false);
   });
 
-  it('sends the run request on Enter and opens the returned run', async () => {
+  it('on Enter creates a chat titled with the task, sends the task to it and opens it', async () => {
     await type('What is 7 times 8?');
     await press({});
 
-    const request = http.expectOne('/api/runs');
-    expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ task: 'What is 7 times 8?' });
+    const create = http.expectOne({ method: 'POST', url: '/api/chats' });
+    expect(create.request.body).toEqual({ title: 'What is 7 times 8?' });
     expect(send().disabled).toBe(true);
-
-    request.flush({ run_id: 'run-0a1b2c3d4e5f' });
+    create.flush(CHAT);
     await fixture.whenStable();
-    expect(TestBed.inject(Router).url).toBe('/runs/run-0a1b2c3d4e5f');
+
+    const message = http.expectOne('/api/chats/7/messages');
+    expect(message.request.method).toBe('POST');
+    expect(message.request.body).toEqual({ task: 'What is 7 times 8?' });
+    message.flush(SENT);
+    await fixture.whenStable();
+    expect(url()).toBe('/chats/7');
+  });
+
+  it('puts the new chat at the top of the chat list', async () => {
+    await type('What is 7 times 8?');
+    await press({});
+    (await created()).flush(SENT);
+    expect(TestBed.inject(Chats).list()).toEqual([CHAT]);
   });
 
   it('sends with the send button too', async () => {
     await type('What is 7 times 8?');
     send().click();
-    http.expectOne('/api/runs');
+    http.expectOne({ method: 'POST', url: '/api/chats' });
   });
 
   it('adds a line on Shift+Enter instead of sending', async () => {
     await type('What is 7 times 8?');
     await press({ shiftKey: true });
-    http.expectNone('/api/runs');
+    http.expectNone('/api/chats');
   });
 
-  it('stays on the page and says why when the agent refuses the run', async () => {
+  it('stays on the page and says why when the chat cannot be created', async () => {
     await type('What is 7 times 8?');
     await press({});
 
     http
-      .expectOne('/api/runs')
-      .flush('agent down', { status: 503, statusText: 'Service Unavailable' });
+      .expectOne({ method: 'POST', url: '/api/chats' })
+      .flush('app down', { status: 503, statusText: 'Service Unavailable' });
     await fixture.whenStable();
-    expect(TestBed.inject(Router).url).toBe('/');
+    expect(url()).toBe('/');
     expect(page.querySelector('.ag-composer-hint')?.textContent).toContain('HTTP 503');
     expect(send().disabled).toBe(false);
+  });
+
+  it('sends a refused message again to the chat it created, not to a new one', async () => {
+    await type('What is 7 times 8?');
+    await press({});
+    (await created()).flush(
+      { detail: 'the runtime refused the run' },
+      { status: 422, statusText: 'Unprocessable Content' },
+    );
+    await fixture.whenStable();
+    expect(url()).toBe('/');
+    expect(page.querySelector('.ag-composer-hint')?.textContent).toContain(
+      'HTTP 422, the runtime refused the run',
+    );
+
+    await press({});
+    http.expectNone({ method: 'POST', url: '/api/chats' });
+    http.expectOne('/api/chats/7/messages').flush(SENT);
+    await fixture.whenStable();
+    expect(url()).toBe('/chats/7');
   });
 
   describe('attached files', () => {
@@ -159,7 +206,7 @@ describe('NewTask', () => {
 
       await type('Total revenue?');
       await press({});
-      const request = http.expectOne('/api/runs');
+      const request = await created();
       expect(request.request.body).toEqual({
         task: 'Total revenue?',
         files: [
@@ -182,7 +229,7 @@ describe('NewTask', () => {
 
       await type('Which clauses?');
       await press({});
-      const body = http.expectOne('/api/runs').request.body as { files: { name: string }[] };
+      const body = (await created()).request.body as { files: { name: string }[] };
       expect(body.files.map((file) => file.name)).toEqual(['terms.md']);
     });
 
@@ -218,7 +265,7 @@ describe('NewTask', () => {
       await fixture.whenStable();
       expect(send().disabled).toBe(true);
       await press({});
-      http.expectNone('/api/runs');
+      http.expectNone('/api/chats');
 
       finishRead(new TextEncoder().encode(SALES).buffer as ArrayBuffer);
       await vi.waitFor(() => expect(attached()).toEqual(['sales.csv']));
@@ -226,19 +273,17 @@ describe('NewTask', () => {
       expect(send().disabled).toBe(false);
     });
 
-    it('shows the reason the agent gives for refusing the files, and keeps them', async () => {
+    it('shows the reason the app gives for refusing the files, and keeps them', async () => {
       await attach(new File([SALES], 'sales.csv'));
       await type('Total revenue?');
       await press({});
 
-      http
-        .expectOne('/api/runs')
-        .flush(
-          { detail: "files: duplicate file id 'sales'" },
-          { status: 422, statusText: 'Unprocessable Content' },
-        );
+      (await created()).flush(
+        { detail: "files: duplicate file id 'sales'" },
+        { status: 422, statusText: 'Unprocessable Content' },
+      );
       await fixture.whenStable();
-      expect(TestBed.inject(Router).url).toBe('/');
+      expect(url()).toBe('/');
       expect(hint()).toContain('HTTP 422');
       expect(hint()).toContain("files: duplicate file id 'sales'");
       expect(attached()).toEqual(['sales.csv']);
@@ -248,12 +293,10 @@ describe('NewTask', () => {
       await attach(new File([SALES], 'sales.csv'));
       await type('Total revenue?');
       await press({});
-      http
-        .expectOne('/api/runs')
-        .flush(
-          { detail: "files: duplicate file id 'sales'" },
-          { status: 422, statusText: 'Unprocessable Content' },
-        );
+      (await created()).flush(
+        { detail: "files: duplicate file id 'sales'" },
+        { status: 422, statusText: 'Unprocessable Content' },
+      );
       await fixture.whenStable();
       expect(hint()).toContain('duplicate');
 
@@ -280,7 +323,7 @@ describe('NewTask', () => {
       expect(send().disabled).toBe(false);
     });
 
-    it('disables attaching and removing while the run starts', async () => {
+    it('disables attaching and removing while the message is sent', async () => {
       await attach(new File([SALES], 'sales.csv'));
       await type('Total revenue?');
       await press({});
@@ -288,7 +331,7 @@ describe('NewTask', () => {
       const attachButton = page.querySelector('[aria-label="Attach files"]') as HTMLButtonElement;
       const remove = page.querySelector('[aria-label="Remove sales.csv"]') as HTMLButtonElement;
       expect([attachButton.disabled, remove.disabled]).toEqual([true, true]);
-      http.expectOne('/api/runs').flush({ run_id: 'run-0a1b2c3d4e5f' });
+      (await created()).flush(SENT);
     });
   });
 });

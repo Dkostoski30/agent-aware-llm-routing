@@ -14,6 +14,7 @@ from agent_runtime.config import AgentConfig
 from agent_runtime.csv_tools import Table
 from agent_runtime.documents import Document
 from agent_runtime.llm import LLMClient, LLMResponseError
+from agent_runtime.run_tracker import RunTracker
 from agent_runtime.store import CallRecord
 from agent_runtime.tools import (
     FINAL_ANSWER,
@@ -138,9 +139,12 @@ async def run_task(
     tables: Sequence[Table] = (),
     documents: Sequence[Document] = (),
     clock: Clock = SYSTEM_CLOCK,
+    tracker: RunTracker | None = None,
 ) -> RunResult:
     """tables and documents are the run request's files, already read
-    (documents.read_run_files); clock times the calls (a test passes a fake one)."""
+    (documents.read_run_files); clock times the calls (a test passes a fake one). tracker, when
+    given, has started the run and hears each call's x-step as it is sent (P3.8); the caller ends
+    the run there."""
     run = _Run(run_id, task, config)
     tools = offered_tools(config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
@@ -160,6 +164,8 @@ async def run_task(
             "x-step": str(run.step),
             "x-expected-steps": str(expected_steps),
         }
+        if tracker is not None:
+            tracker.stepped(run_id, run.step)
         ts_start = clock.wall_ms()
         started_ms = clock.monotonic_ms()
         try:

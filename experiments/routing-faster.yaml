@@ -1,0 +1,64 @@
+# P3.7b: experiments/routing-burst.yaml with the least-work rule on in the plugin variant, which must finish runs faster
+# than the default picker (docs/task-cards/42b-P3.7b-faster-runs.md). Run with make experiment NAME=routing-faster after
+# make up (real, 2 pods), then routing-faster-reversed.yaml, about 40 min each with the laptop idle; make
+# experiment-compare over both CSVs gives the verdicts. A test holds everything but the rule and faster_by equal to
+# routing-burst.yaml, so the rule is the only change from P3.7. Results carry this file's hash (D11).
+# Phase 3's latency claim, so in both orders with a GPU log (PLAN.md, Phase 5's real-pod comparisons): on 2026-11-08 one
+# order alone said 9.4% where both said 6.6%.
+profile: real
+# The long runs (P2.4), as experiments/baseline.yaml and affinity.yaml.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# burst's arrivals with half of the later steps as 2 calls of one x-parallel-group, so every rule of the plugin can act:
+# the converted trace has no parallel groups, so on burst the parallel rule would be on and idle (decided 2026-11-12).
+# The spike on real pods, default picker, seed 6: after each of the 4 bursts a pod had more than 1 call waiting, 5, 10,
+# 12 and 11 at most, 357 calls, 0 failed (experiments/log.md), so the pattern is a burst test as it stands.
+pattern: burst-fan-out
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types. One repetition here; P5 runs three.
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile: 274 blocks of 16 per pod, as
+# experiments/baseline.yaml. Calls that find more than this on their pod are reported apart (P2.4).
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6: they arrive on empty caches and an empty queue, before
+  # the load this file is about. A test holds the count to the seed's start times.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# How much higher the plugin's p95 may be than default's and still count as not worse, on run completion and on first
+# token, each side's p95 averaged over this file and routing-burst-reversed.yaml (make experiment-compare). A first guess
+# under the host's own swing: the same variant moved by up to 14% between nights (P2.9), and the orders cancel a steady
+# drift but not a bad stretch, so 5% is where a difference starts to be the picker's more than the host's.
+not_worse_tolerance: 0.05
+# A replay in which a pod had calls and made no tokens for this long stops the run. In the first run, on 2026-11-12, a vLLM
+# pod sat 30-135 s at a time with calls running and waiting while the other pod went on, in every replay from about 13:55,
+# on both pickers, and 21 runs failed (experiments/log.md). Six of the profile's 5 s scrapes: a pod with calls makes a
+# token about every 0.2 s and the longest prefill here takes a few seconds, so a working pod never shows one; the three
+# clean replays of that run had none.
+pod_stall_seconds: 30
+# P3.7b's claim: the plugin finishes runs faster, its total run time lower than default's in each order, and averaged
+# over this file and the other order's at least this share lower (make experiment-compare). P3.7's tolerance, the
+# other way: over the host's own swing a 5% gain starts to be the picker's more than the host's. Each side's
+# run-completion p95 is reported, not judged: decided 2026-11-12 after the first order and before the reversed one was
+# run again, since at 26 runs a file's p95 is its second-slowest run (bfcl-565-21, 291.43 s on default and 292.16 s on
+# the plugin); P5's three seeds judge the tail. The first-token check above stays, so a rule that bought run time with
+# first tokens shows.
+faster_by: 0.05
+# In this order, one after the other; routing-faster-reversed.yaml runs them the other way round. default is the chart's
+# default-plugins.yaml, as in every earlier experiment. plugin runs thesis-plugins.yaml, the same scorers and weights behind
+# thesis-run-router with every Phase 3 rule on, at the real profile's thresholds (config/real.yaml, routing), and
+# least_work_first (P3.7b) at the real profile's least_work_slack.
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml
+  - name: plugin
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+      least_work_first: true
+    epp_config: thesis-plugins.yaml

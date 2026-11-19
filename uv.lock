@@ -70,6 +70,7 @@ version = "0.1.0"
 source = { virtual = "app" }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "uvicorn" },
 ]
@@ -77,6 +78,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = "==0.143.0" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "uvicorn", specifier = "==0.54.0" },
 ]

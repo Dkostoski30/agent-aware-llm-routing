@@ -1,0 +1,9 @@
+{
+  "remaining_work": 7,
+  "active_runs": 4,
+  "poll_seconds": 5,
+  "pods": [
+    { "name": "vllm-568fc4b669-c9kb2", "state": "ready", "queue": 3, "running": 2 },
+    { "name": "vllm-568fc4b669-fgdgm", "state": "starting", "queue": null, "running": null }
+  ]
+}

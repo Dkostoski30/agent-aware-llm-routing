@@ -1,8 +1,11 @@
 """The agent runtime's HTTP API: start a run, read it back, stream its events, read its call
-records, health (P1.3a-2, P1.4b-1, P2.6b)."""
+records, health (P1.3a-2, P1.4b-1, P2.6b). With the picker's plugin on, a run's end goes to the
+picker once the run is saved (P3.3). The run tracker counts each run from its acceptance to its end,
+and GET /metrics serves its remaining work to Prometheus (D2, P3.8)."""
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 from collections.abc import AsyncIterator
@@ -13,6 +16,7 @@ from typing import Any
 import httpx
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
@@ -24,10 +28,27 @@ from agent_runtime.csv_tools import FileError, Table
 from agent_runtime.documents import Document, read_run_files
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import SYSTEM_CLOCK, initial_messages, run_task
+from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RedisStore, RunRecord, RunStore
 
 # The port the agent Service targets (infra/manifests/agent.yaml, P1.3b).
 PORT = 8080
+
+logger = logging.getLogger(__name__)
+
+
+async def end_run(picker: httpx.AsyncClient, run_id: str) -> None:
+    """POST /runs/{id}/end (D1), which clears the run's pin. A failure is logged and left to the
+    pin's TTL (routing.run_ttl_seconds): the run is saved already, and its answer must not depend on
+    the picker."""
+    try:
+        response = await picker.post(f"/runs/{run_id}/end")
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        logger.warning(
+            "end of run not delivered, the pin lasts until its TTL",
+            extra={"run-id": run_id, "error": repr(error)},
+        )
 
 
 def _arguments(raw: str) -> Any:
@@ -119,7 +140,9 @@ def create_app(
     config: AgentConfig,
     store: RunStore,
     http: httpx.AsyncClient,
+    picker: httpx.AsyncClient,
     run_request_schema: dict[str, Any],
+    tracker: RunTracker,
 ) -> FastAPI:
     llm = LLMClient(http, config)
     validator = Draft202012Validator(run_request_schema)
@@ -136,19 +159,34 @@ def create_app(
             )
             await store.save(updated, messages, calls)
 
-        result = await run_task(
-            record.task, record.run_id, seed, config, llm, save_step, tables, documents
-        )
-        final = replace(
-            record,
-            status=result.status,
-            step=result.steps,
-            invalid_calls=result.invalid_calls,
-            answer=result.answer,
-            error=result.error,
-            updated_ms=SYSTEM_CLOCK.wall_ms(),
-        )
-        await store.save(final, result.messages, result.calls)
+        # finally: a run that raises (Redis gone) ends in the tracker too, or the metric would count
+        # it until the process restarts.
+        try:
+            result = await run_task(
+                record.task,
+                record.run_id,
+                seed,
+                config,
+                llm,
+                save_step,
+                tables,
+                documents,
+                tracker=tracker,
+            )
+            final = replace(
+                record,
+                status=result.status,
+                step=result.steps,
+                invalid_calls=result.invalid_calls,
+                answer=result.answer,
+                error=result.error,
+                updated_ms=SYSTEM_CLOCK.wall_ms(),
+            )
+            await store.save(final, result.messages, result.calls)
+            if config.end_of_run:
+                await end_run(picker, record.run_id)
+        finally:
+            tracker.ended(record.run_id)
 
     @app.post("/runs", status_code=202)
     async def start_run(request: Request, background: BackgroundTasks) -> dict[str, str]:
@@ -181,6 +219,9 @@ def create_app(
         # so a saved run always has its files (P4.4 failover reads both). No calls yet.
         await store.save_files(record.run_id, files)
         await store.save(record, initial_messages(record.task, config), [])
+        # Counted from here, before its first call: the run's work has arrived (D2). Every agent run
+        # sends agent.expected_steps_default until P4.8 knows its scenario (D13).
+        tracker.started(record.run_id, record.expected_steps)
         background.add_task(execute, record, body.get("seed"), tables, documents)
         return {"run_id": record.run_id}
 
@@ -223,6 +264,11 @@ def create_app(
         async for event in run_events(store, run_id, config.events_poll_seconds):
             yield event
 
+    @app.get("/metrics", response_class=PlainTextResponse)
+    async def metrics() -> PlainTextResponse:
+        """Prometheus scrapes this through the PodMonitor in infra/manifests/agent.yaml (P3.8)."""
+        return PlainTextResponse(tracker.exposition(), media_type=METRICS_CONTENT_TYPE)
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
@@ -237,8 +283,11 @@ def from_env() -> FastAPI:
     schema_path = Path(os.environ["THESIS_SCHEMAS_DIR"]) / "run-request.v1.json"
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     http = httpx.AsyncClient(base_url=os.environ["GATEWAY_URL"])
+    # httpx's default timeout, 5 s: the picker answers at once, and a missed end is left to the TTL.
+    picker = httpx.AsyncClient(base_url=os.environ["PICKER_URL"])
     store = RedisStore(redis, config.history_ttl_seconds)
-    return create_app(config, store, http, json.loads(schema_path.read_text()))
+    schema = json.loads(schema_path.read_text())
+    return create_app(config, store, http, picker, schema, RunTracker())
 
 
 def main() -> None:

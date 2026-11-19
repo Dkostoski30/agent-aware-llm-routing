@@ -8,9 +8,12 @@ a Secure cookie off plain HTTP.
 import sqlite3
 from pathlib import Path
 
+import httpx
 import pytest
 from app_backend.app import SESSION_COOKIE, create_app
+from app_backend.cluster import ClusterReader
 from app_backend.config import AppConfig, ScryptParams
+from app_backend.runtime import RuntimeClient
 from fastapi.testclient import TestClient
 
 TTL = 3600
@@ -18,6 +21,17 @@ MIN_LENGTH = 15
 START = 1_000_000.0
 EMAIL = "ana@example.com"
 PASSWORD = "a long enough password"
+
+
+def no_prometheus() -> ClusterReader:
+    """Only GET /cluster asks Prometheus (test_cluster.py); a query here would fail the test."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"asked Prometheus: {request.url}")
+
+    return ClusterReader(
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://prometheus")
+    )
 
 
 class FakeClock:
@@ -34,6 +48,21 @@ def make_config() -> AppConfig:
         scrypt=ScryptParams(n=2, r=1, p=1),
         min_password_length=MIN_LENGTH,
         cookie_secure=True,
+        max_files=5,
+        runtime_timeout_seconds=5.0,
+        cluster_poll_seconds=5,
+    )
+
+
+def no_runtime() -> RuntimeClient:
+    """Auth never calls the agent runtime; a call would fail the test."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"auth called the runtime: {request.method} {request.url}")
+
+    return RuntimeClient(
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent"),
+        httpx.AsyncClient(transport=httpx.MockTransport(refuse), base_url="http://agent"),
     )
 
 
@@ -49,7 +78,10 @@ def clock() -> FakeClock:
 
 @pytest.fixture
 def client(db_path: Path, clock: FakeClock) -> TestClient:
-    return TestClient(create_app(make_config(), db_path, clock), base_url="https://testserver")
+    return TestClient(
+        create_app(make_config(), db_path, no_runtime(), no_prometheus(), clock),
+        base_url="https://testserver",
+    )
 
 
 def register(client: TestClient, email: str = EMAIL, password: str = PASSWORD) -> int:
@@ -135,7 +167,7 @@ def test_logout_without_a_session_is_fine(client: TestClient) -> None:
 
 
 def test_logout_ends_only_its_own_session(db_path: Path, clock: FakeClock) -> None:
-    app = create_app(make_config(), db_path, clock)
+    app = create_app(make_config(), db_path, no_runtime(), no_prometheus(), clock)
     first = TestClient(app, base_url="https://testserver")
     second = TestClient(app, base_url="https://testserver")
     register(first)
@@ -199,8 +231,16 @@ def test_two_users_with_one_password_get_different_hashes(
 
 
 def test_data_survives_a_new_app_on_the_same_file(db_path: Path, clock: FakeClock) -> None:
-    register(TestClient(create_app(make_config(), db_path, clock), base_url="https://testserver"))
-    restarted = TestClient(create_app(make_config(), db_path, clock), base_url="https://testserver")
+    register(
+        TestClient(
+            create_app(make_config(), db_path, no_runtime(), no_prometheus(), clock),
+            base_url="https://testserver",
+        )
+    )
+    restarted = TestClient(
+        create_app(make_config(), db_path, no_runtime(), no_prometheus(), clock),
+        base_url="https://testserver",
+    )
     login(restarted)
     assert restarted.get("/auth/me").json()["email"] == EMAIL
 

@@ -1,0 +1,112 @@
+{
+  "experiment": "self-built-check",
+  "hash": "e141b17ac44c",
+  "profile": "sim",
+  "profile_sha256": "038a556562de4cb71e30c45b821d1b8e594ae80bbf25f6e8ec35e981c095f213",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "variants": {
+    "upstream": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "038a556562de4cb71e30c45b821d1b8e594ae80bbf25f6e8ec35e981c095f213",
+      "warmup_ttft_ms": {
+        "vllm-8495d95997-mdtzd": [
+          372,
+          330,
+          330,
+          330,
+          331
+        ],
+        "vllm-8495d95997-qf4pl": [
+          334,
+          331,
+          333,
+          330,
+          333
+        ]
+      },
+      "started": 1794328356.3436506,
+      "ended": 1794330574.094329,
+      "clock_jumps": 69,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-8495d95997-mdtzd": 184,
+        "vllm-8495d95997-qf4pl": 125
+      },
+      "pod_switch_share": 0.2792207792207792,
+      "max_gap_deviation_ms": 2
+    },
+    "self-built": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "038a556562de4cb71e30c45b821d1b8e594ae80bbf25f6e8ec35e981c095f213",
+      "warmup_ttft_ms": {
+        "vllm-6474c846bc-556r7": [
+          331,
+          329,
+          330,
+          329,
+          330
+        ],
+        "vllm-6474c846bc-9m2rh": [
+          331,
+          330,
+          331,
+          330,
+          330
+        ]
+      },
+      "started": 1794330810.2392335,
+      "ended": 1794333051.802582,
+      "clock_jumps": 22,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6474c846bc-556r7": 172,
+        "vllm-6474c846bc-9m2rh": 137
+      },
+      "pod_switch_share": 0.2824675324675325,
+      "max_gap_deviation_ms": 1
+    },
+    "upstream-again": {
+      "epp_config": "default-plugins.yaml",
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "038a556562de4cb71e30c45b821d1b8e594ae80bbf25f6e8ec35e981c095f213",
+      "warmup_ttft_ms": {
+        "vllm-76fc4b669c-544pf": [
+          331,
+          330,
+          330,
+          330,
+          330
+        ],
+        "vllm-76fc4b669c-svs9q": [
+          331,
+          331,
+          330,
+          330,
+          330
+        ]
+      },
+      "started": 1794333290.1378348,
+      "ended": 1794335527.6022902,
+      "clock_jumps": 35,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-76fc4b669c-544pf": 166,
+        "vllm-76fc4b669c-svs9q": 143
+      },
+      "pod_switch_share": 0.29545454545454547,
+      "max_gap_deviation_ms": 1
+    }
+  }
+}

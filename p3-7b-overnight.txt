@@ -1,0 +1,87 @@
+# P3.7b overnight run 2: the least-context rule on real pods (rewritten 2026-11-13). A bash script; run it from a WSL
+# terminal after a fresh Windows restart, laptop on AC, screen unlocked, display never off:
+#
+#   bash ~/thesis/p3-7b-overnight.txt
+#
+# It asks for the sudo password once at the start (make up needs sudo) and keeps it alive, then runs unattended:
+#   1. refuses to start if routing-context results are already there (so it never runs over earlier ones)
+#   2. make test, make lint
+#   3. make down, make up (real); if make up fails it waits 2 minutes and tries once more (a network blip broke the
+#      first night's make up)
+#   4. routing-context, then routing-context-reversed
+#   5. the verdict (make experiment-compare) and the picker-log checks
+#   6. Windows shuts down 2 minutes after the end; cancel from a Windows terminal with: shutdown /a
+# If step 1, 2 or 3 fails it STOPS and does NOT shut down, so the screen shows why in the morning.
+# The sim check is not repeated: it passed on 2026-11-12 (experiments/results/p3-7b-overnight-2026-11-12-2319.log).
+# Everything it prints also goes to experiments/results/p3-7b-context-<date>.log. About 1.5 hours.
+
+set -uo pipefail
+cd "$HOME/thesis" || exit 1
+R=experiments/results
+FIRST=routing-context-3930f5a0c2f4
+SECOND=routing-context-reversed-5b00a10b5b0c
+
+shopt -s nullglob
+earlier=("$R/$FIRST"* "$R/$SECOND"*)
+if ((${#earlier[@]})); then
+  echo "STOPPED: routing-context results are already there: ${earlier[*]}" >&2
+  echo "Move them away first; nothing was run." >&2
+  exit 1
+fi
+
+LOG="$R/p3-7b-context-$(date +%F-%H%M).log"
+exec > >(tee -a "$LOG") 2>&1
+
+sudo -v || exit 1
+# Refreshes sudo's timestamp every 50 s, under its 15 min timeout, so make up never waits for a password.
+(while true; do sudo -n true; sleep 50; done) &
+KEEP_SUDO=$!
+trap 'kill "$KEEP_SUDO" 2>/dev/null' EXIT
+
+step() { echo; echo "=== $(date '+%F %T') $*"; }
+run() {
+  step "$*"
+  "$@"
+  local rc=$?
+  echo "=== $(date '+%F %T') exit $rc: $*"
+  return "$rc"
+}
+stop() {
+  step "STOPPED: $*. Windows is NOT shut down. Log: $LOG"
+  exit 1
+}
+count() { jq -cR "fromjson? | $1" "$2" | wc -l; }
+
+run make test || stop "make test failed"
+run make lint || stop "make lint failed"
+run make down || stop "make down failed"
+if ! run make up; then
+  step "make up failed; trying once more in 120 s"
+  sleep 120
+  run make down || stop "make down failed"
+  run make up || stop "make up failed twice"
+fi
+
+run make experiment NAME=routing-context
+run make experiment NAME=routing-context-reversed
+
+if [[ -f $R/$FIRST.csv && -f $R/$SECOND.csv ]]; then
+  run make experiment-compare CSVS="$R/$FIRST.csv $R/$SECOND.csv" STALL_SECONDS=5
+else
+  step "no verdict: a routing-context CSV is missing (see the experiment's error above)"
+fi
+for log in "$R/$FIRST-plugin-picker.log" "$R/$SECOND-plugin-picker.log"; do
+  [[ -f $log ]] || continue
+  step "picker checks for $log"
+  jq -rR 'fromjson? | select(.body == "Run call picked") | .reason' "$log" | sort | uniq -c
+  echo "least-context not smallest (want 0): $(count 'select(.reason == "least-context" and .context[.pod] != ([.context[]] | min))' "$log")"
+  echo "first with unequal context (want 0): $(count 'select(.reason == "first" and .context != null and ([.context[]] | max) != ([.context[]] | min))' "$log")"
+  echo "lines with a size (want > 0): $(count 'select(.context != null and ([.context[]] | max) > 0)' "$log")"
+  echo "spill at queue <= 1 (want 0): $(count 'select(.reason == "spill" and .queue <= 1)' "$log")"
+  echo "remap under 10 s (want 0): $(count 'select(.reason == "remap" and .overloadedSeconds < 10)' "$log")"
+  echo "parallel-spill with room (want 0): $(count 'select(.reason == "parallel-spill" and (.queue + .inFlight) <= 2)' "$log")"
+done
+
+step "finished; Windows shuts down in 120 s (cancel: shutdown /a in a Windows terminal). Log: $LOG"
+sync
+/mnt/c/Windows/System32/shutdown.exe /s /t 120

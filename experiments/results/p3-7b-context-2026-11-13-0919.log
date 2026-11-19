@@ -1,0 +1,475 @@
+
+=== 2026-11-13 09:19:14 make test
+uv run --locked pytest
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.13.5
+collected 1720 items
+
+agent/tests/test_agent_config.py .......................                 [  1%]
+agent/tests/test_agent_loop.py ......................................... [  3%]
+.....................................................                    [  6%]
+agent/tests/test_app.py ...........................................      [  9%]
+agent/tests/test_calculator.py ......................................... [ 11%]
+...................                                                      [ 12%]
+agent/tests/test_csv_tools.py .......................................... [ 15%]
+..................................                                       [ 17%]
+agent/tests/test_documents.py ........................................   [ 19%]
+agent/tests/test_logs.py ....                                            [ 19%]
+agent/tests/test_store.py .....                                          [ 20%]
+agent/tests/test_support.py .........................                    [ 21%]
+app/tests/test_app_config.py .....                                       [ 21%]
+app/tests/test_app_logs.py ...                                           [ 21%]
+app/tests/test_auth.py .....................                             [ 23%]
+app/tests/test_db.py .....                                               [ 23%]
+app/tests/test_passwords.py .....                                        [ 23%]
+experiments/tests/test_finetune_data.py ................................ [ 25%]
+.........                                                                [ 26%]
+experiments/tests/test_go_no_go.py ..................................... [ 28%]
+......................................................                   [ 31%]
+experiments/tests/test_heldout.py .............................          [ 33%]
+infra/checks/test_concurrency_check.py ........................          [ 34%]
+infra/checks/test_sim_chart.py ..                                        [ 34%]
+loadgen/tests/test_compare.py .......................................... [ 37%]
+....                                                                     [ 37%]
+loadgen/tests/test_convert.py .......................................... [ 39%]
+........................................................................ [ 43%]
+....                                                                     [ 44%]
+loadgen/tests/test_expected_steps.py ............                        [ 44%]
+loadgen/tests/test_experiment.py ....................................... [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 55%]
+........                                                                 [ 55%]
+loadgen/tests/test_experiment_compare.py ............................... [ 57%]
+........................                                                 [ 59%]
+loadgen/tests/test_graph.py .......                                      [ 59%]
+loadgen/tests/test_pod_removed.py ...................................... [ 61%]
+.............                                                            [ 62%]
+loadgen/tests/test_record.py ........................................... [ 65%]
+...............................                                          [ 66%]
+loadgen/tests/test_replay.py ........................................... [ 69%]
+.............................................                            [ 71%]
+loadgen/tests/test_replay_plan.py ...................................... [ 74%]
+.................................                                        [ 76%]
+loadgen/tests/test_report_config.py ............                         [ 76%]
+loadgen/tests/test_results.py ........................................   [ 79%]
+loadgen/tests/test_routing_values.py ................................... [ 81%]
+....................................                                     [ 83%]
+loadgen/tests/test_validation.py .....................                   [ 84%]
+schemas/tests/test_schemas.py .......................................... [ 86%]
+........................................................................ [ 91%]
+................................................................         [ 94%]
+sim/tests/test_calibrate.py .......................                      [ 96%]
+sim/tests/test_calibration_config.py .................................   [ 98%]
+sim/tests/test_calibration_mapping.py ..........                         [ 98%]
+sim/tests/test_calibration_prompts.py ........                           [ 99%]
+sim/tests/test_calibration_stats.py ..............                       [ 99%]
+sim/tests/test_real_plain_profile.py .                                   [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/kosto/thesis/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 1720 passed, 1 warning in 47.73s =======================
+if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
+?   	github.com/Dkostoski30/agent-aware-llm-routing/gateway/cmd/picker	[no test files]
+ok  	github.com/Dkostoski30/agent-aware-llm-routing/gateway/runrouter	(cached)
+if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis/training
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 22 items
+
+training/tests/test_render.py .........                                  [ 40%]
+training/tests/test_train.py .............                               [100%]
+
+============================= 22 passed in 25.15s ==============================
+=== 2026-11-13 09:20:40 exit 0: make test
+
+=== 2026-11-13 09:20:40 make lint
+uv run --locked pre-commit run --all-files
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check yaml...............................................................Passed
+check json...............................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+mypy (strict)............................................................Passed
+mypy (strict, training)..................................................Passed
+golangci-lint............................................................Passed
+eslint (ui)..............................................................Passed
+tsc --strict (ui)........................................................Passed
+=== 2026-11-13 09:22:15 exit 0: make lint
+
+=== 2026-11-13 09:22:15 make down
+bash infra/down.sh
+deployment.apps "app" deleted from default namespace
+service "app" deleted from default namespace
+configmap "app-config" deleted from default namespace
+deployment.apps "agent" deleted from default namespace
+service "agent" deleted from default namespace
+deployment.apps "redis" deleted from default namespace
+service "redis" deleted from default namespace
+configmap "agent-config" deleted from default namespace
+agentgatewayparameters.agentgateway.dev "inference-gateway" deleted from default namespace
+gateway.gateway.networking.k8s.io "inference-gateway" deleted from default namespace
+httproute.gateway.networking.k8s.io "vllm" deleted from default namespace
+agentgatewaypolicy.agentgateway.dev "inference-gateway-access-log" deleted from default namespace
+release "vllm-pool" uninstalled
+release "agentgateway" uninstalled
+release "agentgateway-crds" uninstalled
+release "vllm" uninstalled
+release "monitoring" uninstalled
+release "nvidia-device-plugin" uninstalled
+namespace "agentgateway-system" deleted
+namespace "monitoring" deleted
+namespace "nvidia-device-plugin" deleted
++ [ -s /etc/systemd/system/k3s.service ]
++ basename /etc/systemd/system/k3s.service
++ systemctl stop k3s.service
++ [ -x /etc/init.d/k3s* ]
++ killtree 3768 3901 4025 4252
++ kill -9 3768 3824 4525 3901 4149 4678 4025 4248 4985 4252 4442 5199
++ do_unmount_and_remove /run/k3s
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/e9909448045f1ab7dccd07e7afa4a6103ad23784435962604a7d69f0644a966a/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/da38cc35b47dd405d31de0926ec78998fc40bf4df4bd1892e102b58edf8fca30/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/d063eeb34fcdf5cb16eb38a74cd4b88b3b7dbfc2fe38a5fe67156154a64dca6b/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/73d6096746f7a7e27219c98326145e9318ee5d6f2b6f932c020726107e259620/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/6ef282e66036ab429516ebc86265db44845ffe063306acd2c92493238a36d71a/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/21fe00f9f97fb6800102bb0b0fccb4d85b5e4585e7ef9716a16eeecc616049cc/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/19cecaa1abe65e48a793bb9de2293346a4a57fedf82109c4678b90a5cabe3d7e/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/16b4f2a0ca6c1a451dcf792804acde11f64864f8ee81758c58e9b397d9cb9a10/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/e9909448045f1ab7dccd07e7afa4a6103ad23784435962604a7d69f0644a966a/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/d063eeb34fcdf5cb16eb38a74cd4b88b3b7dbfc2fe38a5fe67156154a64dca6b/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/21fe00f9f97fb6800102bb0b0fccb4d85b5e4585e7ef9716a16eeecc616049cc/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/16b4f2a0ca6c1a451dcf792804acde11f64864f8ee81758c58e9b397d9cb9a10/shm
++ do_unmount_and_remove /var/lib/kubelet/pods
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/a34517c2-60fe-4075-b12e-51e674ac29f7/volumes/kubernetes.io~projected/kube-api-access-6hlvb
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/321dce9c-215e-4516-9331-2c14c42011d2/volumes/kubernetes.io~projected/kube-api-access-j4lrr
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/1d4c58f9-473b-49d3-b657-adfd774e8d9c/volumes/kubernetes.io~projected/kube-api-access-wmbr4
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/02c30c75-f621-436d-bd33-6e7c6fd78164/volumes/kubernetes.io~projected/kube-api-access-mzx59
++ do_unmount_and_remove /var/lib/kubelet/plugins
++ set +x
++ do_unmount_and_remove /run/netns/cni-
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-e7c45909-9057-b7dd-b2ff-c10c55ef0f2b
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-40b6173f-453b-d6c5-cb15-81950a8da3bf
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-33105fdb-223d-5817-9cd5-413965da751f
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-0e298291-36ef-fc9f-195e-55c8418bb78f
++ ip netns show
++ grep cni-
++ xargs -r -t -n 1 ip netns delete
++ remove_interfaces
++ ip link show
++ grep master cni0
++ read ignore iface ignore
++ iface=veth7b62249b
++ [ -z veth7b62249b ]
++ ip link delete veth7b62249b
++ read ignore iface ignore
++ iface=veth5940ce0b
++ [ -z veth5940ce0b ]
++ ip link delete veth5940ce0b
++ read ignore iface ignore
++ iface=veth076db93c
++ [ -z veth076db93c ]
++ ip link delete veth076db93c
+Cannot find device "veth076db93c"
++ read ignore iface ignore
++ ip link delete cni0
++ ip link delete flannel.1
++ ip link delete flannel-v6.1
+Cannot find device "flannel-v6.1"
++ ip link delete kube-ipvs0
+Cannot find device "kube-ipvs0"
++ ip link delete flannel-wg
+Cannot find device "flannel-wg"
++ ip link delete flannel-wg-v6
+Cannot find device "flannel-wg-v6"
++ command -v tailscale
++ [ -n  ]
++ rm -rf /var/lib/cni/
++ iptables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ iptables-restore
++ ip6tables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ ip6tables-restore
+=== 2026-11-13 09:22:36 exit 0: make down
+
+=== 2026-11-13 09:22:36 make up
+make vllm-stop
+make[1]: Entering directory '/home/kosto/thesis'
+vllm-stop: no vLLM containers
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-k3s.sh
+runtimeclass.node.k8s.io/nvidia serverside-applied
+Release "nvidia-device-plugin" does not exist. Installing it now.
+NAME: nvidia-device-plugin
+LAST DEPLOYED: Fri Nov 13 09:22:52 2026
+NAMESPACE: nvidia-device-plugin
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+node reports allocatable nvidia.com/gpu: 2 (ladder step 1: device plugin)
+== k3s and device plugin versions
+k3s version v1.36.5+k3s1 (3dd98cc5)
+device plugin chart nvidia-device-plugin-0.20.1, app 0.20.1
+bash infra/picker-image.sh
+picker-image: thesis/picker:bf01d913cbf8 is already in k3s
+bash infra/install-monitoring.sh real
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Fri Nov 13 09:23:17 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+if [ "" = sim ]; then \
+	make sim-deploy; \
+else \
+	bash infra/download-model.sh real && make vllm-deploy PROFILE=real; \
+fi
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 498.38it/s]
+[32m✓ Downloaded[0m
+  path: /home/kosto/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-GPTQ-Int8/snapshots/d3f20e7e71825fe57ad32705b396e9e156279107
+make[1]: Entering directory '/home/kosto/thesis'
+Release "vllm" does not exist. Installing it now.
+NAME: vllm
+LAST DEPLOYED: Fri Nov 13 09:23:56 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+vllm-deploy: waiting for the pods to load the model (about 2-3 min)
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE           NOMINATED NODE   READINESS GATES
+vllm-5c9565db76-25kgx   1/1     Running   0          2m41s   10.42.0.12   daniellaptop   <none>           <none>
+vllm-5c9565db76-ffss6   1/1     Running   0          2m41s   10.42.0.13   daniellaptop   <none>           <none>
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-gateway.sh real
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io condition met
+Release "agentgateway-crds" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds@sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+Digest: sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+NAME: agentgateway-crds
+LAST DEPLOYED: Fri Nov 13 09:26:46 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Release "agentgateway" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway@sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+Digest: sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+NAME: agentgateway
+LAST DEPLOYED: Fri Nov 13 09:26:52 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+Release "vllm-pool" does not exist. Installing it now.
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 09:26:58 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+agentgatewayparameters.agentgateway.dev/inference-gateway created
+gateway.gateway.networking.k8s.io/inference-gateway created
+httproute.gateway.networking.k8s.io/vllm created
+agentgatewaypolicy.agentgateway.dev/inference-gateway-access-log created
+gateway.gateway.networking.k8s.io/inference-gateway condition met
+Waiting for deployment "inference-gateway" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inference-gateway" successfully rolled out
+if [ "" != sim ]; then bash infra/deploy-agent.sh real; fi
+deploy-agent: thesis/agent:bf2848f1f42a is already in k3s
+deployment.apps/redis created
+service/redis created
+configmap/agent-config created
+deployment.apps/agent created
+service/agent created
+Waiting for deployment "redis" rollout to finish: 0 of 1 updated replicas are available...
+deployment "redis" successfully rolled out
+Waiting for deployment "agent" rollout to finish: 0 of 1 updated replicas are available...
+deployment "agent" successfully rolled out
+NAME                     READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+agent-b54d6564b-9pm5q    1/1     Running   0          12s   10.42.0.19   daniellaptop   <none>           <none>
+redis-5b9fcb4c45-zhcrf   1/1     Running   0          13s   10.42.0.18   daniellaptop   <none>           <none>
+if [ "" != sim ]; then bash infra/deploy-app.sh real; fi
+deploy-app: thesis/app:c286d44790b3 is already in k3s
+configmap/app-config created
+persistentvolumeclaim/app-data unchanged
+deployment.apps/app created
+service/app created
+Waiting for deployment "app" rollout to finish: 0 of 1 updated replicas are available...
+deployment "app" successfully rolled out
+NAME                   READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+app-8446c7f656-vtnl4   1/1     Running   0          12s   10.42.0.20   daniellaptop   <none>           <none>
+NAME       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+app-data   Bound    pvc-a80b8b37-23f2-4019-9c9f-8d35370ddab0   1Gi        RWO            local-path     <unset>                 5d6h
+=== 2026-11-13 09:27:29 exit 0: make up
+
+=== 2026-11-13 09:27:29 make experiment NAME=routing-context
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/routing-context.yaml
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Error: failed to perform "FetchReference" on source: Get "https://ghcr.io/v2/llm-d/charts/llm-d-router-gateway/manifests/sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0": dial tcp: lookup ghcr.io on 10.255.255.254:53: read udp 10.255.255.254:49596->10.255.255.254:53: i/o timeout
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1153, in <module>
+    main()
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1149, in main
+    run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 661, in run_experiment
+    cluster.set_routing(variant.values, variant.routing)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 909, in set_routing
+    set_routing(self.current, values, routing)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 826, in set_routing
+    subprocess.run(["bash", script, profile, *extra], check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/home/kosto/thesis/infra/set-routing.sh', 'real']' returned non-zero exit status 1.
+make: *** [Makefile:296: experiment] Error 1
+=== 2026-11-13 09:31:17 exit 2: make experiment NAME=routing-context
+
+=== 2026-11-13 09:31:17 make experiment NAME=routing-context-reversed
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/routing-context-reversed.yaml
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Error: failed to perform "FetchReference" on source: Get "https://ghcr.io/v2/llm-d/charts/llm-d-router-gateway/manifests/sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0": dial tcp: lookup ghcr.io on 10.255.255.254:53: read udp 10.255.255.254:35498->10.255.255.254:53: i/o timeout
+Error: failed to perform "FetchReference" on source: Get "https://ghcr.io/v2/llm-d/charts/llm-d-router-gateway/manifests/sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0": dial tcp: lookup ghcr.io on 10.255.255.254:53: read udp 10.255.255.254:57201->10.255.255.254:53: i/o timeout
+Traceback (most recent call last):
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 661, in run_experiment
+    cluster.set_routing(variant.values, variant.routing)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 909, in set_routing
+    set_routing(self.current, values, routing)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 831, in set_routing
+    subprocess.run(["bash", script, profile, rules.name], check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/home/kosto/thesis/infra/set-routing.sh', 'real', '/tmp/tmp_92ofv32.yaml']' returned non-zero exit status 1.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1153, in <module>
+    main()
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 1149, in main
+    run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 708, in run_experiment
+    cluster.set_routing(None, None)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 909, in set_routing
+    set_routing(self.current, values, routing)
+  File "/home/kosto/thesis/loadgen/load_generator/experiment.py", line 826, in set_routing
+    subprocess.run(["bash", script, profile, *extra], check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['bash', '/home/kosto/thesis/infra/set-routing.sh', 'real']' returned non-zero exit status 1.
+make: *** [Makefile:296: experiment] Error 1
+=== 2026-11-13 09:36:08 exit 2: make experiment NAME=routing-context-reversed
+
+=== 2026-11-13 09:36:08 no verdict: a routing-context CSV is missing (see the experiment's error above)
+
+=== 2026-11-13 09:36:08 finished; Windows shuts down in 120 s (cancel: shutdown /a in a Windows terminal). Log: experiments/results/p3-7b-context-2026-11-13-0919.log

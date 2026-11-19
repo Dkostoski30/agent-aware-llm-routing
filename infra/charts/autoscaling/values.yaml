@@ -1,0 +1,8 @@
+# Defaults for the parts that are not in config/. make experiment hands the rest from the profile's autoscaling
+# section, through loadgen/load_generator/autoscale.py's helm_values (D11): minReplicas, maxReplicas and
+# scaleDownStabilizationSeconds, and query and threshold for KEDA or cpuTargetPercent for the plain HPA (P3.10). The
+# templates refuse to render without them.
+
+# kube-prometheus-stack's Prometheus under make up's release name, monitoring (infra/install-monitoring.sh), as the
+# experiment's own range queries reach it.
+prometheusAddress: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090

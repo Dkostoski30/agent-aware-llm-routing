@@ -1,0 +1,67 @@
+{
+  "experiment": "autoscale-remaining",
+  "hash": "3fb2040041ef",
+  "profile": "sim",
+  "profile_sha256": "5774367e51bfa1cf90a905ee3e21d314b00584e0a6a505f4702eec7e52289b8a",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "variants": {
+    "remaining": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "5774367e51bfa1cf90a905ee3e21d314b00584e0a6a505f4702eec7e52289b8a",
+      "warmup_ttft_ms": {
+        "vllm-6cbf6478d6-2pj68": [
+          388,
+          330,
+          330,
+          329,
+          329
+        ]
+      },
+      "started": 1794669044.457568,
+      "ended": 1794669554.5669172,
+      "clock_jumps": 13,
+      "calls": 252,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6cbf6478d6-2pj68": 135,
+        "vllm-6cbf6478d6-4g2pf": 9,
+        "vllm-6cbf6478d6-lvnd9": 93,
+        "vllm-6cbf6478d6-m947d": 15
+      },
+      "pod_switch_share": 0.3665338645418327,
+      "max_gap_deviation_ms": 1,
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "autoscale-remaining-3fb2040041ef-remaining-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 125.0,
+          "scale_up_seconds": 140.0,
+          "queue_seconds": 130.0
+        },
+        "scale_up_before_queue": false
+      }
+    }
+  }
+}

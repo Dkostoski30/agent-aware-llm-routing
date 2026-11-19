@@ -1,11 +1,14 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
-# training environment is installed (uv sync --locked --project training, P1.7).
+# training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
+# watching (P3.13b); a clone without ui/node_modules installs the locked packages first, as make ui does.
 test:
 	uv run --locked pytest
 	if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
 	if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
+	if [ ! -d ui/node_modules ]; then cd ui && npm ci --no-audit --no-fund; fi
+	cd ui && npx --no-install ng test --watch=false
 
 lint:
 	uv run --locked pre-commit run --all-files
@@ -142,6 +145,12 @@ service-check:
 gateway-check:
 	bash infra/checks/gateway_check.sh
 
+# The Endpoint Picker's image built from gateway/ into k3s, tagged with a hash of gateway/; skipped if k3s has that tag
+# (P3.1). Run it after a change to gateway/, then infra/set-routing.sh, which deploys the build but never makes it. The
+# compile needs a few GB of the VM's memory, so not next to real vLLM pods: make up runs it before they start.
+picker-image:
+	bash infra/picker-image.sh
+
 # Redis and the agent runtime, image built from the working tree, config from config/$(PROFILE).yaml (P1.3b).
 agent-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make agent-deploy PROFILE=real|sim|demo"; exit 2; fi
@@ -172,7 +181,8 @@ reset-app:
 	kubectl rollout status deployment/app --timeout=$(APP_RESTART_TIMEOUT)
 
 # The UI's dev server on http://localhost:4200 until Ctrl+C, also from a Windows browser through WSL's localhost
-# forwarding; it proxies /api to make agent-forward (ui/proxy.conf.json). profile.json feeds the top bar's chip, so
+# forwarding; it proxies all of /api to make app-forward (ui/proxy.conf.json), since the app backend passes a run's
+# detail, calls and events on from the agent runtime (P3.12b, P3.13b). profile.json feeds the top bar's chip, so
 # PROFILE should be the one make up deployed. The model is named without its Hugging Face org, as in the design (P1.4a).
 ui:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make ui PROFILE=real|sim|demo"; exit 2; fi
@@ -185,17 +195,22 @@ ui:
 # the GPU cannot hold them and the pods at once. Machine setup (make docker-gpu, infra/bootstrap.sh) comes before.
 # PROFILE=sim deploys simulated pods and no model; it has no agent either, since nothing there can answer a tool call,
 # so make smoke is not expected to pass on it (P2.7), and no app backend, which only serves the agent's clients
-# (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use.
+# (P2.10b). install-k3s.sh still sets up the GPU, which those pods don't use. Every profile gets the replayer's metrics
+# target, since every profile replays (P3.8). KEDA too, before any pod starts, so its memory is in the baseline
+# before vLLM loads (P3.9a).
 up:
 	$(MAKE) vllm-stop
 	bash infra/install-k3s.sh
+	bash infra/picker-image.sh
 	bash infra/install-monitoring.sh $(or $(PROFILE),real)
+	bash infra/install-keda.sh
+	bash infra/deploy-replayer-metrics.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" = sim ]; then \
 		$(MAKE) sim-deploy; \
 	else \
 		bash infra/download-model.sh $(or $(PROFILE),real) && $(MAKE) vllm-deploy PROFILE=$(or $(PROFILE),real); \
 	fi
-	bash infra/install-gateway.sh
+	bash infra/install-gateway.sh $(or $(PROFILE),real)
 	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-agent.sh $(or $(PROFILE),real); fi
 	if [ "$(PROFILE)" != sim ]; then bash infra/deploy-app.sh $(or $(PROFILE),real); fi
 
@@ -264,14 +279,16 @@ record:
 # values the profiles must hold, and a test fails until they do.
 convert:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make convert EXPERIMENT=experiments/convert-apb.yaml"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.convert $(EXPERIMENT)
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.convert $(EXPERIMENT)
 
 # A trace's LLM calls straight to the gateway, one trace.v1 line per call in experiments/results/replays/, with the
 # runs arriving by a pattern in config/$(PROFILE).yaml, replay.patterns (P2.3). Needs make up with that profile. An
 # existing output is refused; OUT= names another file. SEED= overrides replay.seed. Exits 1 if a call got no full reply.
+# While it runs, the run tracker's /metrics listens on replay.tracker_port (P3.8). PYTHONPATH: replay.py imports the
+# tracker from agent/, so every target that imports replay.py (convert, experiment, pod-removed, calibrate) has it too.
 replay:
 	@if [ -z "$(TRACE)" ] || [ -z "$(PATTERN)" ]; then echo "usage: make replay TRACE=<trace.jsonl> PATTERN=<name> [PROFILE=real] [SEED=n] [OUT=file]"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.replay $(TRACE) $(PATTERN) \
 		--profile $(or $(PROFILE),real) $(if $(SEED),--seed $(SEED)) $(if $(OUT),--out $(OUT))
 
 # Two replays of one trace: each the pattern's plan at its seed, the same call sequence, tokens as in the trace, every gap
@@ -286,7 +303,7 @@ replay-compare:
 # from sleeping, and the laptop idle: use during a variant shows in its speed. An earlier result of the same file is refused. The default picker is put back when it ends, or it says it could not.
 experiment:
 	@if [ -z "$(NAME)" ]; then echo "usage: make experiment NAME=baseline"; exit 2; fi
-	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/$(NAME).yaml
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.experiment experiments/$(NAME).yaml
 
 # An experiment's graph again, from its CSV alone: no cluster, no replay file (P2.5).
 experiment-graph:
@@ -299,9 +316,16 @@ experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
 
+# A replay with one vLLM pod deleted partway, and where the runs pinned to it went (P3.4): the replay's lines, its printed
+# lines, the picker's log and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the
+# file's profile; it turns the file's rules on for the replay and puts the profile's back after.
+pod-removed:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make pod-removed EXPERIMENT=experiments/pod-removed.yaml"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.pod_removed $(EXPERIMENT)
+
 # Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
 # Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys
 # real again. About 9-10 h, so it refuses to start unless Windows is on Performance with AC sleep and hibernate off. A
 # rerun skips finished files and redoes the others from their start.
 calibrate:
-	PYTHONPATH=loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml
+	PYTHONPATH=agent:loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml

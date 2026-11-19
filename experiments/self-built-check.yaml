@@ -1,0 +1,32 @@
+# P3.1: the Endpoint Picker built from gateway/ against upstream's image, both on the default config
+# (docs/task-cards/36-P3.1-self-built-picker.md). Run with make experiment NAME=self-built-check after make up PROFILE=sim,
+# about 2 h. On sim, not real: it makes no latency claim and simulated pods have no GPU noise (decided 2026-11-09). Two runs
+# of one picker differ, so upstream runs twice and their spread is the yardstick for the self-built run.
+profile: sim
+# The converted trace of P2.4, which config/sim.yaml was calibrated on (P2.8).
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# P2.5's load: 40 runs at 0.02 runs/s, the same in config/sim.yaml as in config/real.yaml.
+pattern: baseline
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types.
+seed: 6
+# The real pods' KV cache, as in experiments/validate-sim.yaml: 274 blocks of 16 per pod, so "over" means a call that would
+# wait for KV blocks on a real pod.
+kv_capacity_tokens_per_pod: 4384
+# As experiments/baseline.yaml, so the replay starts as P2.5's and P2.9's did.
+warmup:
+  runs_discarded: 5
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# In this order: the self-built run between the two upstream ones cancels a steady drift of the host. values null is the
+# default picker, which since P3.1 is the build of gateway/; router-upstream-values.yaml puts upstream's image back.
+variants:
+  - name: upstream
+    values: ../infra/helm/router-upstream-values.yaml
+    epp_config: default-plugins.yaml
+  - name: self-built
+    values: null
+    epp_config: default-plugins.yaml
+  - name: upstream-again
+    values: ../infra/helm/router-upstream-values.yaml
+    epp_config: default-plugins.yaml

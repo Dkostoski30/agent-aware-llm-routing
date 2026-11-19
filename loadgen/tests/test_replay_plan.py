@@ -543,6 +543,37 @@ def test_steady_fan_out_really_fans_out_on_the_recorded_trace() -> None:
     assert any(step.parallel_group is not None for run in plan for step in run.steps)
 
 
+@pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
+def test_burst_fan_out_is_bursts_arrivals_with_a_fan_out_of_half_the_later_steps_into_2(
+    profile: str,
+) -> None:
+    """P3.6's load (card 41): burst's runs and arrivals, half of the later steps fanned out into 2
+    calls, the same in every profile, so its replays on any profile carry one load."""
+    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["replay"]
+    patterns = load_replay_config(section).patterns
+    burst = patterns["burst"]
+    assert patterns["burst-fan-out"] == Pattern(
+        burst.runs, burst.rate_per_second, burst.burst, FanOut(0.5, 2)
+    )
+    sim = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["replay"]
+    assert section["patterns"]["burst-fan-out"] == sim["patterns"]["burst-fan-out"]
+
+
+def test_burst_fan_out_really_fans_out_on_the_recorded_trace() -> None:
+    section = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["replay"]
+    config = load_replay_config(section)
+    plan = build_plan(
+        load_trace(RECORDED_TRACE),
+        config.patterns["burst-fan-out"],
+        config.shared_prefix,
+        config.seed,
+        TEMPLATE_TOKENS,
+    )
+    steps = [step for run in plan for step in run.steps]
+    assert any(step.parallel_group is not None and step.calls == 2 for step in steps)
+    assert all(step.parallel_group is None for run in plan for step in run.steps[:1])
+
+
 @pytest.mark.parametrize("profile", ["real", "sim", "demo"])
 def test_runs_of_different_types_share_no_block_of_the_pickers_hash(profile: str) -> None:
     """The picker hashes 256-byte blocks of a request, tools first (llm-d-router v0.11.0): real runs

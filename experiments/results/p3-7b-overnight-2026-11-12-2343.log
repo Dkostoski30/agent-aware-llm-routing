@@ -1,0 +1,1757 @@
+
+=== 2026-11-12 23:43:58 make test
+uv run --locked pytest
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis
+configfile: pyproject.toml
+plugins: anyio-4.15.1, platformdirs-4.13.5
+collected 1720 items
+
+agent/tests/test_agent_config.py .......................                 [  1%]
+agent/tests/test_agent_loop.py ......................................... [  3%]
+.....................................................                    [  6%]
+agent/tests/test_app.py ...........................................      [  9%]
+agent/tests/test_calculator.py ......................................... [ 11%]
+...................                                                      [ 12%]
+agent/tests/test_csv_tools.py .......................................... [ 15%]
+..................................                                       [ 17%]
+agent/tests/test_documents.py ........................................   [ 19%]
+agent/tests/test_logs.py ....                                            [ 19%]
+agent/tests/test_store.py .....                                          [ 20%]
+agent/tests/test_support.py .........................                    [ 21%]
+app/tests/test_app_config.py .....                                       [ 21%]
+app/tests/test_app_logs.py ...                                           [ 21%]
+app/tests/test_auth.py .....................                             [ 23%]
+app/tests/test_db.py .....                                               [ 23%]
+app/tests/test_passwords.py .....                                        [ 23%]
+experiments/tests/test_finetune_data.py ................................ [ 25%]
+.........                                                                [ 26%]
+experiments/tests/test_go_no_go.py ..................................... [ 28%]
+......................................................                   [ 31%]
+experiments/tests/test_heldout.py .............................          [ 33%]
+infra/checks/test_concurrency_check.py ........................          [ 34%]
+infra/checks/test_sim_chart.py ..                                        [ 34%]
+loadgen/tests/test_compare.py .......................................... [ 37%]
+....                                                                     [ 37%]
+loadgen/tests/test_convert.py .......................................... [ 39%]
+........................................................................ [ 43%]
+....                                                                     [ 44%]
+loadgen/tests/test_expected_steps.py ............                        [ 44%]
+loadgen/tests/test_experiment.py ....................................... [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 55%]
+........                                                                 [ 55%]
+loadgen/tests/test_experiment_compare.py ............................... [ 57%]
+........................                                                 [ 59%]
+loadgen/tests/test_graph.py .......                                      [ 59%]
+loadgen/tests/test_pod_removed.py ...................................... [ 61%]
+.............                                                            [ 62%]
+loadgen/tests/test_record.py ........................................... [ 65%]
+...............................                                          [ 66%]
+loadgen/tests/test_replay.py ........................................... [ 69%]
+.............................................                            [ 71%]
+loadgen/tests/test_replay_plan.py ...................................... [ 74%]
+.................................                                        [ 76%]
+loadgen/tests/test_report_config.py ............                         [ 76%]
+loadgen/tests/test_results.py ........................................   [ 79%]
+loadgen/tests/test_routing_values.py ................................... [ 81%]
+....................................                                     [ 83%]
+loadgen/tests/test_validation.py .....................                   [ 84%]
+schemas/tests/test_schemas.py .......................................... [ 86%]
+........................................................................ [ 91%]
+................................................................         [ 94%]
+sim/tests/test_calibrate.py .......................                      [ 96%]
+sim/tests/test_calibration_config.py .................................   [ 98%]
+sim/tests/test_calibration_mapping.py ..........                         [ 98%]
+sim/tests/test_calibration_prompts.py ........                           [ 99%]
+sim/tests/test_calibration_stats.py ..............                       [ 99%]
+sim/tests/test_real_plain_profile.py .                                   [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/kosto/thesis/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 1720 passed, 1 warning in 35.74s =======================
+if [ -f gateway/go.mod ]; then cd gateway && go test ./...; fi
+?   	github.com/Dkostoski30/agent-aware-llm-routing/gateway/cmd/picker	[no test files]
+ok  	github.com/Dkostoski30/agent-aware-llm-routing/gateway/runrouter	(cached)
+if [ -d training/.venv ]; then uv run --locked --project training pytest -c training/pyproject.toml training/tests; fi
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.7.0
+rootdir: /home/kosto/thesis/training
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 22 items
+
+training/tests/test_render.py .........                                  [ 40%]
+training/tests/test_train.py .............                               [100%]
+
+============================= 22 passed in 14.76s ==============================
+=== 2026-11-12 23:44:57 exit 0: make test
+
+=== 2026-11-12 23:44:57 make lint
+uv run --locked pre-commit run --all-files
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check yaml...............................................................Passed
+check json...............................................................Passed
+ruff.....................................................................Passed
+ruff-format..............................................................Passed
+mypy (strict)............................................................Passed
+mypy (strict, training)..................................................Passed
+golangci-lint............................................................Passed
+eslint (ui)..............................................................Passed
+tsc --strict (ui)........................................................Passed
+=== 2026-11-12 23:45:41 exit 0: make lint
+
+=== 2026-11-12 23:45:41 make down
+bash infra/down.sh
+release "vllm-pool" uninstalled
+release "agentgateway" uninstalled
+release "agentgateway-crds" uninstalled
+release "vllm" uninstalled
+release "monitoring" uninstalled
+release "nvidia-device-plugin" uninstalled
++ [ -s /etc/systemd/system/k3s.service ]
++ basename /etc/systemd/system/k3s.service
++ systemctl stop k3s.service
++ [ -x /etc/init.d/k3s* ]
++ killtree 1945 1996 2083
++ kill -9 1945 1983 2147 1996 2043 2138 2083 2108 2260
++ do_unmount_and_remove /run/k3s
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/adf9f19c3f9a6671199f3235d451892b991086fc545fdf20a38be6d81f3828ab/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/94733547e0b9811fb79e46dff0eb68d14b122a7cb34fda9f604e69e3fa68c8bf/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/8fb85f0f2f5e52e1f4b01bf1797be73b575cd63436b655732bc9ebf839553e19/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/8ce8eb2d46094b4a80f23dcb5500b0da02b14db9aba6663869fcc3350a16b8df/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/4ee15eef3729246a918b4a4b62e9edd95933984e2da56e8bf96adfc0b927f9cb/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/1df1b313abdeca64d9a865a6a5644ed84ce3c8d2d14cc1de087dfd1e84a33753/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/94733547e0b9811fb79e46dff0eb68d14b122a7cb34fda9f604e69e3fa68c8bf/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/8ce8eb2d46094b4a80f23dcb5500b0da02b14db9aba6663869fcc3350a16b8df/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/4ee15eef3729246a918b4a4b62e9edd95933984e2da56e8bf96adfc0b927f9cb/shm
++ do_unmount_and_remove /var/lib/kubelet/pods
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/a34517c2-60fe-4075-b12e-51e674ac29f7/volumes/kubernetes.io~projected/kube-api-access-6hlvb
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/321dce9c-215e-4516-9331-2c14c42011d2/volumes/kubernetes.io~projected/kube-api-access-j4lrr
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/02c30c75-f621-436d-bd33-6e7c6fd78164/volumes/kubernetes.io~projected/kube-api-access-mzx59
++ do_unmount_and_remove /var/lib/kubelet/plugins
++ set +x
++ do_unmount_and_remove /run/netns/cni-
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-b7c8c12a-c916-d3b6-29d9-387556a0f4a9
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-a90a1f16-f33d-8925-c79a-7d4549af9409
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-6706b766-a961-d6a9-8f2d-f65b8b426ff3
++ ip netns show
++ grep cni-
++ xargs -r -t -n 1 ip netns delete
++ remove_interfaces
++ ip link show
++ grep master cni0
++ read ignore iface ignore
++ iface=veth14cd3434
++ [ -z veth14cd3434 ]
++ ip link delete veth14cd3434
++ read ignore iface ignore
++ iface=vethb42ec6f5
++ [ -z vethb42ec6f5 ]
++ ip link delete vethb42ec6f5
++ read ignore iface ignore
++ ip link delete cni0
++ ip link delete flannel.1
++ ip link delete flannel-v6.1
+Cannot find device "flannel-v6.1"
++ ip link delete kube-ipvs0
+Cannot find device "kube-ipvs0"
++ ip link delete flannel-wg
+Cannot find device "flannel-wg"
++ ip link delete flannel-wg-v6
+Cannot find device "flannel-wg-v6"
++ command -v tailscale
++ [ -n  ]
++ rm -rf /var/lib/cni/
++ iptables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ iptables-restore
++ ip6tables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ ip6tables-restore
+=== 2026-11-12 23:45:48 exit 0: make down
+
+=== 2026-11-12 23:45:48 make up PROFILE=sim
+make vllm-stop
+make[1]: Entering directory '/home/kosto/thesis'
+vllm-stop: no vLLM containers
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-k3s.sh
+runtimeclass.node.k8s.io/nvidia serverside-applied
+Release "nvidia-device-plugin" does not exist. Installing it now.
+NAME: nvidia-device-plugin
+LAST DEPLOYED: Thu Nov 12 23:46:03 2026
+NAMESPACE: nvidia-device-plugin
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+node reports allocatable nvidia.com/gpu: 2 (ladder step 1: device plugin)
+== k3s and device plugin versions
+k3s version v1.36.5+k3s1 (3dd98cc5)
+device plugin chart nvidia-device-plugin-0.20.1, app 0.20.1
+bash infra/picker-image.sh
+picker-image: thesis/picker:bf01d913cbf8 is already in k3s
+bash infra/install-monitoring.sh sim
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Thu Nov 12 23:46:25 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+if [ "sim" = sim ]; then \
+	make sim-deploy; \
+else \
+	bash infra/download-model.sh sim && make vllm-deploy PROFILE=sim; \
+fi
+make[1]: Entering directory '/home/kosto/thesis'
+Release "vllm" does not exist. Installing it now.
+NAME: vllm
+LAST DEPLOYED: Thu Nov 12 23:47:02 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+sim-deploy: waiting for the simulated cold start
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+NAME                    READY   STATUS    RESTARTS   AGE     IP           NODE           NOMINATED NODE   READINESS GATES
+vllm-66c49d9b9b-b99rn   1/1     Running   0          2m27s   10.42.0.13   daniellaptop   <none>           <none>
+vllm-66c49d9b9b-r55km   1/1     Running   0          2m27s   10.42.0.12   daniellaptop   <none>           <none>
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-gateway.sh sim
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io condition met
+Release "agentgateway-crds" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds@sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+Digest: sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+NAME: agentgateway-crds
+LAST DEPLOYED: Thu Nov 12 23:49:36 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Release "agentgateway" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway@sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+Digest: sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+NAME: agentgateway
+LAST DEPLOYED: Thu Nov 12 23:49:40 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+Release "vllm-pool" does not exist. Installing it now.
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+NAME: vllm-pool
+LAST DEPLOYED: Thu Nov 12 23:49:47 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+agentgatewayparameters.agentgateway.dev/inference-gateway created
+gateway.gateway.networking.k8s.io/inference-gateway created
+httproute.gateway.networking.k8s.io/vllm created
+agentgatewaypolicy.agentgateway.dev/inference-gateway-access-log created
+gateway.gateway.networking.k8s.io/inference-gateway condition met
+Waiting for deployment "inference-gateway" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inference-gateway" successfully rolled out
+if [ "sim" != sim ]; then bash infra/deploy-agent.sh sim; fi
+if [ "sim" != sim ]; then bash infra/deploy-app.sh sim; fi
+=== 2026-11-12 23:49:51 exit 0: make up PROFILE=sim
+
+=== 2026-11-12 23:49:51 bash infra/set-routing.sh sim /tmp/least-context-on.yaml
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Thu Nov 12 23:49:53 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: /tmp/least-context-on.yaml is serving, on try 1
+=== 2026-11-12 23:51:01 exit 0: bash infra/set-routing.sh sim /tmp/least-context-on.yaml
+
+=== 2026-11-12 23:51:01 make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=burst-fan-out PROFILE=sim SEED=6 OUT=experiments/results/replays/least-context-burst-fan-out-6.jsonl
+PYTHONPATH=loadgen uv run --locked python -m load_generator.replay experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl burst-fan-out \
+	--profile sim --seed 6 --out experiments/results/replays/least-context-burst-fan-out-6.jsonl
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/kosto/thesis/loadgen/load_generator/replay.py", line 510, in <module>
+    main()
+  File "/home/kosto/thesis/loadgen/load_generator/replay.py", line 504, in main
+    lines = replay_to_file(profile, args.trace, args.pattern, args.seed, args.out, end_runs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/kosto/thesis/loadgen/load_generator/replay.py", line 462, in replay_to_file
+    raise ReplayError(f"{out} exists: delete it, or name another file with OUT=")
+load_generator.plan.ReplayError: experiments/results/replays/least-context-burst-fan-out-6.jsonl exists: delete it, or name another file with OUT=
+make: *** [Makefile:281: replay] Error 1
+=== 2026-11-12 23:51:02 exit 2: make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=burst-fan-out PROFILE=sim SEED=6 OUT=experiments/results/replays/least-context-burst-fan-out-6.jsonl
+
+=== 2026-11-12 23:51:02 sim reasons (least-context must be > 0)
+      1 first
+
+=== 2026-11-12 23:51:02 sim checks: not smallest 0 (want 0), first with unequal context 0 (want 0), lines with a size 0 (want > 0), least-context 0 (want > 0)
+
+=== 2026-11-12 23:51:02 make down
+bash infra/down.sh
+agentgatewayparameters.agentgateway.dev "inference-gateway" deleted from default namespace
+gateway.gateway.networking.k8s.io "inference-gateway" deleted from default namespace
+httproute.gateway.networking.k8s.io "vllm" deleted from default namespace
+agentgatewaypolicy.agentgateway.dev "inference-gateway-access-log" deleted from default namespace
+release "vllm-pool" uninstalled
+release "agentgateway" uninstalled
+release "agentgateway-crds" uninstalled
+release "vllm" uninstalled
+release "monitoring" uninstalled
+release "nvidia-device-plugin" uninstalled
+namespace "agentgateway-system" deleted
+namespace "monitoring" deleted
+namespace "nvidia-device-plugin" deleted
++ [ -s /etc/systemd/system/k3s.service ]
++ basename /etc/systemd/system/k3s.service
++ systemctl stop k3s.service
++ [ -x /etc/init.d/k3s* ]
++ killtree 8274 8308 8326 13971
++ kill -9 8274 8347 8436 8308 8364 8449 8326 8376 8456 13971 13996 14023
++ do_unmount_and_remove /run/k3s
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/e064c7aad97f27ec53b92e5d20551226eb65c108825ddb27d105ad70edc0c223/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/b70b4da215f20592dd4b45a3118ec063f611f43c30f6c09a6968cba284ee8baa/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/a15c732c3736a23db9f0a8f4e6604c6a64203402ec769e517a2fca79e06c48ad/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/8a4ee36f4f4e81c4d5003e8a580c1b9f8f9b42944a65e51fa24ecca8cb98f333/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/896c5d098ee7385c2291572365233da54b742f456d0bc0b7aaec69c585bf0ee7/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/58e2172df25bc3c0109f4d351ad62666260c7b3e34889f2cfd2aa047aa0f0aa9/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/38013e639d6914bd8f08cfa6da1dffc6bc8552996b9e50bb2d90874fa4f85364/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.runtime.v2.task/k8s.io/104180dae7e6d53bc11141851340d51b251ef9a3a52508af7b3b77be2505e7d6/rootfs
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/e064c7aad97f27ec53b92e5d20551226eb65c108825ddb27d105ad70edc0c223/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/8a4ee36f4f4e81c4d5003e8a580c1b9f8f9b42944a65e51fa24ecca8cb98f333/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/58e2172df25bc3c0109f4d351ad62666260c7b3e34889f2cfd2aa047aa0f0aa9/shm
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/k3s/containerd/io.containerd.grpc.v1.cri/sandboxes/104180dae7e6d53bc11141851340d51b251ef9a3a52508af7b3b77be2505e7d6/shm
++ do_unmount_and_remove /var/lib/kubelet/pods
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/a34517c2-60fe-4075-b12e-51e674ac29f7/volumes/kubernetes.io~projected/kube-api-access-6hlvb
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/3b650ed6-ea4c-406b-b9fa-9442cf3e2483/volumes/kubernetes.io~projected/kube-api-access-6qt7n
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/321dce9c-215e-4516-9331-2c14c42011d2/volumes/kubernetes.io~projected/kube-api-access-j4lrr
+sh -c 'umount -f "$0" && rm -rf "$0"' /var/lib/kubelet/pods/02c30c75-f621-436d-bd33-6e7c6fd78164/volumes/kubernetes.io~projected/kube-api-access-mzx59
++ do_unmount_and_remove /var/lib/kubelet/plugins
++ set +x
++ do_unmount_and_remove /run/netns/cni-
++ set +x
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-dabc1dc2-48f1-5980-f8c5-df5b9dcbedf8
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-ace56daa-7e16-2956-2ec7-2fdb63fb254a
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-766a0185-75a2-5e72-3ae8-7fb5d2dce703
+sh -c 'umount -f "$0" && rm -rf "$0"' /run/netns/cni-0ccd3300-4fbd-296c-488c-829fd8205bc6
++ ip netns show
++ grep cni-
++ xargs -r -t -n 1 ip netns delete
++ remove_interfaces
++ ip link show
++ grep master cni0
++ read ignore iface ignore
++ iface=veth1b41c761
++ [ -z veth1b41c761 ]
++ ip link delete veth1b41c761
++ read ignore iface ignore
++ iface=veth57c6a43f
++ [ -z veth57c6a43f ]
++ ip link delete veth57c6a43f
++ read ignore iface ignore
++ iface=vethb87536f0
++ [ -z vethb87536f0 ]
++ ip link delete vethb87536f0
+Cannot find device "vethb87536f0"
++ read ignore iface ignore
++ ip link delete cni0
++ ip link delete flannel.1
++ ip link delete flannel-v6.1
+Cannot find device "flannel-v6.1"
++ ip link delete kube-ipvs0
+Cannot find device "kube-ipvs0"
++ ip link delete flannel-wg
+Cannot find device "flannel-wg"
++ ip link delete flannel-wg-v6
+Cannot find device "flannel-wg-v6"
++ command -v tailscale
++ [ -n  ]
++ rm -rf /var/lib/cni/
++ iptables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ iptables-restore
++ ip6tables-save
++ grep -v KUBE-
++ grep -v CNI-
++ grep -iv flannel
++ ip6tables-restore
+=== 2026-11-12 23:51:19 exit 0: make down
+
+=== 2026-11-12 23:51:19 make up
+make vllm-stop
+make[1]: Entering directory '/home/kosto/thesis'
+vllm-stop: no vLLM containers
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-k3s.sh
+runtimeclass.node.k8s.io/nvidia serverside-applied
+Release "nvidia-device-plugin" does not exist. Installing it now.
+NAME: nvidia-device-plugin
+LAST DEPLOYED: Thu Nov 12 23:51:32 2026
+NAMESPACE: nvidia-device-plugin
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+node reports allocatable nvidia.com/gpu: 2 (ladder step 1: device plugin)
+== k3s and device plugin versions
+k3s version v1.36.5+k3s1 (3dd98cc5)
+device plugin chart nvidia-device-plugin-0.20.1, app 0.20.1
+bash infra/picker-image.sh
+picker-image: thesis/picker:bf01d913cbf8 is already in k3s
+bash infra/install-monitoring.sh real
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Thu Nov 12 23:51:48 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+if [ "" = sim ]; then \
+	make sim-deploy; \
+else \
+	bash infra/download-model.sh real && make vllm-deploy PROFILE=real; \
+fi
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 435.41it/s]
+[32m✓ Downloaded[0m
+  path: /home/kosto/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B-GPTQ-Int8/snapshots/d3f20e7e71825fe57ad32705b396e9e156279107
+make[1]: Entering directory '/home/kosto/thesis'
+Release "vllm" does not exist. Installing it now.
+NAME: vllm
+LAST DEPLOYED: Thu Nov 12 23:52:23 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+vllm-deploy: waiting for the pods to load the model (about 2-3 min)
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+NAME                    READY   STATUS    RESTARTS   AGE    IP           NODE           NOMINATED NODE   READINESS GATES
+vllm-5c9565db76-qlcjq   1/1     Running   0          2m3s   10.42.0.13   daniellaptop   <none>           <none>
+vllm-5c9565db76-vcjtk   1/1     Running   0          2m3s   10.42.0.12   daniellaptop   <none>           <none>
+make[1]: Leaving directory '/home/kosto/thesis'
+bash infra/install-gateway.sh real
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io condition met
+customresourcedefinition.apiextensions.k8s.io/inferencepools.inference.networking.k8s.io condition met
+Release "agentgateway-crds" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway-crds@sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+Digest: sha256:dd7f965d43e54dffa9c95af089b6f762397a23c963a159ad6d4992f6c582292a
+NAME: agentgateway-crds
+LAST DEPLOYED: Thu Nov 12 23:54:32 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway-crds chart.
+
+Your release "agentgateway-crds" has been deployed in the "agentgateway-system" namespace.
+
+This chart installs the Custom Resource Definitions (CRDs) required by agentgateway.
+
+To check the installed CRDs:
+
+  kubectl get crds | grep agentgateway.dev
+Release "agentgateway" does not exist. Installing it now.
+Pulled: cr.agentgateway.dev/charts/agentgateway@sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+Digest: sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28
+NAME: agentgateway
+LAST DEPLOYED: Thu Nov 12 23:54:36 2026
+NAMESPACE: agentgateway-system
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+Thank you for installing the agentgateway chart.
+
+Your release "agentgateway" has been deployed in the "agentgateway-system" namespace.
+
+To check the status of the deployment:
+
+  helm status agentgateway --namespace agentgateway-system
+
+To view the resources created by this chart:
+
+  kubectl get all -n agentgateway-system
+
+To learn how to access and use agentgateway, please visit the official documentation:
+
+  https://agentgateway.dev/docs/kubernetes/latest/
+
+To uninstall the agentgateway deployment:
+
+  helm uninstall agentgateway --namespace agentgateway-system
+Release "vllm-pool" does not exist. Installing it now.
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+NAME: vllm-pool
+LAST DEPLOYED: Thu Nov 12 23:54:41 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+agentgatewayparameters.agentgateway.dev/inference-gateway created
+gateway.gateway.networking.k8s.io/inference-gateway created
+httproute.gateway.networking.k8s.io/vllm created
+agentgatewaypolicy.agentgateway.dev/inference-gateway-access-log created
+gateway.gateway.networking.k8s.io/inference-gateway condition met
+Waiting for deployment "inference-gateway" rollout to finish: 0 of 1 updated replicas are available...
+deployment "inference-gateway" successfully rolled out
+if [ "" != sim ]; then bash infra/deploy-agent.sh real; fi
+deploy-agent: thesis/agent:bf2848f1f42a is already in k3s
+deployment.apps/redis created
+service/redis created
+configmap/agent-config created
+deployment.apps/agent created
+service/agent created
+deployment "redis" successfully rolled out
+Waiting for deployment "agent" rollout to finish: 0 of 1 updated replicas are available...
+deployment "agent" successfully rolled out
+NAME                     READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+agent-b54d6564b-vgd7x    1/1     Running   0          12s   10.42.0.19   daniellaptop   <none>           <none>
+redis-5b9fcb4c45-g6l46   1/1     Running   0          13s   10.42.0.18   daniellaptop   <none>           <none>
+if [ "" != sim ]; then bash infra/deploy-app.sh real; fi
+deploy-app: thesis/app:c286d44790b3 is already in k3s
+configmap/app-config created
+persistentvolumeclaim/app-data unchanged
+deployment.apps/app created
+service/app created
+Waiting for deployment "app" rollout to finish: 0 of 1 updated replicas are available...
+deployment "app" successfully rolled out
+NAME                   READY   STATUS    RESTARTS   AGE   IP           NODE           NOMINATED NODE   READINESS GATES
+app-8446c7f656-jx7vn   1/1     Running   0          12s   10.42.0.20   daniellaptop   <none>           <none>
+NAME       STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+app-data   Bound    pvc-a80b8b37-23f2-4019-9c9f-8d35370ddab0   1Gi        RWO            local-path     <unset>                 4d20h
+=== 2026-11-12 23:55:13 exit 0: make up
+
+=== 2026-11-12 23:55:13 make experiment NAME=routing-faster-reversed
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment experiments/routing-faster-reversed.yaml
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Thu Nov 12 23:58:09 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 2
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: /tmp/tmpmb6epfz3.yaml is serving, on try 1
+replay: 1/1 warmup-1 warmup: 5 calls, pods ['vllm-5548d86b9f-5dfw9']
+experiment: warmed vllm-5548d86b9f-5dfw9, ms to first token [19818, 524, 324, 303, 344]
+replay: 1/1 warmup-2 warmup: 5 calls, pods ['vllm-5548d86b9f-5whrz']
+experiment: warmed vllm-5548d86b9f-5whrz, ms to first token [4397, 472, 356, 396, 396]
+replay: 1/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 2/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 3/30 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 4/30 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 5/30 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 6/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 7/30 bfcl-522-11 bfcl: 14 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 8/30 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 9/30 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 10/30 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 11/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 12/30 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 13/30 bfcl-615-6 bfcl: 14 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 14/30 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-5548d86b9f-5dfw9']
+replay: 15/30 tau2_telecom-986-18 tau2_telecom: 13 calls, pods ['vllm-5548d86b9f-5dfw9']
+replay: 16/30 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-5548d86b9f-5dfw9']
+replay: 17/30 bfcl-624-13 bfcl: 18 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 18/30 tau2_airline-772-10 tau2_airline: 19 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 19/30 tau2_airline-816-14 tau2_airline: 9 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 20/30 hotpotqa-25-28 hotpotqa: 4 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 21/30 bfcl-514-16 bfcl: 16 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 22/30 bfcl-561-22 bfcl: 13 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 23/30 bfcl-527-25 bfcl: 11 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 24/30 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-5548d86b9f-5dfw9']
+replay: 25/30 bfcl-708-27 bfcl: 8 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 26/30 bfcl-508-29 bfcl: 10 calls, pods ['vllm-5548d86b9f-5whrz']
+replay: 27/30 bfcl-565-21 bfcl: 25 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 28/30 bfcl-679-24 bfcl: 17 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 29/30 gaia_dev-345-26 gaia_dev: 50 calls, pods ['vllm-5548d86b9f-5dfw9', 'vllm-5548d86b9f-5whrz']
+replay: 30/30 gaia_dev-270-19 gaia_dev: 39 calls, pods ['vllm-5548d86b9f-5dfw9']
+deployment.apps/vllm restarted
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 out of 2 new replicas have been updated...
+Waiting for deployment "vllm" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "vllm" rollout to finish: 1 of 2 updated replicas are available...
+deployment "vllm" successfully rolled out
+Pulled: ghcr.io/llm-d/charts/llm-d-router-gateway@sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Digest: sha256:63a79a842974691be73d44918c7086bcc52d6fee546ff39113517a23c03eeab0
+Release "vllm-pool" has been upgraded. Happy Helming!
+NAME: vllm-pool
+LAST DEPLOYED: Fri Nov 13 00:13:25 2026
+NAMESPACE: default
+STATUS: deployed
+REVISION: 3
+DESCRIPTION: Upgrade complete
+TEST SUITE: None
+NOTES:
+llm-d-router-gateway vllm-pool deployed.
+deployment.apps/vllm-pool-epp restarted
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 out of 1 new replicas have been updated...
+Waiting for deployment "vllm-pool-epp" rollout to finish: 0 of 1 updated replicas are available...
+deployment "vllm-pool-epp" successfully rolled out
+set-routing: config/real.yaml is serving, on try 1
+replay: 357 calls, 0 failed
+replay: wrote /home/kosto/thesis/experiments/results/routing-faster-reversed-9a6c4680fec5-plugin.jsonl
+replay: 1/1 warmup-1 warmup: 5 calls, pods ['vllm-5bdc5449f8-624qs']
+experiment: warmed vllm-5bdc5449f8-624qs, ms to first token [3835, 370, 316, 410, 339]
+replay: 1/1 warmup-2 warmup: 5 calls, pods ['vllm-5bdc5449f8-vhv6p']
+experiment: warmed vllm-5bdc5449f8-vhv6p, ms to first token [17563, 330, 294, 365, 444]
+replay: 1/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 2/30 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-5bdc5449f8-vhv6p']
+replay: 3/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 4/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 5/30 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 6/30 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 7/30 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 8/30 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 9/30 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 10/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 11/30 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-5bdc5449f8-vhv6p']
+replay: 12/30 bfcl-522-11 bfcl: 14 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 13/30 bfcl-624-13 bfcl: 18 calls, pods ['vllm-5bdc5449f8-vhv6p']
+replay: 14/30 bfcl-615-6 bfcl: 14 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 15/30 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 16/30 tau2_airline-772-10 tau2_airline: 19 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 17/30 tau2_telecom-986-18 tau2_telecom: 13 calls, pods ['vllm-5bdc5449f8-624qs']
+replay: 18/30 tau2_airline-816-14 tau2_airline: 9 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 19/30 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 20/30 bfcl-514-16 bfcl: 16 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 21/30 bfcl-527-25 bfcl: 11 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 22/30 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 23/30 hotpotqa-25-28 hotpotqa: 4 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 24/30 bfcl-708-27 bfcl: 8 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 25/30 bfcl-561-22 bfcl: 13 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 26/30 bfcl-508-29 bfcl: 10 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 27/30 bfcl-679-24 bfcl: 17 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 28/30 bfcl-565-21 bfcl: 25 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 29/30 gaia_dev-270-19 gaia_dev: 39 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 30/30 gaia_dev-345-26 gaia_dev: 50 calls, pods ['vllm-5bdc5449f8-624qs', 'vllm-5bdc5449f8-vhv6p']
+replay: 357 calls, 0 failed
+replay: wrote /home/kosto/thesis/experiments/results/routing-faster-reversed-9a6c4680fec5-default.jsonl
+plugin: 26 of 26 runs finished, 313 calls, 0 failed; run time median 122.44 s; hit rate 0.487; moved 31 of 287 later steps
+  picks {'vllm-5548d86b9f-5whrz': 186, 'vllm-5548d86b9f-5dfw9': 171}, share that switched pod 0.2556179775280899; clock jumps 19; largest gap deviation 6 ms
+  speed, mostly the host's: generation 195.7 ms per token, warm-up calls 389.4 ms to first token
+  stayed later steps short of their previous prompt in cache: 155 of 256
+  under the KV limit, all: 15 calls, TTFT p50 0.43 s, p95 0.63 s
+  under the KV limit, stayed: 15 calls, TTFT p50 0.43 s, p95 0.63 s
+  under the KV limit, moved: 0 calls, TTFT p50 -, p95 -
+  over the KV limit, all: 298 calls, TTFT p50 8.80 s, p95 38.58 s
+  over the KV limit, stayed: 241 calls, TTFT p50 9.10 s, p95 35.59 s
+  over the KV limit, moved: 31 calls, TTFT p50 13.46 s, p95 78.49 s
+default: 26 of 26 runs finished, 313 calls, 0 failed; run time median 127.26 s; hit rate 0.455; moved 86 of 287 later steps
+  picks {'vllm-5bdc5449f8-vhv6p': 181, 'vllm-5bdc5449f8-624qs': 176}, share that switched pod 0.25280898876404495; clock jumps 19; largest gap deviation 8 ms
+  speed, mostly the host's: generation 195.7 ms per token, warm-up calls 358.5 ms to first token
+  stayed later steps short of their previous prompt in cache: 120 of 201
+  under the KV limit, all: 10 calls, TTFT p50 0.45 s, p95 0.94 s
+  under the KV limit, stayed: 8 calls, TTFT p50 0.45 s, p95 0.75 s
+  under the KV limit, moved: 1 calls, TTFT p50 0.32 s, p95 0.32 s
+  over the KV limit, all: 303 calls, TTFT p50 10.03 s, p95 29.90 s
+  over the KV limit, stayed: 193 calls, TTFT p50 8.71 s, p95 26.90 s
+  over the KV limit, moved: 85 calls, TTFT p50 13.79 s, p95 29.90 s
+experiment: wrote /home/kosto/thesis/experiments/results/routing-faster-reversed-9a6c4680fec5.csv, /home/kosto/thesis/experiments/results/routing-faster-reversed-9a6c4680fec5.meta.json and /home/kosto/thesis/experiments/graphs/routing-faster-reversed-9a6c4680fec5.png
+experiment: GPU log /home/kosto/thesis/experiments/results/routing-faster-reversed-9a6c4680fec5-gpu.csv
+=== 2026-11-13 00:26:15 exit 0: make experiment NAME=routing-faster-reversed
+
+=== 2026-11-13 00:26:15 SKIPPED routing-context and routing-context-reversed: the sim check failed
+
+=== 2026-11-13 00:26:15 make experiment-compare CSVS=experiments/results/routing-faster-d7acfd33b019.csv experiments/results/routing-faster-reversed-9a6c4680fec5.csv STALL_SECONDS=5
+PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds 5 experiments/results/routing-faster-d7acfd33b019.csv experiments/results/routing-faster-reversed-9a6c4680fec5.csv
+routing-faster-d7acfd33b019.csv, in order default, plugin
+  default: runs 3718.7 s over 26 of 26 finished, first tokens 3760.4 s, generation 1311.0 s, uncached tokens 385529
+    under the KV limit: 6 calls, first tokens 2.8 s, uncached tokens 842
+    over the KV limit: 307 calls, first tokens 3757.5 s
+    default: 240 calls of 5.0 s or more to first token, 3654.4 s in all
+      bfcl-615-6 step 3 on vllm-97d4b4c96-z8zgg: 57.6 s
+      bfcl-624-13 step 6 on vllm-97d4b4c96-2llhh: 45.9 s
+      bfcl-624-13 step 6 on vllm-97d4b4c96-2llhh: 45.9 s
+      hotpotqa-145-20 step 3 on vllm-97d4b4c96-2llhh: 44.0 s
+      hotpotqa-145-20 step 3 on vllm-97d4b4c96-2llhh: 44.0 s
+      bfcl-514-16 step 5 on vllm-97d4b4c96-2llhh: 41.4 s
+      gaia_dev-270-19 step 5 on vllm-97d4b4c96-2llhh: 41.2 s
+      gaia_dev-270-19 step 5 on vllm-97d4b4c96-2llhh: 41.2 s
+      bfcl-615-6 step 10 on vllm-97d4b4c96-z8zgg: 38.0 s
+      bfcl-615-6 step 10 on vllm-97d4b4c96-z8zgg: 38.0 s
+      tau2_telecom-986-18 step 5 on vllm-97d4b4c96-z8zgg: 36.7 s
+      bfcl-565-21 step 3 on vllm-97d4b4c96-z8zgg: 35.8 s
+      bfcl-624-13 step 9 on vllm-97d4b4c96-2llhh: 33.5 s
+      bfcl-624-13 step 9 on vllm-97d4b4c96-2llhh: 33.5 s
+      bfcl-624-13 step 1 on vllm-97d4b4c96-2llhh: 32.8 s
+      gaia_dev-270-19 step 8 on vllm-97d4b4c96-2llhh: 32.7 s
+      gaia_dev-345-26 step 2 on vllm-97d4b4c96-2llhh: 31.4 s
+      gaia_dev-345-26 step 2 on vllm-97d4b4c96-2llhh: 31.4 s
+      bfcl-522-11 step 5 on vllm-97d4b4c96-2llhh: 31.0 s
+      bfcl-679-24 step 4 on vllm-97d4b4c96-z8zgg: 28.2 s
+      bfcl-527-25 step 4 on vllm-97d4b4c96-z8zgg: 28.0 s
+      bfcl-527-25 step 4 on vllm-97d4b4c96-z8zgg: 28.0 s
+      bfcl-561-22 step 10 on vllm-97d4b4c96-2llhh: 27.6 s
+      gaia_dev-345-26 step 9 on vllm-97d4b4c96-z8zgg: 27.6 s
+      bfcl-508-29 step 2 on vllm-97d4b4c96-z8zgg: 26.9 s
+      gaia_dev-270-19 step 16 on vllm-97d4b4c96-z8zgg: 26.6 s
+      bfcl-561-22 step 2 on vllm-97d4b4c96-2llhh: 26.4 s
+      bfcl-615-6 step 2 on vllm-97d4b4c96-z8zgg: 25.1 s
+      bfcl-514-16 step 9 on vllm-97d4b4c96-z8zgg: 24.7 s
+      bfcl-527-25 step 9 on vllm-97d4b4c96-2llhh: 24.3 s
+      bfcl-679-24 step 9 on vllm-97d4b4c96-z8zgg: 24.0 s
+      bfcl-679-24 step 9 on vllm-97d4b4c96-z8zgg: 24.0 s
+      tau2_telecom-986-18 step 7 on vllm-97d4b4c96-z8zgg: 23.9 s
+      tau2_telecom-986-18 step 7 on vllm-97d4b4c96-z8zgg: 23.9 s
+      tau2_airline-816-14 step 8 on vllm-97d4b4c96-z8zgg: 23.4 s
+      bfcl-565-21 step 13 on vllm-97d4b4c96-2llhh: 23.3 s
+      bfcl-561-22 step 9 on vllm-97d4b4c96-2llhh: 22.7 s
+      bfcl-514-16 step 1 on vllm-97d4b4c96-2llhh: 21.7 s
+      bfcl-522-11 step 6 on vllm-97d4b4c96-2llhh: 21.6 s
+      bfcl-522-11 step 6 on vllm-97d4b4c96-2llhh: 21.6 s
+      bfcl-508-29 step 3 on vllm-97d4b4c96-z8zgg: 21.0 s
+      bfcl-508-29 step 3 on vllm-97d4b4c96-z8zgg: 21.0 s
+      bfcl-527-25 step 8 on vllm-97d4b4c96-2llhh: 20.9 s
+      tau2_airline-816-14 step 7 on vllm-97d4b4c96-2llhh: 20.8 s
+      bfcl-508-29 step 8 on vllm-97d4b4c96-2llhh: 20.4 s
+      gaia_dev-387-15 step 1 on vllm-97d4b4c96-2llhh: 20.1 s
+      bfcl-561-22 step 1 on vllm-97d4b4c96-z8zgg: 19.9 s
+      hotpotqa-22-5 step 1 on vllm-97d4b4c96-z8zgg: 19.8 s
+      hotpotqa-237-30 step 2 on vllm-97d4b4c96-2llhh: 19.8 s
+      bfcl-514-16 step 7 on vllm-97d4b4c96-2llhh: 19.7 s
+      tau2_airline-772-10 step 2 on vllm-97d4b4c96-z8zgg: 19.6 s
+      tau2_airline-772-10 step 2 on vllm-97d4b4c96-z8zgg: 19.6 s
+      tau2_airline-764-7 step 2 on vllm-97d4b4c96-z8zgg: 19.6 s
+      gaia_dev-345-26 step 6 on vllm-97d4b4c96-2llhh: 19.6 s
+      gaia_dev-345-26 step 6 on vllm-97d4b4c96-2llhh: 19.6 s
+      hotpotqa-25-28 step 3 on vllm-97d4b4c96-2llhh: 19.5 s
+      hotpotqa-25-28 step 3 on vllm-97d4b4c96-2llhh: 19.5 s
+      tau2_airline-772-10 step 13 on vllm-97d4b4c96-z8zgg: 19.5 s
+      gaia_dev-270-19 step 17 on vllm-97d4b4c96-z8zgg: 19.3 s
+      tau2_telecom-986-18 step 3 on vllm-97d4b4c96-2llhh: 19.3 s
+      bfcl-679-24 step 10 on vllm-97d4b4c96-z8zgg: 19.3 s
+      bfcl-565-21 step 6 on vllm-97d4b4c96-2llhh: 19.1 s
+      tau2_telecom-986-18 step 3 on vllm-97d4b4c96-2llhh: 19.1 s
+      tau2_telecom-986-18 step 1 on vllm-97d4b4c96-2llhh: 19.1 s
+      bfcl-624-13 step 4 on vllm-97d4b4c96-z8zgg: 19.1 s
+      bfcl-624-13 step 4 on vllm-97d4b4c96-z8zgg: 19.1 s
+      tau2_airline-816-14 step 1 on vllm-97d4b4c96-2llhh: 18.9 s
+      gaia_dev-345-26 step 10 on vllm-97d4b4c96-z8zgg: 18.8 s
+      hotpotqa-237-30 step 3 on vllm-97d4b4c96-2llhh: 18.6 s
+      tau2_airline-772-10 step 1 on vllm-97d4b4c96-z8zgg: 18.3 s
+      bfcl-527-25 step 1 on vllm-97d4b4c96-z8zgg: 18.3 s
+      bfcl-565-21 step 14 on vllm-97d4b4c96-2llhh: 17.8 s
+      bfcl-565-21 step 14 on vllm-97d4b4c96-2llhh: 17.8 s
+      bfcl-615-6 step 6 on vllm-97d4b4c96-z8zgg: 17.6 s
+      bfcl-615-6 step 6 on vllm-97d4b4c96-z8zgg: 17.6 s
+      bfcl-615-6 step 1 on vllm-97d4b4c96-z8zgg: 17.4 s
+      bfcl-679-24 step 7 on vllm-97d4b4c96-2llhh: 17.0 s
+      bfcl-527-25 step 2 on vllm-97d4b4c96-z8zgg: 16.7 s
+      bfcl-624-13 step 3 on vllm-97d4b4c96-z8zgg: 16.7 s
+      bfcl-527-25 step 2 on vllm-97d4b4c96-z8zgg: 16.7 s
+      gaia_dev-270-19 step 14 on vllm-97d4b4c96-z8zgg: 16.7 s
+      bfcl-708-27 step 1 on vllm-97d4b4c96-2llhh: 16.4 s
+      bfcl-565-21 step 5 on vllm-97d4b4c96-z8zgg: 16.1 s
+      bfcl-565-21 step 5 on vllm-97d4b4c96-z8zgg: 16.1 s
+      gaia_dev-476-17 step 1 on vllm-97d4b4c96-2llhh: 16.0 s
+      bfcl-679-24 step 1 on vllm-97d4b4c96-z8zgg: 16.0 s
+      hotpotqa-78-23 step 1 on vllm-97d4b4c96-z8zgg: 16.0 s
+      bfcl-679-24 step 2 on vllm-97d4b4c96-z8zgg: 15.9 s
+      bfcl-679-24 step 2 on vllm-97d4b4c96-z8zgg: 15.9 s
+      bfcl-522-11 step 8 on vllm-97d4b4c96-z8zgg: 15.7 s
+      tau2_airline-816-14 step 3 on vllm-97d4b4c96-z8zgg: 15.7 s
+      gaia_dev-345-26 step 7 on vllm-97d4b4c96-z8zgg: 15.4 s
+      gaia_dev-345-26 step 7 on vllm-97d4b4c96-z8zgg: 15.4 s
+      bfcl-565-21 step 11 on vllm-97d4b4c96-z8zgg: 15.4 s
+      bfcl-565-21 step 11 on vllm-97d4b4c96-z8zgg: 15.3 s
+      tau2_airline-764-7 step 3 on vllm-97d4b4c96-z8zgg: 15.3 s
+      tau2_airline-764-7 step 3 on vllm-97d4b4c96-z8zgg: 15.3 s
+      tau2_telecom-986-18 step 6 on vllm-97d4b4c96-z8zgg: 15.3 s
+      bfcl-514-16 step 3 on vllm-97d4b4c96-z8zgg: 15.2 s
+      bfcl-514-16 step 3 on vllm-97d4b4c96-z8zgg: 15.2 s
+      bfcl-527-25 step 7 on vllm-97d4b4c96-2llhh: 14.9 s
+      bfcl-514-16 step 10 on vllm-97d4b4c96-z8zgg: 14.7 s
+      bfcl-514-16 step 10 on vllm-97d4b4c96-z8zgg: 14.7 s
+      bfcl-514-16 step 11 on vllm-97d4b4c96-2llhh: 14.6 s
+      bfcl-565-21 step 12 on vllm-97d4b4c96-2llhh: 14.0 s
+      bfcl-565-21 step 12 on vllm-97d4b4c96-2llhh: 14.0 s
+      tau2_telecom-986-18 step 9 on vllm-97d4b4c96-z8zgg: 14.0 s
+      tau2_telecom-986-18 step 9 on vllm-97d4b4c96-z8zgg: 14.0 s
+      bfcl-679-24 step 6 on vllm-97d4b4c96-2llhh: 13.9 s
+      bfcl-679-24 step 6 on vllm-97d4b4c96-2llhh: 13.9 s
+      tau2_airline-764-7 step 4 on vllm-97d4b4c96-2llhh: 13.7 s
+      bfcl-527-25 step 3 on vllm-97d4b4c96-z8zgg: 13.6 s
+      gaia_dev-270-19 step 12 on vllm-97d4b4c96-2llhh: 13.5 s
+      tau2_airline-772-10 step 11 on vllm-97d4b4c96-2llhh: 13.5 s
+      tau2_airline-772-10 step 11 on vllm-97d4b4c96-2llhh: 13.5 s
+      bfcl-565-21 step 4 on vllm-97d4b4c96-z8zgg: 13.4 s
+      bfcl-624-13 step 2 on vllm-97d4b4c96-z8zgg: 13.4 s
+      bfcl-624-13 step 2 on vllm-97d4b4c96-z8zgg: 13.4 s
+      gaia_dev-270-19 step 1 on vllm-97d4b4c96-2llhh: 13.4 s
+      tau2_airline-764-7 step 1 on vllm-97d4b4c96-z8zgg: 13.3 s
+      hotpotqa-83-9 step 1 on vllm-97d4b4c96-z8zgg: 13.3 s
+      bfcl-565-21 step 2 on vllm-97d4b4c96-z8zgg: 13.1 s
+      bfcl-561-22 step 4 on vllm-97d4b4c96-2llhh: 13.1 s
+      bfcl-561-22 step 4 on vllm-97d4b4c96-2llhh: 13.0 s
+      gaia_dev-310-8 step 3 on vllm-97d4b4c96-z8zgg: 13.0 s
+      hotpotqa-25-28 step 2 on vllm-97d4b4c96-2llhh: 13.0 s
+      bfcl-615-6 step 5 on vllm-97d4b4c96-z8zgg: 12.9 s
+      gaia_dev-345-26 step 5 on vllm-97d4b4c96-2llhh: 12.8 s
+      gaia_dev-345-26 step 5 on vllm-97d4b4c96-2llhh: 12.8 s
+      bfcl-708-27 step 3 on vllm-97d4b4c96-2llhh: 12.7 s
+      bfcl-708-27 step 3 on vllm-97d4b4c96-2llhh: 12.7 s
+      bfcl-522-11 step 9 on vllm-97d4b4c96-z8zgg: 12.3 s
+      bfcl-522-11 step 9 on vllm-97d4b4c96-z8zgg: 12.3 s
+      gaia_dev-345-26 step 1 on vllm-97d4b4c96-z8zgg: 12.2 s
+      bfcl-565-21 step 8 on vllm-97d4b4c96-2llhh: 12.2 s
+      bfcl-565-21 step 9 on vllm-97d4b4c96-2llhh: 11.9 s
+      gaia_dev-476-17 step 2 on vllm-97d4b4c96-z8zgg: 11.8 s
+      gaia_dev-476-17 step 2 on vllm-97d4b4c96-z8zgg: 11.8 s
+      bfcl-527-25 step 5 on vllm-97d4b4c96-z8zgg: 11.3 s
+      tau2_airline-816-14 step 6 on vllm-97d4b4c96-z8zgg: 11.1 s
+      tau2_telecom-986-18 step 2 on vllm-97d4b4c96-2llhh: 11.1 s
+      gaia_dev-270-19 step 20 on vllm-97d4b4c96-z8zgg: 11.0 s
+      gaia_dev-270-19 step 20 on vllm-97d4b4c96-z8zgg: 11.0 s
+      gaia_dev-270-19 step 2 on vllm-97d4b4c96-2llhh: 10.9 s
+      bfcl-561-22 step 7 on vllm-97d4b4c96-z8zgg: 10.8 s
+      bfcl-615-6 step 8 on vllm-97d4b4c96-2llhh: 10.6 s
+      bfcl-615-6 step 8 on vllm-97d4b4c96-2llhh: 10.6 s
+      hotpotqa-145-20 step 4 on vllm-97d4b4c96-2llhh: 10.5 s
+      bfcl-514-16 step 12 on vllm-97d4b4c96-2llhh: 10.4 s
+      bfcl-624-13 step 5 on vllm-97d4b4c96-z8zgg: 10.3 s
+      bfcl-624-13 step 5 on vllm-97d4b4c96-z8zgg: 10.3 s
+      gaia_dev-387-15 step 2 on vllm-97d4b4c96-2llhh: 10.3 s
+      gaia_dev-270-19 step 6 on vllm-97d4b4c96-z8zgg: 10.2 s
+      tau2_airline-816-14 step 2 on vllm-97d4b4c96-2llhh: 10.1 s
+      bfcl-514-16 step 2 on vllm-97d4b4c96-2llhh: 10.1 s
+      gaia_dev-270-19 step 15 on vllm-97d4b4c96-z8zgg: 10.1 s
+      bfcl-679-24 step 5 on vllm-97d4b4c96-z8zgg: 10.0 s
+      bfcl-679-24 step 5 on vllm-97d4b4c96-z8zgg: 10.0 s
+      bfcl-624-13 step 8 on vllm-97d4b4c96-2llhh: 9.9 s
+      bfcl-624-13 step 8 on vllm-97d4b4c96-2llhh: 9.9 s
+      gaia_dev-345-26 step 8 on vllm-97d4b4c96-z8zgg: 9.7 s
+      gaia_dev-345-26 step 8 on vllm-97d4b4c96-z8zgg: 9.7 s
+      tau2_airline-816-14 step 5 on vllm-97d4b4c96-2llhh: 9.6 s
+      bfcl-708-27 step 4 on vllm-97d4b4c96-z8zgg: 9.6 s
+      bfcl-708-27 step 4 on vllm-97d4b4c96-z8zgg: 9.6 s
+      gaia_dev-270-19 step 10 on vllm-97d4b4c96-2llhh: 9.4 s
+      bfcl-708-27 step 2 on vllm-97d4b4c96-2llhh: 9.3 s
+      bfcl-708-27 step 2 on vllm-97d4b4c96-2llhh: 9.2 s
+      tau2_airline-772-10 step 12 on vllm-97d4b4c96-z8zgg: 9.2 s
+      tau2_airline-772-10 step 12 on vllm-97d4b4c96-z8zgg: 9.2 s
+      gaia_dev-270-19 step 11 on vllm-97d4b4c96-2llhh: 8.9 s
+      bfcl-708-27 step 5 on vllm-97d4b4c96-z8zgg: 8.8 s
+      gaia_dev-345-26 step 13 on vllm-97d4b4c96-z8zgg: 8.8 s
+      hotpotqa-237-30 step 1 on vllm-97d4b4c96-z8zgg: 8.7 s
+      bfcl-508-29 step 1 on vllm-97d4b4c96-z8zgg: 8.7 s
+      hotpotqa-145-20 step 1 on vllm-97d4b4c96-z8zgg: 8.6 s
+      hotpotqa-25-28 step 1 on vllm-97d4b4c96-z8zgg: 8.5 s
+      tau2_telecom-986-18 step 4 on vllm-97d4b4c96-2llhh: 8.4 s
+      tau2_telecom-986-18 step 4 on vllm-97d4b4c96-2llhh: 8.4 s
+      bfcl-615-6 step 9 on vllm-97d4b4c96-2llhh: 8.3 s
+      tau2_airline-772-10 step 10 on vllm-97d4b4c96-z8zgg: 8.3 s
+      bfcl-514-16 step 4 on vllm-97d4b4c96-z8zgg: 8.3 s
+      bfcl-514-16 step 4 on vllm-97d4b4c96-z8zgg: 8.2 s
+      gaia_dev-270-19 step 7 on vllm-97d4b4c96-2llhh: 8.2 s
+      bfcl-624-13 step 11 on vllm-97d4b4c96-2llhh: 8.2 s
+      bfcl-522-11 step 3 on vllm-97d4b4c96-2llhh: 8.2 s
+      bfcl-522-11 step 3 on vllm-97d4b4c96-2llhh: 8.2 s
+      bfcl-565-21 step 7 on vllm-97d4b4c96-2llhh: 8.0 s
+      bfcl-565-21 step 7 on vllm-97d4b4c96-2llhh: 8.0 s
+      bfcl-561-22 step 8 on vllm-97d4b4c96-z8zgg: 8.0 s
+      gaia_dev-270-19 step 3 on vllm-97d4b4c96-2llhh: 7.6 s
+      gaia_dev-270-19 step 3 on vllm-97d4b4c96-2llhh: 7.6 s
+      bfcl-679-24 step 12 on vllm-97d4b4c96-z8zgg: 7.6 s
+      bfcl-624-13 step 10 on vllm-97d4b4c96-2llhh: 7.5 s
+      gaia_dev-270-19 step 9 on vllm-97d4b4c96-2llhh: 7.4 s
+      bfcl-565-21 step 1 on vllm-97d4b4c96-2llhh: 7.2 s
+      gaia_dev-270-19 step 19 on vllm-97d4b4c96-z8zgg: 7.1 s
+      bfcl-615-6 step 4 on vllm-97d4b4c96-z8zgg: 7.1 s
+      bfcl-615-6 step 4 on vllm-97d4b4c96-z8zgg: 7.1 s
+      gaia_dev-345-26 step 3 on vllm-97d4b4c96-2llhh: 7.1 s
+      gaia_dev-345-26 step 3 on vllm-97d4b4c96-2llhh: 7.1 s
+      bfcl-514-16 step 8 on vllm-97d4b4c96-z8zgg: 7.1 s
+      bfcl-514-16 step 8 on vllm-97d4b4c96-z8zgg: 7.1 s
+      bfcl-565-21 step 10 on vllm-97d4b4c96-z8zgg: 7.0 s
+      bfcl-565-21 step 10 on vllm-97d4b4c96-z8zgg: 7.0 s
+      bfcl-527-25 step 6 on vllm-97d4b4c96-z8zgg: 7.0 s
+      tau2_airline-816-14 step 4 on vllm-97d4b4c96-2llhh: 6.9 s
+      tau2_airline-816-14 step 4 on vllm-97d4b4c96-2llhh: 6.9 s
+      gaia_dev-270-19 step 18 on vllm-97d4b4c96-z8zgg: 6.8 s
+      gaia_dev-270-19 step 13 on vllm-97d4b4c96-z8zgg: 6.8 s
+      gaia_dev-270-19 step 13 on vllm-97d4b4c96-z8zgg: 6.8 s
+      gaia_dev-345-26 step 11 on vllm-97d4b4c96-z8zgg: 6.7 s
+      gaia_dev-345-26 step 12 on vllm-97d4b4c96-z8zgg: 6.7 s
+      bfcl-561-22 step 6 on vllm-97d4b4c96-z8zgg: 6.6 s
+      bfcl-561-22 step 6 on vllm-97d4b4c96-z8zgg: 6.6 s
+      bfcl-514-16 step 6 on vllm-97d4b4c96-2llhh: 6.4 s
+      bfcl-679-24 step 8 on vllm-97d4b4c96-z8zgg: 6.4 s
+      bfcl-679-24 step 8 on vllm-97d4b4c96-z8zgg: 6.4 s
+      bfcl-522-11 step 7 on vllm-97d4b4c96-2llhh: 6.4 s
+      bfcl-522-11 step 7 on vllm-97d4b4c96-2llhh: 6.4 s
+      gaia_dev-345-26 step 4 on vllm-97d4b4c96-2llhh: 6.2 s
+      gaia_dev-345-26 step 4 on vllm-97d4b4c96-2llhh: 6.2 s
+      gaia_dev-270-19 step 4 on vllm-97d4b4c96-2llhh: 6.2 s
+      bfcl-561-22 step 5 on vllm-97d4b4c96-2llhh: 6.1 s
+      bfcl-679-24 step 3 on vllm-97d4b4c96-z8zgg: 6.0 s
+      bfcl-561-22 step 3 on vllm-97d4b4c96-2llhh: 6.0 s
+      tau2_telecom-986-18 step 8 on vllm-97d4b4c96-z8zgg: 5.9 s
+      bfcl-561-22 step 11 on vllm-97d4b4c96-2llhh: 5.8 s
+      hotpotqa-145-20 step 2 on vllm-97d4b4c96-2llhh: 5.8 s
+      hotpotqa-145-20 step 2 on vllm-97d4b4c96-2llhh: 5.8 s
+      bfcl-508-29 step 4 on vllm-97d4b4c96-z8zgg: 5.7 s
+      bfcl-508-29 step 4 on vllm-97d4b4c96-z8zgg: 5.7 s
+      bfcl-508-29 step 5 on vllm-97d4b4c96-2llhh: 5.6 s
+      bfcl-679-24 step 11 on vllm-97d4b4c96-z8zgg: 5.6 s
+      gaia_dev-310-8 step 2 on vllm-97d4b4c96-2llhh: 5.4 s
+      gaia_dev-310-8 step 2 on vllm-97d4b4c96-2llhh: 5.4 s
+      bfcl-522-11 step 4 on vllm-97d4b4c96-2llhh: 5.2 s
+      bfcl-522-11 step 4 on vllm-97d4b4c96-2llhh: 5.2 s
+      bfcl-565-21 step 15 on vllm-97d4b4c96-z8zgg: 5.2 s
+      bfcl-565-21 step 15 on vllm-97d4b4c96-z8zgg: 5.2 s
+  plugin: runs 3441.2 s over 26 of 26 finished, first tokens 3342.7 s, generation 1365.0 s, uncached tokens 362409
+    under the KV limit: 14 calls, first tokens 6.4 s, uncached tokens 1002
+    over the KV limit: 299 calls, first tokens 3336.2 s
+    plugin: 201 calls of 5.0 s or more to first token, 3111.7 s in all
+      tau2_telecom-986-18 step 6 on vllm-67487f4d87-p2jrt: 48.5 s
+      gaia_dev-270-19 step 1 on vllm-67487f4d87-p2jrt: 47.5 s
+      bfcl-624-13 step 5 on vllm-67487f4d87-p2jrt: 46.2 s
+      bfcl-624-13 step 5 on vllm-67487f4d87-p2jrt: 46.2 s
+      bfcl-615-6 step 4 on vllm-67487f4d87-4544r: 43.4 s
+      bfcl-615-6 step 4 on vllm-67487f4d87-4544r: 43.4 s
+      bfcl-522-11 step 1 on vllm-67487f4d87-4544r: 40.3 s
+      bfcl-679-24 step 1 on vllm-67487f4d87-p2jrt: 35.8 s
+      tau2_airline-772-10 step 11 on vllm-67487f4d87-p2jrt: 34.2 s
+      tau2_airline-772-10 step 11 on vllm-67487f4d87-p2jrt: 34.2 s
+      bfcl-624-13 step 3 on vllm-67487f4d87-4544r: 31.8 s
+      bfcl-561-22 step 1 on vllm-67487f4d87-p2jrt: 31.6 s
+      bfcl-565-21 step 13 on vllm-67487f4d87-4544r: 30.0 s
+      bfcl-522-11 step 5 on vllm-67487f4d87-4544r: 30.0 s
+      bfcl-527-25 step 1 on vllm-67487f4d87-p2jrt: 29.9 s
+      bfcl-679-24 step 11 on vllm-67487f4d87-4544r: 29.0 s
+      bfcl-565-21 step 4 on vllm-67487f4d87-4544r: 28.5 s
+      gaia_dev-345-26 step 13 on vllm-67487f4d87-4544r: 27.8 s
+      bfcl-508-29 step 1 on vllm-67487f4d87-p2jrt: 26.4 s
+      bfcl-514-16 step 1 on vllm-67487f4d87-4544r: 25.4 s
+      bfcl-514-16 step 7 on vllm-67487f4d87-4544r: 24.2 s
+      bfcl-522-11 step 8 on vllm-67487f4d87-4544r: 24.1 s
+      bfcl-679-24 step 10 on vllm-67487f4d87-4544r: 23.1 s
+      bfcl-561-22 step 8 on vllm-67487f4d87-p2jrt: 23.0 s
+      bfcl-615-6 step 3 on vllm-67487f4d87-4544r: 22.9 s
+      gaia_dev-270-19 step 14 on vllm-67487f4d87-p2jrt: 22.9 s
+      gaia_dev-270-19 step 24 on vllm-67487f4d87-p2jrt: 22.7 s
+      gaia_dev-270-19 step 24 on vllm-67487f4d87-p2jrt: 22.7 s
+      tau2_telecom-986-18 step 9 on vllm-67487f4d87-4544r: 22.3 s
+      tau2_telecom-986-18 step 9 on vllm-67487f4d87-4544r: 22.3 s
+      tau2_airline-764-7 step 2 on vllm-67487f4d87-4544r: 22.1 s
+      tau2_airline-816-14 step 8 on vllm-67487f4d87-p2jrt: 22.1 s
+      gaia_dev-345-26 step 12 on vllm-67487f4d87-4544r: 22.0 s
+      gaia_dev-270-19 step 15 on vllm-67487f4d87-p2jrt: 21.4 s
+      bfcl-514-16 step 4 on vllm-67487f4d87-4544r: 21.2 s
+      bfcl-514-16 step 4 on vllm-67487f4d87-4544r: 21.2 s
+      tau2_airline-772-10 step 4 on vllm-67487f4d87-p2jrt: 20.9 s
+      tau2_airline-772-10 step 4 on vllm-67487f4d87-p2jrt: 20.9 s
+      bfcl-565-21 step 1 on vllm-67487f4d87-4544r: 20.9 s
+      tau2_telecom-986-18 step 8 on vllm-67487f4d87-p2jrt: 20.7 s
+      hotpotqa-237-30 step 3 on vllm-67487f4d87-4544r: 20.7 s
+      bfcl-624-13 step 9 on vllm-67487f4d87-p2jrt: 20.6 s
+      bfcl-624-13 step 9 on vllm-67487f4d87-p2jrt: 20.6 s
+      bfcl-624-13 step 6 on vllm-67487f4d87-p2jrt: 20.2 s
+      bfcl-624-13 step 6 on vllm-67487f4d87-p2jrt: 20.2 s
+      hotpotqa-78-23 step 1 on vllm-67487f4d87-4544r: 19.8 s
+      gaia_dev-345-26 step 1 on vllm-67487f4d87-4544r: 19.8 s
+      gaia_dev-270-19 step 6 on vllm-67487f4d87-p2jrt: 19.7 s
+      bfcl-624-13 step 8 on vllm-67487f4d87-p2jrt: 19.6 s
+      bfcl-624-13 step 8 on vllm-67487f4d87-p2jrt: 19.6 s
+      bfcl-565-21 step 5 on vllm-67487f4d87-4544r: 19.4 s
+      bfcl-565-21 step 5 on vllm-67487f4d87-4544r: 19.4 s
+      bfcl-565-21 step 8 on vllm-67487f4d87-4544r: 19.3 s
+      hotpotqa-145-20 step 2 on vllm-67487f4d87-4544r: 19.2 s
+      hotpotqa-145-20 step 2 on vllm-67487f4d87-4544r: 19.2 s
+      hotpotqa-237-30 step 2 on vllm-67487f4d87-4544r: 18.8 s
+      gaia_dev-270-19 step 5 on vllm-67487f4d87-p2jrt: 18.8 s
+      gaia_dev-270-19 step 5 on vllm-67487f4d87-p2jrt: 18.8 s
+      bfcl-565-21 step 10 on vllm-67487f4d87-4544r: 18.8 s
+      bfcl-565-21 step 10 on vllm-67487f4d87-4544r: 18.8 s
+      bfcl-514-16 step 8 on vllm-67487f4d87-4544r: 18.6 s
+      bfcl-514-16 step 8 on vllm-67487f4d87-4544r: 18.6 s
+      hotpotqa-25-28 step 2 on vllm-67487f4d87-4544r: 18.3 s
+      bfcl-561-22 step 7 on vllm-67487f4d87-p2jrt: 18.3 s
+      bfcl-708-27 step 5 on vllm-67487f4d87-4544r: 18.2 s
+      gaia_dev-270-19 step 8 on vllm-67487f4d87-4544r: 17.9 s
+      bfcl-527-25 step 4 on vllm-67487f4d87-4544r: 17.9 s
+      bfcl-527-25 step 4 on vllm-67487f4d87-4544r: 17.9 s
+      bfcl-561-22 step 6 on vllm-67487f4d87-4544r: 17.7 s
+      bfcl-561-22 step 6 on vllm-67487f4d87-4544r: 17.7 s
+      gaia_dev-476-17 step 2 on vllm-67487f4d87-4544r: 17.7 s
+      gaia_dev-476-17 step 2 on vllm-67487f4d87-4544r: 17.7 s
+      bfcl-615-6 step 6 on vllm-67487f4d87-p2jrt: 16.8 s
+      bfcl-615-6 step 6 on vllm-67487f4d87-p2jrt: 16.8 s
+      hotpotqa-42-12 step 2 on vllm-67487f4d87-4544r: 16.3 s
+      hotpotqa-42-12 step 2 on vllm-67487f4d87-4544r: 16.3 s
+      bfcl-708-27 step 2 on vllm-67487f4d87-4544r: 16.0 s
+      bfcl-708-27 step 2 on vllm-67487f4d87-4544r: 16.0 s
+      bfcl-522-11 step 2 on vllm-67487f4d87-p2jrt: 15.7 s
+      bfcl-615-6 step 7 on vllm-67487f4d87-4544r: 15.6 s
+      tau2_telecom-986-18 step 7 on vllm-67487f4d87-p2jrt: 15.3 s
+      tau2_telecom-986-18 step 7 on vllm-67487f4d87-p2jrt: 15.3 s
+      bfcl-679-24 step 4 on vllm-67487f4d87-4544r: 15.2 s
+      bfcl-508-29 step 3 on vllm-67487f4d87-p2jrt: 15.0 s
+      bfcl-508-29 step 3 on vllm-67487f4d87-p2jrt: 15.0 s
+      tau2_airline-816-14 step 5 on vllm-67487f4d87-p2jrt: 15.0 s
+      gaia_dev-345-26 step 2 on vllm-67487f4d87-4544r: 15.0 s
+      gaia_dev-345-26 step 2 on vllm-67487f4d87-4544r: 14.9 s
+      bfcl-615-6 step 1 on vllm-67487f4d87-4544r: 14.8 s
+      gaia_dev-345-26 step 8 on vllm-67487f4d87-4544r: 14.7 s
+      gaia_dev-345-26 step 8 on vllm-67487f4d87-4544r: 14.7 s
+      bfcl-565-21 step 12 on vllm-67487f4d87-p2jrt: 14.7 s
+      bfcl-565-21 step 12 on vllm-67487f4d87-p2jrt: 14.7 s
+      gaia_dev-270-19 step 3 on vllm-67487f4d87-p2jrt: 14.5 s
+      gaia_dev-270-19 step 3 on vllm-67487f4d87-p2jrt: 14.5 s
+      tau2_airline-764-7 step 1 on vllm-67487f4d87-p2jrt: 14.5 s
+      tau2_airline-772-10 step 12 on vllm-67487f4d87-p2jrt: 14.2 s
+      tau2_airline-772-10 step 12 on vllm-67487f4d87-p2jrt: 14.2 s
+      gaia_dev-270-19 step 2 on vllm-67487f4d87-p2jrt: 14.0 s
+      bfcl-624-13 step 4 on vllm-67487f4d87-p2jrt: 13.8 s
+      bfcl-624-13 step 4 on vllm-67487f4d87-p2jrt: 13.8 s
+      tau2_airline-772-10 step 1 on vllm-67487f4d87-4544r: 13.6 s
+      bfcl-679-24 step 5 on vllm-67487f4d87-p2jrt: 13.4 s
+      bfcl-679-24 step 5 on vllm-67487f4d87-p2jrt: 13.4 s
+      tau2_airline-816-14 step 7 on vllm-67487f4d87-p2jrt: 13.4 s
+      gaia_dev-476-17 step 1 on vllm-67487f4d87-4544r: 13.3 s
+      gaia_dev-270-19 step 16 on vllm-67487f4d87-p2jrt: 13.1 s
+      hotpotqa-25-28 step 3 on vllm-67487f4d87-p2jrt: 13.0 s
+      hotpotqa-25-28 step 3 on vllm-67487f4d87-p2jrt: 13.0 s
+      bfcl-624-13 step 7 on vllm-67487f4d87-4544r: 12.9 s
+      bfcl-624-13 step 7 on vllm-67487f4d87-4544r: 12.9 s
+      hotpotqa-145-20 step 4 on vllm-67487f4d87-4544r: 12.8 s
+      tau2_airline-772-10 step 13 on vllm-67487f4d87-p2jrt: 12.5 s
+      gaia_dev-270-19 step 4 on vllm-67487f4d87-p2jrt: 12.3 s
+      bfcl-561-22 step 10 on vllm-67487f4d87-p2jrt: 12.2 s
+      bfcl-522-11 step 9 on vllm-67487f4d87-4544r: 11.7 s
+      bfcl-522-11 step 9 on vllm-67487f4d87-4544r: 11.7 s
+      bfcl-679-24 step 8 on vllm-67487f4d87-p2jrt: 11.3 s
+      bfcl-679-24 step 8 on vllm-67487f4d87-p2jrt: 11.3 s
+      bfcl-514-16 step 10 on vllm-67487f4d87-4544r: 11.2 s
+      bfcl-514-16 step 10 on vllm-67487f4d87-4544r: 11.2 s
+      bfcl-508-29 step 5 on vllm-67487f4d87-p2jrt: 11.1 s
+      bfcl-561-22 step 4 on vllm-67487f4d87-p2jrt: 11.1 s
+      bfcl-561-22 step 4 on vllm-67487f4d87-p2jrt: 11.1 s
+      bfcl-615-6 step 10 on vllm-67487f4d87-4544r: 10.9 s
+      bfcl-615-6 step 10 on vllm-67487f4d87-4544r: 10.9 s
+      bfcl-565-21 step 2 on vllm-67487f4d87-4544r: 10.9 s
+      bfcl-565-21 step 11 on vllm-67487f4d87-4544r: 10.8 s
+      bfcl-565-21 step 11 on vllm-67487f4d87-4544r: 10.8 s
+      gaia_dev-270-19 step 9 on vllm-67487f4d87-p2jrt: 10.5 s
+      hotpotqa-145-20 step 1 on vllm-67487f4d87-4544r: 10.5 s
+      gaia_dev-270-19 step 17 on vllm-67487f4d87-p2jrt: 10.5 s
+      bfcl-514-16 step 12 on vllm-67487f4d87-4544r: 10.4 s
+      bfcl-624-13 step 11 on vllm-67487f4d87-p2jrt: 10.3 s
+      bfcl-565-21 step 3 on vllm-67487f4d87-4544r: 10.3 s
+      bfcl-615-6 step 8 on vllm-67487f4d87-4544r: 10.3 s
+      bfcl-615-6 step 8 on vllm-67487f4d87-4544r: 10.3 s
+      bfcl-514-16 step 5 on vllm-67487f4d87-4544r: 10.3 s
+      bfcl-615-6 step 9 on vllm-67487f4d87-4544r: 10.2 s
+      bfcl-527-25 step 2 on vllm-67487f4d87-p2jrt: 10.2 s
+      bfcl-527-25 step 2 on vllm-67487f4d87-p2jrt: 10.2 s
+      bfcl-514-16 step 11 on vllm-67487f4d87-4544r: 10.2 s
+      bfcl-565-21 step 14 on vllm-67487f4d87-p2jrt: 10.1 s
+      bfcl-565-21 step 14 on vllm-67487f4d87-p2jrt: 10.1 s
+      bfcl-527-25 step 6 on vllm-67487f4d87-p2jrt: 10.1 s
+      bfcl-514-16 step 2 on vllm-67487f4d87-4544r: 9.9 s
+      bfcl-522-11 step 7 on vllm-67487f4d87-4544r: 9.7 s
+      bfcl-522-11 step 7 on vllm-67487f4d87-4544r: 9.7 s
+      bfcl-514-16 step 6 on vllm-67487f4d87-4544r: 9.4 s
+      bfcl-522-11 step 6 on vllm-67487f4d87-4544r: 9.4 s
+      bfcl-522-11 step 6 on vllm-67487f4d87-4544r: 9.4 s
+      tau2_telecom-986-18 step 5 on vllm-67487f4d87-p2jrt: 9.3 s
+      tau2_airline-772-10 step 10 on vllm-67487f4d87-p2jrt: 9.1 s
+      bfcl-508-29 step 4 on vllm-67487f4d87-p2jrt: 8.8 s
+      bfcl-508-29 step 4 on vllm-67487f4d87-p2jrt: 8.8 s
+      bfcl-561-22 step 2 on vllm-67487f4d87-p2jrt: 8.8 s
+      hotpotqa-145-20 step 3 on vllm-67487f4d87-4544r: 8.6 s
+      hotpotqa-145-20 step 3 on vllm-67487f4d87-4544r: 8.6 s
+      gaia_dev-345-26 step 15 on vllm-67487f4d87-4544r: 8.5 s
+      gaia_dev-345-26 step 6 on vllm-67487f4d87-p2jrt: 8.4 s
+      gaia_dev-345-26 step 6 on vllm-67487f4d87-p2jrt: 8.4 s
+      tau2_airline-772-10 step 2 on vllm-67487f4d87-p2jrt: 8.2 s
+      tau2_airline-772-10 step 2 on vllm-67487f4d87-p2jrt: 8.2 s
+      bfcl-561-22 step 3 on vllm-67487f4d87-p2jrt: 8.2 s
+      gaia_dev-270-19 step 10 on vllm-67487f4d87-p2jrt: 8.1 s
+      bfcl-514-16 step 3 on vllm-67487f4d87-4544r: 7.8 s
+      bfcl-514-16 step 3 on vllm-67487f4d87-4544r: 7.8 s
+      gaia_dev-310-8 step 3 on vllm-67487f4d87-p2jrt: 7.8 s
+      bfcl-565-21 step 9 on vllm-67487f4d87-4544r: 7.8 s
+      bfcl-565-21 step 7 on vllm-67487f4d87-p2jrt: 7.7 s
+      bfcl-565-21 step 7 on vllm-67487f4d87-p2jrt: 7.7 s
+      gaia_dev-345-26 step 10 on vllm-67487f4d87-4544r: 7.5 s
+      gaia_dev-345-26 step 11 on vllm-67487f4d87-4544r: 7.5 s
+      bfcl-514-16 step 9 on vllm-67487f4d87-4544r: 7.1 s
+      bfcl-708-27 step 3 on vllm-67487f4d87-4544r: 7.0 s
+      bfcl-708-27 step 3 on vllm-67487f4d87-4544r: 7.0 s
+      bfcl-679-24 step 2 on vllm-67487f4d87-4544r: 7.0 s
+      bfcl-679-24 step 2 on vllm-67487f4d87-4544r: 7.0 s
+      tau2_airline-772-10 step 5 on vllm-67487f4d87-p2jrt: 7.0 s
+      tau2_airline-764-7 step 4 on vllm-67487f4d87-p2jrt: 6.9 s
+      gaia_dev-270-19 step 18 on vllm-67487f4d87-p2jrt: 6.7 s
+      gaia_dev-345-26 step 7 on vllm-67487f4d87-4544r: 6.6 s
+      gaia_dev-345-26 step 7 on vllm-67487f4d87-4544r: 6.6 s
+      bfcl-624-13 step 10 on vllm-67487f4d87-p2jrt: 6.5 s
+      bfcl-624-13 step 1 on vllm-67487f4d87-p2jrt: 6.1 s
+      hotpotqa-22-5 step 2 on vllm-67487f4d87-4544r: 6.1 s
+      hotpotqa-22-5 step 2 on vllm-67487f4d87-4544r: 6.1 s
+      gaia_dev-345-26 step 14 on vllm-67487f4d87-4544r: 6.0 s
+      gaia_dev-345-26 step 14 on vllm-67487f4d87-4544r: 6.0 s
+      tau2_airline-772-10 step 3 on vllm-67487f4d87-p2jrt: 5.9 s
+      tau2_airline-772-10 step 3 on vllm-67487f4d87-p2jrt: 5.9 s
+      bfcl-527-25 step 3 on vllm-67487f4d87-p2jrt: 5.7 s
+      gaia_dev-345-26 step 5 on vllm-67487f4d87-p2jrt: 5.6 s
+      gaia_dev-345-26 step 5 on vllm-67487f4d87-p2jrt: 5.6 s
+      gaia_dev-270-19 step 7 on vllm-67487f4d87-4544r: 5.5 s
+      bfcl-624-13 step 2 on vllm-67487f4d87-p2jrt: 5.4 s
+      bfcl-624-13 step 2 on vllm-67487f4d87-p2jrt: 5.4 s
+      bfcl-708-27 step 1 on vllm-67487f4d87-4544r: 5.4 s
+      gaia_dev-345-26 step 3 on vllm-67487f4d87-4544r: 5.1 s
+      gaia_dev-345-26 step 3 on vllm-67487f4d87-4544r: 5.1 s
+      tau2_airline-816-14 step 6 on vllm-67487f4d87-p2jrt: 5.1 s
+  default faster in 8 of 26 runs, plugin in 18; default minus plugin per run: median 6.73 s
+  hit rate per run: default higher in 7 of 26 runs, plugin in 11, the same in 8
+    of the 22 runs default moved a step in: default higher in 7, plugin in 10, the same in 5
+    of the 16 runs plugin moved a step in: default higher in 5, plugin in 9, the same in 2
+routing-faster-reversed-9a6c4680fec5.csv, in order plugin, default
+  plugin: runs 3692.8 s over 26 of 26 finished, first tokens 3772.4 s, generation 1352.5 s, uncached tokens 367689
+    under the KV limit: 15 calls, first tokens 6.5 s, uncached tokens 922
+    over the KV limit: 298 calls, first tokens 3765.9 s
+    plugin: 212 calls of 5.0 s or more to first token, 3555.2 s in all
+      bfcl-615-6 step 4 on vllm-5548d86b9f-5dfw9: 78.5 s
+      bfcl-615-6 step 4 on vllm-5548d86b9f-5dfw9: 78.5 s
+      bfcl-624-13 step 11 on vllm-5548d86b9f-5whrz: 63.6 s
+      bfcl-514-16 step 5 on vllm-5548d86b9f-5whrz: 62.1 s
+      tau2_airline-772-10 step 11 on vllm-5548d86b9f-5whrz: 58.6 s
+      tau2_airline-772-10 step 11 on vllm-5548d86b9f-5whrz: 58.6 s
+      bfcl-527-25 step 1 on vllm-5548d86b9f-5whrz: 52.5 s
+      gaia_dev-270-19 step 20 on vllm-5548d86b9f-5dfw9: 41.2 s
+      gaia_dev-270-19 step 20 on vllm-5548d86b9f-5dfw9: 41.2 s
+      tau2_airline-772-10 step 7 on vllm-5548d86b9f-5dfw9: 40.0 s
+      tau2_airline-772-10 step 7 on vllm-5548d86b9f-5dfw9: 40.0 s
+      tau2_airline-816-14 step 3 on vllm-5548d86b9f-5whrz: 39.3 s
+      bfcl-679-24 step 10 on vllm-5548d86b9f-5dfw9: 39.0 s
+      bfcl-565-21 step 16 on vllm-5548d86b9f-5dfw9: 38.6 s
+      bfcl-565-21 step 16 on vllm-5548d86b9f-5dfw9: 38.6 s
+      bfcl-624-13 step 8 on vllm-5548d86b9f-5whrz: 38.2 s
+      bfcl-624-13 step 8 on vllm-5548d86b9f-5whrz: 38.2 s
+      bfcl-514-16 step 2 on vllm-5548d86b9f-5whrz: 35.6 s
+      tau2_airline-764-7 step 3 on vllm-5548d86b9f-5dfw9: 33.5 s
+      tau2_airline-764-7 step 3 on vllm-5548d86b9f-5dfw9: 33.5 s
+      bfcl-514-16 step 4 on vllm-5548d86b9f-5whrz: 32.7 s
+      bfcl-514-16 step 4 on vllm-5548d86b9f-5whrz: 32.7 s
+      gaia_dev-270-19 step 17 on vllm-5548d86b9f-5dfw9: 32.1 s
+      hotpotqa-237-30 step 3 on vllm-5548d86b9f-5dfw9: 31.2 s
+      bfcl-679-24 step 7 on vllm-5548d86b9f-5dfw9: 30.0 s
+      tau2_airline-772-10 step 2 on vllm-5548d86b9f-5dfw9: 27.3 s
+      tau2_airline-772-10 step 2 on vllm-5548d86b9f-5dfw9: 27.3 s
+      tau2_airline-816-14 step 6 on vllm-5548d86b9f-5whrz: 26.5 s
+      bfcl-708-27 step 1 on vllm-5548d86b9f-5dfw9: 26.3 s
+      bfcl-679-24 step 11 on vllm-5548d86b9f-5dfw9: 25.5 s
+      tau2_airline-816-14 step 5 on vllm-5548d86b9f-5whrz: 25.0 s
+      bfcl-561-22 step 8 on vllm-5548d86b9f-5dfw9: 24.8 s
+      bfcl-615-6 step 3 on vllm-5548d86b9f-5whrz: 24.0 s
+      gaia_dev-270-19 step 21 on vllm-5548d86b9f-5dfw9: 23.7 s
+      bfcl-527-25 step 2 on vllm-5548d86b9f-5whrz: 23.2 s
+      bfcl-527-25 step 2 on vllm-5548d86b9f-5whrz: 23.2 s
+      bfcl-561-22 step 10 on vllm-5548d86b9f-5dfw9: 23.1 s
+      tau2_airline-816-14 step 4 on vllm-5548d86b9f-5whrz: 23.1 s
+      tau2_airline-816-14 step 4 on vllm-5548d86b9f-5whrz: 23.1 s
+      tau2_airline-772-10 step 10 on vllm-5548d86b9f-5whrz: 23.0 s
+      bfcl-561-22 step 9 on vllm-5548d86b9f-5dfw9: 22.7 s
+      tau2_airline-764-7 step 2 on vllm-5548d86b9f-5whrz: 22.6 s
+      hotpotqa-22-5 step 2 on vllm-5548d86b9f-5whrz: 22.2 s
+      tau2_airline-772-10 step 13 on vllm-5548d86b9f-5whrz: 22.0 s
+      bfcl-565-21 step 15 on vllm-5548d86b9f-5dfw9: 22.0 s
+      bfcl-565-21 step 15 on vllm-5548d86b9f-5dfw9: 22.0 s
+      bfcl-624-13 step 10 on vllm-5548d86b9f-5whrz: 22.0 s
+      gaia_dev-310-8 step 4 on vllm-5548d86b9f-5whrz: 21.9 s
+      bfcl-708-27 step 4 on vllm-5548d86b9f-5dfw9: 21.7 s
+      bfcl-708-27 step 4 on vllm-5548d86b9f-5dfw9: 21.7 s
+      gaia_dev-270-19 step 18 on vllm-5548d86b9f-5dfw9: 21.6 s
+      bfcl-679-24 step 9 on vllm-5548d86b9f-5dfw9: 21.3 s
+      bfcl-679-24 step 9 on vllm-5548d86b9f-5dfw9: 21.3 s
+      gaia_dev-270-19 step 19 on vllm-5548d86b9f-5dfw9: 21.0 s
+      bfcl-527-25 step 3 on vllm-5548d86b9f-5whrz: 20.6 s
+      bfcl-615-6 step 5 on vllm-5548d86b9f-5dfw9: 20.4 s
+      bfcl-514-16 step 7 on vllm-5548d86b9f-5whrz: 20.3 s
+      bfcl-508-29 step 4 on vllm-5548d86b9f-5whrz: 20.1 s
+      bfcl-508-29 step 4 on vllm-5548d86b9f-5whrz: 20.1 s
+      bfcl-708-27 step 3 on vllm-5548d86b9f-5dfw9: 19.6 s
+      bfcl-708-27 step 3 on vllm-5548d86b9f-5dfw9: 19.6 s
+      gaia_dev-345-26 step 13 on vllm-5548d86b9f-5whrz: 19.4 s
+      gaia_dev-270-19 step 9 on vllm-5548d86b9f-5dfw9: 19.1 s
+      hotpotqa-22-5 step 2 on vllm-5548d86b9f-5dfw9: 19.1 s
+      bfcl-565-21 step 4 on vllm-5548d86b9f-5dfw9: 19.1 s
+      bfcl-527-25 step 8 on vllm-5548d86b9f-5whrz: 18.9 s
+      gaia_dev-270-19 step 10 on vllm-5548d86b9f-5dfw9: 18.8 s
+      bfcl-514-16 step 6 on vllm-5548d86b9f-5whrz: 18.4 s
+      tau2_telecom-986-18 step 9 on vllm-5548d86b9f-5dfw9: 17.8 s
+      tau2_telecom-986-18 step 9 on vllm-5548d86b9f-5dfw9: 17.8 s
+      gaia_dev-345-26 step 8 on vllm-5548d86b9f-5whrz: 17.8 s
+      gaia_dev-345-26 step 8 on vllm-5548d86b9f-5whrz: 17.8 s
+      bfcl-679-24 step 5 on vllm-5548d86b9f-5whrz: 17.6 s
+      bfcl-679-24 step 5 on vllm-5548d86b9f-5whrz: 17.6 s
+      hotpotqa-237-30 step 1 on vllm-5548d86b9f-5dfw9: 17.4 s
+      bfcl-565-21 step 5 on vllm-5548d86b9f-5dfw9: 17.4 s
+      bfcl-565-21 step 5 on vllm-5548d86b9f-5dfw9: 17.4 s
+      bfcl-514-16 step 12 on vllm-5548d86b9f-5whrz: 17.1 s
+      bfcl-527-25 step 4 on vllm-5548d86b9f-5whrz: 16.7 s
+      bfcl-527-25 step 4 on vllm-5548d86b9f-5whrz: 16.7 s
+      bfcl-679-24 step 8 on vllm-5548d86b9f-5dfw9: 15.7 s
+      bfcl-679-24 step 8 on vllm-5548d86b9f-5dfw9: 15.7 s
+      bfcl-565-21 step 8 on vllm-5548d86b9f-5dfw9: 15.7 s
+      bfcl-514-16 step 8 on vllm-5548d86b9f-5whrz: 15.6 s
+      bfcl-514-16 step 8 on vllm-5548d86b9f-5whrz: 15.6 s
+      tau2_telecom-986-18 step 2 on vllm-5548d86b9f-5dfw9: 15.5 s
+      gaia_dev-345-26 step 17 on vllm-5548d86b9f-5whrz: 15.4 s
+      gaia_dev-345-26 step 17 on vllm-5548d86b9f-5whrz: 15.4 s
+      hotpotqa-237-30 step 2 on vllm-5548d86b9f-5dfw9: 14.6 s
+      gaia_dev-270-19 step 13 on vllm-5548d86b9f-5dfw9: 14.5 s
+      gaia_dev-270-19 step 13 on vllm-5548d86b9f-5dfw9: 14.5 s
+      bfcl-508-29 step 8 on vllm-5548d86b9f-5whrz: 14.4 s
+      bfcl-565-21 step 13 on vllm-5548d86b9f-5dfw9: 14.4 s
+      bfcl-514-16 step 3 on vllm-5548d86b9f-5whrz: 14.1 s
+      bfcl-514-16 step 3 on vllm-5548d86b9f-5whrz: 14.1 s
+      tau2_telecom-986-18 step 4 on vllm-5548d86b9f-5dfw9: 13.9 s
+      tau2_telecom-986-18 step 4 on vllm-5548d86b9f-5dfw9: 13.9 s
+      bfcl-565-21 step 12 on vllm-5548d86b9f-5dfw9: 13.7 s
+      bfcl-565-21 step 12 on vllm-5548d86b9f-5dfw9: 13.7 s
+      bfcl-561-22 step 3 on vllm-5548d86b9f-5dfw9: 13.6 s
+      bfcl-679-24 step 2 on vllm-5548d86b9f-5dfw9: 13.5 s
+      bfcl-679-24 step 2 on vllm-5548d86b9f-5dfw9: 13.5 s
+      gaia_dev-387-15 step 2 on vllm-5548d86b9f-5dfw9: 13.5 s
+      gaia_dev-270-19 step 2 on vllm-5548d86b9f-5dfw9: 13.4 s
+      gaia_dev-345-26 step 2 on vllm-5548d86b9f-5dfw9: 13.4 s
+      gaia_dev-345-26 step 2 on vllm-5548d86b9f-5dfw9: 13.4 s
+      tau2_airline-816-14 step 7 on vllm-5548d86b9f-5whrz: 13.4 s
+      gaia_dev-345-26 step 9 on vllm-5548d86b9f-5dfw9: 13.2 s
+      gaia_dev-345-26 step 4 on vllm-5548d86b9f-5dfw9: 13.2 s
+      gaia_dev-345-26 step 4 on vllm-5548d86b9f-5dfw9: 13.2 s
+      tau2_telecom-986-18 step 7 on vllm-5548d86b9f-5dfw9: 13.1 s
+      tau2_telecom-986-18 step 7 on vllm-5548d86b9f-5dfw9: 13.1 s
+      bfcl-527-25 step 6 on vllm-5548d86b9f-5whrz: 13.1 s
+      gaia_dev-270-19 step 11 on vllm-5548d86b9f-5dfw9: 13.0 s
+      bfcl-508-29 step 2 on vllm-5548d86b9f-5whrz: 12.9 s
+      bfcl-615-6 step 10 on vllm-5548d86b9f-5whrz: 12.2 s
+      bfcl-615-6 step 10 on vllm-5548d86b9f-5whrz: 12.2 s
+      bfcl-522-11 step 4 on vllm-5548d86b9f-5whrz: 12.1 s
+      bfcl-522-11 step 4 on vllm-5548d86b9f-5whrz: 12.1 s
+      bfcl-708-27 step 2 on vllm-5548d86b9f-5dfw9: 12.1 s
+      bfcl-708-27 step 2 on vllm-5548d86b9f-5dfw9: 12.1 s
+      bfcl-565-21 step 10 on vllm-5548d86b9f-5dfw9: 11.9 s
+      bfcl-565-21 step 10 on vllm-5548d86b9f-5dfw9: 11.9 s
+      gaia_dev-345-26 step 11 on vllm-5548d86b9f-5whrz: 11.8 s
+      tau2_airline-772-10 step 4 on vllm-5548d86b9f-5whrz: 11.3 s
+      tau2_airline-772-10 step 4 on vllm-5548d86b9f-5whrz: 11.3 s
+      bfcl-561-22 step 2 on vllm-5548d86b9f-5dfw9: 10.8 s
+      gaia_dev-270-19 step 15 on vllm-5548d86b9f-5dfw9: 10.6 s
+      gaia_dev-345-26 step 6 on vllm-5548d86b9f-5dfw9: 10.5 s
+      gaia_dev-345-26 step 6 on vllm-5548d86b9f-5dfw9: 10.5 s
+      gaia_dev-270-19 step 8 on vllm-5548d86b9f-5dfw9: 10.4 s
+      bfcl-565-21 step 7 on vllm-5548d86b9f-5dfw9: 10.4 s
+      bfcl-565-21 step 7 on vllm-5548d86b9f-5dfw9: 10.4 s
+      hotpotqa-25-28 step 2 on vllm-5548d86b9f-5whrz: 10.2 s
+      gaia_dev-345-26 step 7 on vllm-5548d86b9f-5dfw9: 10.0 s
+      gaia_dev-345-26 step 7 on vllm-5548d86b9f-5dfw9: 10.0 s
+      tau2_airline-772-10 step 9 on vllm-5548d86b9f-5whrz: 10.0 s
+      bfcl-624-13 step 1 on vllm-5548d86b9f-5whrz: 9.8 s
+      gaia_dev-270-19 step 7 on vllm-5548d86b9f-5dfw9: 9.8 s
+      bfcl-561-22 step 7 on vllm-5548d86b9f-5dfw9: 9.4 s
+      gaia_dev-345-26 step 3 on vllm-5548d86b9f-5dfw9: 9.3 s
+      gaia_dev-345-26 step 3 on vllm-5548d86b9f-5dfw9: 9.3 s
+      bfcl-561-22 step 1 on vllm-5548d86b9f-5dfw9: 9.1 s
+      bfcl-679-24 step 4 on vllm-5548d86b9f-5dfw9: 9.1 s
+      tau2_airline-764-7 step 4 on vllm-5548d86b9f-5dfw9: 9.1 s
+      bfcl-522-11 step 1 on vllm-5548d86b9f-5whrz: 9.1 s
+      bfcl-565-21 step 6 on vllm-5548d86b9f-5dfw9: 9.0 s
+      bfcl-565-21 step 3 on vllm-5548d86b9f-5dfw9: 9.0 s
+      bfcl-522-11 step 3 on vllm-5548d86b9f-5whrz: 8.8 s
+      bfcl-522-11 step 3 on vllm-5548d86b9f-5whrz: 8.8 s
+      gaia_dev-270-19 step 14 on vllm-5548d86b9f-5dfw9: 8.8 s
+      bfcl-508-29 step 5 on vllm-5548d86b9f-5whrz: 8.7 s
+      gaia_dev-345-26 step 15 on vllm-5548d86b9f-5whrz: 8.6 s
+      bfcl-514-16 step 10 on vllm-5548d86b9f-5whrz: 8.4 s
+      gaia_dev-270-19 step 22 on vllm-5548d86b9f-5dfw9: 8.4 s
+      bfcl-514-16 step 10 on vllm-5548d86b9f-5whrz: 8.4 s
+      gaia_dev-345-26 step 12 on vllm-5548d86b9f-5whrz: 8.3 s
+      tau2_airline-816-14 step 8 on vllm-5548d86b9f-5whrz: 8.2 s
+      tau2_airline-772-10 step 8 on vllm-5548d86b9f-5whrz: 8.2 s
+      bfcl-514-16 step 11 on vllm-5548d86b9f-5whrz: 8.0 s
+      hotpotqa-22-5 step 1 on vllm-5548d86b9f-5whrz: 8.0 s
+      bfcl-615-6 step 1 on vllm-5548d86b9f-5whrz: 7.9 s
+      bfcl-561-22 step 4 on vllm-5548d86b9f-5dfw9: 7.8 s
+      bfcl-561-22 step 4 on vllm-5548d86b9f-5dfw9: 7.8 s
+      bfcl-679-24 step 6 on vllm-5548d86b9f-5dfw9: 7.7 s
+      bfcl-679-24 step 6 on vllm-5548d86b9f-5dfw9: 7.7 s
+      bfcl-514-16 step 1 on vllm-5548d86b9f-5whrz: 7.7 s
+      gaia_dev-270-19 step 16 on vllm-5548d86b9f-5dfw9: 7.6 s
+      tau2_telecom-986-18 step 8 on vllm-5548d86b9f-5dfw9: 7.6 s
+      bfcl-565-21 step 17 on vllm-5548d86b9f-5dfw9: 7.5 s
+      gaia_dev-476-17 step 2 on vllm-5548d86b9f-5whrz: 7.5 s
+      gaia_dev-476-17 step 2 on vllm-5548d86b9f-5whrz: 7.5 s
+      bfcl-624-13 step 9 on vllm-5548d86b9f-5dfw9: 7.4 s
+      bfcl-624-13 step 9 on vllm-5548d86b9f-5dfw9: 7.4 s
+      tau2_telecom-986-18 step 6 on vllm-5548d86b9f-5dfw9: 7.4 s
+      gaia_dev-270-19 step 12 on vllm-5548d86b9f-5dfw9: 7.4 s
+      bfcl-565-21 step 9 on vllm-5548d86b9f-5dfw9: 7.3 s
+      bfcl-527-25 step 7 on vllm-5548d86b9f-5whrz: 7.2 s
+      bfcl-561-22 step 5 on vllm-5548d86b9f-5dfw9: 7.2 s
+      bfcl-527-25 step 9 on vllm-5548d86b9f-5whrz: 7.1 s
+      bfcl-624-13 step 7 on vllm-5548d86b9f-5whrz: 7.0 s
+      bfcl-624-13 step 7 on vllm-5548d86b9f-5whrz: 7.0 s
+      tau2_telecom-986-18 step 1 on vllm-5548d86b9f-5dfw9: 7.0 s
+      hotpotqa-25-28 step 3 on vllm-5548d86b9f-5whrz: 7.0 s
+      hotpotqa-25-28 step 3 on vllm-5548d86b9f-5whrz: 6.9 s
+      bfcl-508-29 step 3 on vllm-5548d86b9f-5whrz: 6.9 s
+      bfcl-508-29 step 3 on vllm-5548d86b9f-5whrz: 6.9 s
+      bfcl-565-21 step 14 on vllm-5548d86b9f-5whrz: 6.8 s
+      bfcl-565-21 step 14 on vllm-5548d86b9f-5whrz: 6.8 s
+      gaia_dev-345-26 step 16 on vllm-5548d86b9f-5whrz: 6.6 s
+      bfcl-679-24 step 3 on vllm-5548d86b9f-5dfw9: 6.5 s
+      gaia_dev-270-19 step 6 on vllm-5548d86b9f-5dfw9: 6.5 s
+      tau2_airline-816-14 step 2 on vllm-5548d86b9f-5whrz: 6.4 s
+      bfcl-615-6 step 9 on vllm-5548d86b9f-5dfw9: 6.3 s
+      bfcl-565-21 step 11 on vllm-5548d86b9f-5dfw9: 6.1 s
+      bfcl-565-21 step 11 on vllm-5548d86b9f-5dfw9: 6.1 s
+      tau2_airline-816-14 step 1 on vllm-5548d86b9f-5whrz: 6.1 s
+      gaia_dev-387-15 step 1 on vllm-5548d86b9f-5whrz: 6.1 s
+      bfcl-561-22 step 6 on vllm-5548d86b9f-5dfw9: 5.9 s
+      bfcl-561-22 step 6 on vllm-5548d86b9f-5dfw9: 5.9 s
+      bfcl-565-21 step 2 on vllm-5548d86b9f-5dfw9: 5.8 s
+      bfcl-679-24 step 1 on vllm-5548d86b9f-5dfw9: 5.8 s
+      tau2_airline-772-10 step 12 on vllm-5548d86b9f-5whrz: 5.6 s
+      tau2_airline-772-10 step 12 on vllm-5548d86b9f-5whrz: 5.6 s
+      hotpotqa-145-20 step 3 on vllm-5548d86b9f-5dfw9: 5.6 s
+      hotpotqa-145-20 step 3 on vllm-5548d86b9f-5dfw9: 5.6 s
+      gaia_dev-310-8 step 5 on vllm-5548d86b9f-5whrz: 5.5 s
+      gaia_dev-345-26 step 5 on vllm-5548d86b9f-5dfw9: 5.4 s
+      gaia_dev-345-26 step 5 on vllm-5548d86b9f-5dfw9: 5.4 s
+      gaia_dev-345-26 step 1 on vllm-5548d86b9f-5dfw9: 5.3 s
+      hotpotqa-78-23 step 1 on vllm-5548d86b9f-5dfw9: 5.3 s
+      hotpotqa-145-20 step 4 on vllm-5548d86b9f-5dfw9: 5.3 s
+  default: runs 3550.9 s over 26 of 26 finished, first tokens 3601.7 s, generation 1342.9 s, uncached tokens 390537
+    under the KV limit: 10 calls, first tokens 5.2 s, uncached tokens 3317
+    over the KV limit: 303 calls, first tokens 3596.5 s
+    default: 218 calls of 5.0 s or more to first token, 3381.6 s in all
+      tau2_telecom-986-18 step 6 on vllm-5bdc5449f8-624qs: 54.7 s
+      bfcl-565-21 step 1 on vllm-5bdc5449f8-624qs: 51.1 s
+      bfcl-615-6 step 10 on vllm-5bdc5449f8-624qs: 48.5 s
+      bfcl-615-6 step 10 on vllm-5bdc5449f8-624qs: 48.5 s
+      hotpotqa-145-20 step 2 on vllm-5bdc5449f8-624qs: 48.1 s
+      hotpotqa-145-20 step 2 on vllm-5bdc5449f8-624qs: 48.1 s
+      gaia_dev-270-19 step 3 on vllm-5bdc5449f8-624qs: 46.6 s
+      gaia_dev-270-19 step 3 on vllm-5bdc5449f8-624qs: 46.6 s
+      bfcl-522-11 step 1 on vllm-5bdc5449f8-624qs: 34.3 s
+      bfcl-615-6 step 4 on vllm-5bdc5449f8-624qs: 33.9 s
+      bfcl-615-6 step 4 on vllm-5bdc5449f8-624qs: 33.9 s
+      bfcl-624-13 step 6 on vllm-5bdc5449f8-vhv6p: 32.3 s
+      bfcl-624-13 step 6 on vllm-5bdc5449f8-vhv6p: 32.3 s
+      bfcl-679-24 step 9 on vllm-5bdc5449f8-vhv6p: 31.6 s
+      bfcl-679-24 step 9 on vllm-5bdc5449f8-vhv6p: 31.6 s
+      bfcl-565-21 step 4 on vllm-5bdc5449f8-624qs: 29.9 s
+      hotpotqa-145-20 step 3 on vllm-5bdc5449f8-vhv6p: 29.2 s
+      hotpotqa-145-20 step 3 on vllm-5bdc5449f8-vhv6p: 29.2 s
+      gaia_dev-345-26 step 6 on vllm-5bdc5449f8-624qs: 27.8 s
+      bfcl-615-6 step 8 on vllm-5bdc5449f8-vhv6p: 27.6 s
+      bfcl-615-6 step 8 on vllm-5bdc5449f8-vhv6p: 27.6 s
+      bfcl-561-22 step 9 on vllm-5bdc5449f8-vhv6p: 27.0 s
+      bfcl-527-25 step 4 on vllm-5bdc5449f8-624qs: 26.9 s
+      bfcl-527-25 step 4 on vllm-5bdc5449f8-624qs: 26.9 s
+      bfcl-514-16 step 8 on vllm-5bdc5449f8-vhv6p: 26.7 s
+      bfcl-514-16 step 8 on vllm-5bdc5449f8-vhv6p: 26.7 s
+      hotpotqa-42-12 step 2 on vllm-5bdc5449f8-vhv6p: 26.7 s
+      hotpotqa-42-12 step 2 on vllm-5bdc5449f8-vhv6p: 26.7 s
+      bfcl-615-6 step 3 on vllm-5bdc5449f8-vhv6p: 26.5 s
+      bfcl-508-29 step 1 on vllm-5bdc5449f8-vhv6p: 25.4 s
+      hotpotqa-145-20 step 4 on vllm-5bdc5449f8-624qs: 25.1 s
+      bfcl-561-22 step 10 on vllm-5bdc5449f8-vhv6p: 24.1 s
+      bfcl-565-21 step 2 on vllm-5bdc5449f8-vhv6p: 24.1 s
+      gaia_dev-345-26 step 6 on vllm-5bdc5449f8-624qs: 23.6 s
+      tau2_airline-772-10 step 6 on vllm-5bdc5449f8-624qs: 23.4 s
+      bfcl-527-25 step 5 on vllm-5bdc5449f8-624qs: 22.9 s
+      bfcl-561-22 step 4 on vllm-5bdc5449f8-vhv6p: 22.8 s
+      bfcl-561-22 step 4 on vllm-5bdc5449f8-vhv6p: 22.8 s
+      bfcl-679-24 step 4 on vllm-5bdc5449f8-624qs: 22.7 s
+      gaia_dev-270-19 step 15 on vllm-5bdc5449f8-624qs: 22.5 s
+      gaia_dev-270-19 step 4 on vllm-5bdc5449f8-vhv6p: 21.7 s
+      bfcl-679-24 step 3 on vllm-5bdc5449f8-624qs: 21.3 s
+      bfcl-615-6 step 1 on vllm-5bdc5449f8-624qs: 20.8 s
+      gaia_dev-270-19 step 7 on vllm-5bdc5449f8-vhv6p: 20.2 s
+      gaia_dev-270-19 step 5 on vllm-5bdc5449f8-vhv6p: 19.9 s
+      gaia_dev-270-19 step 5 on vllm-5bdc5449f8-vhv6p: 19.9 s
+      bfcl-565-21 step 3 on vllm-5bdc5449f8-vhv6p: 19.9 s
+      bfcl-561-22 step 3 on vllm-5bdc5449f8-624qs: 19.7 s
+      bfcl-708-27 step 4 on vllm-5bdc5449f8-vhv6p: 19.6 s
+      bfcl-708-27 step 4 on vllm-5bdc5449f8-vhv6p: 19.6 s
+      bfcl-615-6 step 9 on vllm-5bdc5449f8-624qs: 19.5 s
+      gaia_dev-270-19 step 2 on vllm-5bdc5449f8-624qs: 19.3 s
+      bfcl-679-24 step 8 on vllm-5bdc5449f8-vhv6p: 19.3 s
+      bfcl-679-24 step 8 on vllm-5bdc5449f8-vhv6p: 19.3 s
+      gaia_dev-270-19 step 17 on vllm-5bdc5449f8-vhv6p: 19.2 s
+      bfcl-514-16 step 9 on vllm-5bdc5449f8-vhv6p: 19.2 s
+      bfcl-514-16 step 5 on vllm-5bdc5449f8-vhv6p: 18.1 s
+      bfcl-522-11 step 9 on vllm-5bdc5449f8-vhv6p: 18.1 s
+      bfcl-522-11 step 9 on vllm-5bdc5449f8-vhv6p: 18.1 s
+      gaia_dev-310-8 step 5 on vllm-5bdc5449f8-vhv6p: 17.1 s
+      tau2_airline-772-10 step 5 on vllm-5bdc5449f8-vhv6p: 17.1 s
+      tau2_airline-816-14 step 7 on vllm-5bdc5449f8-vhv6p: 16.6 s
+      bfcl-624-13 step 9 on vllm-5bdc5449f8-vhv6p: 16.6 s
+      bfcl-624-13 step 9 on vllm-5bdc5449f8-vhv6p: 16.6 s
+      tau2_airline-816-14 step 5 on vllm-5bdc5449f8-624qs: 16.4 s
+      bfcl-565-21 step 14 on vllm-5bdc5449f8-624qs: 16.1 s
+      bfcl-565-21 step 14 on vllm-5bdc5449f8-624qs: 16.1 s
+      gaia_dev-345-26 step 14 on vllm-5bdc5449f8-624qs: 15.9 s
+      gaia_dev-345-26 step 14 on vllm-5bdc5449f8-624qs: 15.9 s
+      bfcl-624-13 step 10 on vllm-5bdc5449f8-vhv6p: 15.9 s
+      hotpotqa-25-28 step 1 on vllm-5bdc5449f8-vhv6p: 15.8 s
+      hotpotqa-237-30 step 1 on vllm-5bdc5449f8-vhv6p: 15.8 s
+      gaia_dev-270-19 step 6 on vllm-5bdc5449f8-vhv6p: 15.8 s
+      gaia_dev-345-26 step 13 on vllm-5bdc5449f8-624qs: 15.7 s
+      bfcl-508-29 step 2 on vllm-5bdc5449f8-624qs: 15.7 s
+      gaia_dev-270-19 step 16 on vllm-5bdc5449f8-624qs: 15.7 s
+      bfcl-514-16 step 10 on vllm-5bdc5449f8-vhv6p: 15.4 s
+      bfcl-514-16 step 10 on vllm-5bdc5449f8-vhv6p: 15.4 s
+      gaia_dev-345-26 step 5 on vllm-5bdc5449f8-vhv6p: 15.3 s
+      gaia_dev-345-26 step 5 on vllm-5bdc5449f8-vhv6p: 15.3 s
+      bfcl-708-27 step 2 on vllm-5bdc5449f8-vhv6p: 15.3 s
+      bfcl-708-27 step 2 on vllm-5bdc5449f8-vhv6p: 15.3 s
+      tau2_telecom-986-18 step 4 on vllm-5bdc5449f8-624qs: 15.3 s
+      tau2_telecom-986-18 step 4 on vllm-5bdc5449f8-624qs: 15.3 s
+      gaia_dev-270-19 step 9 on vllm-5bdc5449f8-624qs: 15.2 s
+      bfcl-561-22 step 11 on vllm-5bdc5449f8-624qs: 15.1 s
+      hotpotqa-22-5 step 2 on vllm-5bdc5449f8-vhv6p: 14.9 s
+      hotpotqa-22-5 step 2 on vllm-5bdc5449f8-vhv6p: 14.9 s
+      bfcl-624-13 step 4 on vllm-5bdc5449f8-vhv6p: 14.7 s
+      bfcl-624-13 step 4 on vllm-5bdc5449f8-vhv6p: 14.7 s
+      bfcl-514-16 step 6 on vllm-5bdc5449f8-vhv6p: 14.7 s
+      tau2_airline-772-10 step 4 on vllm-5bdc5449f8-624qs: 14.6 s
+      tau2_airline-772-10 step 4 on vllm-5bdc5449f8-624qs: 14.6 s
+      bfcl-708-27 step 1 on vllm-5bdc5449f8-624qs: 14.4 s
+      bfcl-565-21 step 17 on vllm-5bdc5449f8-624qs: 14.3 s
+      bfcl-679-24 step 11 on vllm-5bdc5449f8-624qs: 14.2 s
+      bfcl-679-24 step 5 on vllm-5bdc5449f8-vhv6p: 14.2 s
+      bfcl-679-24 step 5 on vllm-5bdc5449f8-vhv6p: 14.1 s
+      tau2_airline-816-14 step 4 on vllm-5bdc5449f8-vhv6p: 14.0 s
+      tau2_airline-816-14 step 4 on vllm-5bdc5449f8-vhv6p: 14.0 s
+      gaia_dev-345-26 step 16 on vllm-5bdc5449f8-624qs: 13.8 s
+      bfcl-679-24 step 10 on vllm-5bdc5449f8-624qs: 13.8 s
+      gaia_dev-310-8 step 4 on vllm-5bdc5449f8-624qs: 13.5 s
+      bfcl-522-11 step 4 on vllm-5bdc5449f8-624qs: 13.4 s
+      bfcl-522-11 step 4 on vllm-5bdc5449f8-624qs: 13.4 s
+      tau2_airline-764-7 step 2 on vllm-5bdc5449f8-vhv6p: 13.4 s
+      bfcl-565-21 step 13 on vllm-5bdc5449f8-624qs: 13.4 s
+      bfcl-508-29 step 4 on vllm-5bdc5449f8-vhv6p: 13.3 s
+      bfcl-508-29 step 4 on vllm-5bdc5449f8-vhv6p: 13.3 s
+      bfcl-514-16 step 12 on vllm-5bdc5449f8-vhv6p: 13.2 s
+      hotpotqa-25-28 step 3 on vllm-5bdc5449f8-624qs: 13.2 s
+      hotpotqa-25-28 step 3 on vllm-5bdc5449f8-624qs: 13.2 s
+      bfcl-514-16 step 4 on vllm-5bdc5449f8-624qs: 13.2 s
+      bfcl-514-16 step 4 on vllm-5bdc5449f8-624qs: 13.2 s
+      tau2_airline-772-10 step 13 on vllm-5bdc5449f8-vhv6p: 13.0 s
+      gaia_dev-345-26 step 15 on vllm-5bdc5449f8-624qs: 12.8 s
+      gaia_dev-270-19 step 8 on vllm-5bdc5449f8-vhv6p: 12.6 s
+      bfcl-514-16 step 7 on vllm-5bdc5449f8-vhv6p: 12.6 s
+      bfcl-514-16 step 1 on vllm-5bdc5449f8-624qs: 12.5 s
+      gaia_dev-345-26 step 10 on vllm-5bdc5449f8-vhv6p: 12.3 s
+      tau2_telecom-986-18 step 5 on vllm-5bdc5449f8-624qs: 12.3 s
+      bfcl-615-6 step 5 on vllm-5bdc5449f8-624qs: 12.0 s
+      bfcl-565-21 step 15 on vllm-5bdc5449f8-624qs: 12.0 s
+      bfcl-565-21 step 15 on vllm-5bdc5449f8-624qs: 12.0 s
+      bfcl-565-21 step 12 on vllm-5bdc5449f8-624qs: 11.8 s
+      bfcl-565-21 step 12 on vllm-5bdc5449f8-624qs: 11.8 s
+      bfcl-624-13 step 7 on vllm-5bdc5449f8-vhv6p: 11.8 s
+      bfcl-624-13 step 7 on vllm-5bdc5449f8-vhv6p: 11.8 s
+      bfcl-527-25 step 9 on vllm-5bdc5449f8-vhv6p: 11.8 s
+      bfcl-527-25 step 8 on vllm-5bdc5449f8-vhv6p: 11.7 s
+      bfcl-679-24 step 1 on vllm-5bdc5449f8-624qs: 11.6 s
+      bfcl-522-11 step 2 on vllm-5bdc5449f8-624qs: 11.3 s
+      bfcl-624-13 step 11 on vllm-5bdc5449f8-vhv6p: 11.3 s
+      bfcl-679-24 step 7 on vllm-5bdc5449f8-vhv6p: 11.2 s
+      bfcl-561-22 step 6 on vllm-5bdc5449f8-624qs: 11.2 s
+      bfcl-561-22 step 6 on vllm-5bdc5449f8-624qs: 11.2 s
+      gaia_dev-345-26 step 12 on vllm-5bdc5449f8-624qs: 11.2 s
+      tau2_airline-772-10 step 10 on vllm-5bdc5449f8-vhv6p: 10.9 s
+      tau2_airline-772-10 step 1 on vllm-5bdc5449f8-vhv6p: 10.8 s
+      gaia_dev-270-19 step 22 on vllm-5bdc5449f8-624qs: 10.8 s
+      tau2_airline-772-10 step 12 on vllm-5bdc5449f8-vhv6p: 10.7 s
+      tau2_airline-772-10 step 12 on vllm-5bdc5449f8-vhv6p: 10.7 s
+      tau2_airline-764-7 step 1 on vllm-5bdc5449f8-624qs: 10.6 s
+      hotpotqa-83-9 step 1 on vllm-5bdc5449f8-624qs: 10.6 s
+      hotpotqa-22-5 step 1 on vllm-5bdc5449f8-624qs: 10.6 s
+      gaia_dev-310-8 step 1 on vllm-5bdc5449f8-624qs: 10.6 s
+      tau2_airline-816-14 step 6 on vllm-5bdc5449f8-vhv6p: 10.1 s
+      bfcl-565-21 step 7 on vllm-5bdc5449f8-624qs: 10.1 s
+      bfcl-565-21 step 7 on vllm-5bdc5449f8-624qs: 10.1 s
+      tau2_airline-816-14 step 1 on vllm-5bdc5449f8-624qs: 10.0 s
+      gaia_dev-387-15 step 1 on vllm-5bdc5449f8-624qs: 10.0 s
+      gaia_dev-476-17 step 1 on vllm-5bdc5449f8-624qs: 10.0 s
+      tau2_airline-816-14 step 8 on vllm-5bdc5449f8-vhv6p: 9.7 s
+      bfcl-527-25 step 2 on vllm-5bdc5449f8-624qs: 9.6 s
+      bfcl-527-25 step 2 on vllm-5bdc5449f8-624qs: 9.5 s
+      tau2_telecom-986-18 step 1 on vllm-5bdc5449f8-624qs: 9.5 s
+      tau2_airline-772-10 step 9 on vllm-5bdc5449f8-624qs: 9.3 s
+      tau2_telecom-986-18 step 8 on vllm-5bdc5449f8-624qs: 9.3 s
+      hotpotqa-237-30 step 3 on vllm-5bdc5449f8-624qs: 9.3 s
+      tau2_telecom-986-18 step 3 on vllm-5bdc5449f8-624qs: 9.0 s
+      tau2_telecom-986-18 step 3 on vllm-5bdc5449f8-624qs: 9.0 s
+      tau2_airline-764-7 step 3 on vllm-5bdc5449f8-624qs: 9.0 s
+      tau2_airline-764-7 step 3 on vllm-5bdc5449f8-624qs: 9.0 s
+      bfcl-522-11 step 7 on vllm-5bdc5449f8-vhv6p: 9.0 s
+      bfcl-522-11 step 7 on vllm-5bdc5449f8-vhv6p: 9.0 s
+      gaia_dev-310-8 step 2 on vllm-5bdc5449f8-624qs: 8.9 s
+      gaia_dev-310-8 step 2 on vllm-5bdc5449f8-624qs: 8.9 s
+      bfcl-522-11 step 3 on vllm-5bdc5449f8-624qs: 8.7 s
+      bfcl-522-11 step 3 on vllm-5bdc5449f8-624qs: 8.7 s
+      bfcl-522-11 step 6 on vllm-5bdc5449f8-624qs: 8.7 s
+      bfcl-522-11 step 6 on vllm-5bdc5449f8-624qs: 8.7 s
+      tau2_airline-816-14 step 3 on vllm-5bdc5449f8-624qs: 8.7 s
+      tau2_airline-772-10 step 11 on vllm-5bdc5449f8-vhv6p: 8.6 s
+      tau2_airline-772-10 step 11 on vllm-5bdc5449f8-vhv6p: 8.6 s
+      gaia_dev-345-26 step 8 on vllm-5bdc5449f8-vhv6p: 8.4 s
+      gaia_dev-345-26 step 8 on vllm-5bdc5449f8-vhv6p: 8.4 s
+      bfcl-565-21 step 6 on vllm-5bdc5449f8-624qs: 8.2 s
+      gaia_dev-345-26 step 2 on vllm-5bdc5449f8-624qs: 8.1 s
+      gaia_dev-345-26 step 2 on vllm-5bdc5449f8-624qs: 8.1 s
+      bfcl-708-27 step 3 on vllm-5bdc5449f8-624qs: 8.0 s
+      bfcl-708-27 step 3 on vllm-5bdc5449f8-624qs: 8.0 s
+      bfcl-708-27 step 5 on vllm-5bdc5449f8-vhv6p: 7.9 s
+      gaia_dev-270-19 step 1 on vllm-5bdc5449f8-vhv6p: 7.9 s
+      hotpotqa-42-12 step 1 on vllm-5bdc5449f8-vhv6p: 7.7 s
+      bfcl-522-11 step 8 on vllm-5bdc5449f8-vhv6p: 7.7 s
+      hotpotqa-25-28 step 2 on vllm-5bdc5449f8-624qs: 7.5 s
+      bfcl-624-13 step 8 on vllm-5bdc5449f8-vhv6p: 7.4 s
+      bfcl-624-13 step 8 on vllm-5bdc5449f8-vhv6p: 7.4 s
+      bfcl-508-29 step 3 on vllm-5bdc5449f8-vhv6p: 7.0 s
+      bfcl-508-29 step 3 on vllm-5bdc5449f8-vhv6p: 7.0 s
+      tau2_telecom-986-18 step 9 on vllm-5bdc5449f8-624qs: 6.7 s
+      tau2_telecom-986-18 step 9 on vllm-5bdc5449f8-624qs: 6.7 s
+      gaia_dev-476-17 step 2 on vllm-5bdc5449f8-624qs: 6.6 s
+      bfcl-561-22 step 1 on vllm-5bdc5449f8-624qs: 6.6 s
+      hotpotqa-78-23 step 1 on vllm-5bdc5449f8-624qs: 6.6 s
+      bfcl-561-22 step 2 on vllm-5bdc5449f8-624qs: 6.6 s
+      tau2_airline-772-10 step 7 on vllm-5bdc5449f8-624qs: 6.3 s
+      tau2_airline-772-10 step 7 on vllm-5bdc5449f8-624qs: 6.3 s
+      tau2_airline-816-14 step 2 on vllm-5bdc5449f8-624qs: 6.3 s
+      tau2_telecom-986-18 step 2 on vllm-5bdc5449f8-624qs: 6.2 s
+      gaia_dev-387-15 step 2 on vllm-5bdc5449f8-624qs: 6.2 s
+      bfcl-561-22 step 7 on vllm-5bdc5449f8-vhv6p: 6.2 s
+      bfcl-514-16 step 3 on vllm-5bdc5449f8-624qs: 6.2 s
+      bfcl-514-16 step 3 on vllm-5bdc5449f8-624qs: 6.2 s
+      bfcl-527-25 step 3 on vllm-5bdc5449f8-624qs: 6.1 s
+      bfcl-522-11 step 5 on vllm-5bdc5449f8-624qs: 6.1 s
+      bfcl-679-24 step 2 on vllm-5bdc5449f8-624qs: 6.1 s
+      bfcl-679-24 step 2 on vllm-5bdc5449f8-624qs: 6.1 s
+      gaia_dev-476-17 step 2 on vllm-5bdc5449f8-624qs: 6.0 s
+      bfcl-527-25 step 7 on vllm-5bdc5449f8-vhv6p: 5.9 s
+      bfcl-514-16 step 2 on vllm-5bdc5449f8-624qs: 5.8 s
+      hotpotqa-237-30 step 2 on vllm-5bdc5449f8-624qs: 5.6 s
+      tau2_airline-772-10 step 2 on vllm-5bdc5449f8-624qs: 5.6 s
+      tau2_airline-772-10 step 2 on vllm-5bdc5449f8-624qs: 5.6 s
+      gaia_dev-345-26 step 4 on vllm-5bdc5449f8-624qs: 5.5 s
+      gaia_dev-345-26 step 4 on vllm-5bdc5449f8-624qs: 5.5 s
+      gaia_dev-270-19 step 12 on vllm-5bdc5449f8-624qs: 5.3 s
+      gaia_dev-345-26 step 11 on vllm-5bdc5449f8-624qs: 5.2 s
+  default faster in 13 of 26 runs, plugin in 13; default minus plugin per run: median -1.16 s
+  hit rate per run: default higher in 10 of 26 runs, plugin in 9, the same in 7
+    of the 19 runs default moved a step in: default higher in 8, plugin in 8, the same in 3
+    of the 11 runs plugin moved a step in: default higher in 4, plugin in 4, the same in 3
+over 2 files: default 3634.8 s, plugin 3567.0 s; default minus plugin 67.8 s, 1.9% of plugin
+  default faster in 11 of 26 runs, plugin in 15; default minus plugin per run: median 4.20 s
+  without the 2 runs that favour that side most: -0.7% of plugin
+  without the 5 runs that favour that side most: -2.7% of plugin
+default between routing-faster-reversed-9a6c4680fec5.csv and routing-faster-d7acfd33b019.csv: total -167.8 s, median size per run 12.91 s
+plugin between routing-faster-reversed-9a6c4680fec5.csv and routing-faster-d7acfd33b019.csv: total 251.5 s, median size per run 18.25 s
+p95 over 2 files, plugin against default, tolerance 5%:
+  run completion: plugin 312.94 s (292.16 s, 333.72 s), default 297.18 s (291.43 s, 302.92 s), limit 312.04 s -> worse
+  first token: plugin 33.63 s (29.03 s, 38.24 s), default 31.29 s (32.69 s, 29.90 s), limit 32.86 s -> worse
+faster by 5% over 2 files, plugin against default:
+  routing-faster-d7acfd33b019.csv: total run time plugin 3441.24 s, default 3718.75 s -> lower; run completion p95 plugin 292.16 s, default 291.43 s (reported, not judged)
+  routing-faster-reversed-9a6c4680fec5.csv: total run time plugin 3692.76 s, default 3550.91 s -> not lower; run completion p95 plugin 333.72 s, default 302.92 s (reported, not judged)
+  total run time averaged: plugin 3567.00 s, default 3634.83 s, limit 3453.09 s
+  run completion: not faster
+=== 2026-11-13 00:26:15 exit 0: make experiment-compare CSVS=experiments/results/routing-faster-d7acfd33b019.csv experiments/results/routing-faster-reversed-9a6c4680fec5.csv STALL_SECONDS=5
+
+=== 2026-11-13 00:26:15 picker checks for experiments/results/routing-faster-reversed-9a6c4680fec5-plugin-picker.log
+     11 first
+     20 least-work
+     17 parallel-spill
+    190 parallel-stay
+    109 pinned
+      5 remap
+      6 spill
+least-work not lightest (want 0): 0
+least-work within slack (want 0): 0
+first over slack (want 0): 0
+least-context not smallest (want 0): 0
+first with unequal context (want 0): 0
+spill at queue <= 1 (want 0): 0
+remap under 10 s (want 0): 0
+parallel-spill with room (want 0): 0
+
+=== 2026-11-13 00:26:16 finished; Windows shuts down in 120 s (cancel: shutdown /a in a Windows terminal). Log: experiments/results/p3-7b-overnight-2026-11-12-2343.log

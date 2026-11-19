@@ -45,6 +45,13 @@ spec:
               value: /etc/thesis/profile.yaml
             - name: THESIS_APP_DB
               value: /data/app.db
+            # The agent runtime's Service (infra/manifests/agent.yaml); one message starts one run there (D13).
+            - name: AGENT_URL
+              value: http://agent:8080
+            # kube-prometheus-stack's Prometheus Service (install-monitoring.sh), the address the autoscaling chart's
+            # KEDA objects use too; GET /cluster reads the cluster panel's numbers there (P3.11).
+            - name: PROMETHEUS_URL
+              value: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
           ports:
             - name: http
               containerPort: 8080

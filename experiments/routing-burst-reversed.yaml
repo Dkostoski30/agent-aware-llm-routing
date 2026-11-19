@@ -1,0 +1,52 @@
+# P3.7: experiments/routing-burst.yaml with the variants the other way round (docs/task-cards/42-P3.7-burst-replay.md).
+# Run right after it with make experiment NAME=routing-burst-reversed: default, plugin, plugin, default cancels a steady
+# drift such as heat. A test holds everything else equal to routing-burst.yaml. Results carry this file's hash (D11).
+# Phase 3's latency claim, so in both orders with a GPU log (PLAN.md, Phase 5's real-pod comparisons): on 2026-11-08 one
+# order alone said 9.4% where both said 6.6%.
+profile: real
+# The long runs (P2.4), as experiments/baseline.yaml and affinity.yaml.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# burst's arrivals with half of the later steps as 2 calls of one x-parallel-group, so every rule of the plugin can act:
+# the converted trace has no parallel groups, so on burst the parallel rule would be on and idle (decided 2026-11-12).
+# The spike on real pods, default picker, seed 6: after each of the 4 bursts a pod had more than 1 call waiting, 5, 10,
+# 12 and 11 at most, 357 calls, 0 failed (experiments/log.md), so the pattern is a burst test as it stands.
+pattern: burst-fan-out
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types. One repetition here; P5 runs three.
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile: 274 blocks of 16 per pod, as
+# experiments/baseline.yaml. Calls that find more than this on their pod are reported apart (P2.4).
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6: they arrive on empty caches and an empty queue, before
+  # the load this file is about. A test holds the count to the seed's start times.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# How much higher the plugin's p95 may be than default's and still count as not worse, on run completion and on first
+# token, each side's p95 averaged over this file and routing-burst-reversed.yaml (make experiment-compare). A first guess
+# under the host's own swing: the same variant moved by up to 14% between nights (P2.9), and the orders cancel a steady
+# drift but not a bad stretch, so 5% is where a difference starts to be the picker's more than the host's.
+not_worse_tolerance: 0.05
+# A replay in which a pod had calls and made no tokens for this long stops the run. In the first run, on 2026-11-12, a vLLM
+# pod sat 30-135 s at a time with calls running and waiting while the other pod went on, in every replay from about 13:55,
+# on both pickers, and 21 runs failed (experiments/log.md). Six of the profile's 5 s scrapes: a pod with calls makes a
+# token about every 0.2 s and the longest prefill here takes a few seconds, so a working pod never shows one; the three
+# clean replays of that run had none.
+pod_stall_seconds: 30
+# In this order, one after the other; routing-burst.yaml runs them the other way round. default is the chart's
+# default-plugins.yaml, as in every earlier experiment. plugin runs thesis-plugins.yaml, the same scorers and weights behind
+# thesis-run-router with every Phase 3 rule on, at the real profile's thresholds (config/real.yaml, routing).
+variants:
+  - name: plugin
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+    epp_config: thesis-plugins.yaml
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml

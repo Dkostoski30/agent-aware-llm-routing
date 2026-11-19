@@ -10,6 +10,37 @@ A variant may name its own profile and replica count (P2.9): the vLLM release is
 profile's whenever it changes, with no make down, since make up asks for sudo, and the pods are
 scaled before the restart. The deployed profile is scaled back to its own count at the end.
 
+A variant may instead turn routing rules on (P3.2): routing: {plugin: true, affinity: true} is laid
+over its profile's routing section by infra/routing-values.sh, and the picker runs
+thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the picker (P3.3).
+
+On real pods, nvidia-smi samples the GPU into a file beside the results for the whole run, and is
+checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons). A plugin variant's
+picker log is kept before the next switch restarts the picker. A file may name a
+not_worse_tolerance, and a faster_by (P3.7b), which go into the .meta.json for make
+experiment-compare's verdicts. A file may name pod_stall_seconds: after each replay Prometheus is
+asked whether a pod made no tokens for that long while it had calls, and such a replay stops the
+run (P3.7, experiments/log.md). After each replay on real pods, both vLLM pods' logs are kept beside
+the results before that check, so a stall comes with the engine's own numbers (P3.7c).
+
+A variant may carry an autoscaler (P3.9b): the pods are scaled to the profile's
+autoscaling.min_replicas before the restart, so the floor's pods are the ones warmed, and KEDA's
+ScaledObject (infra/charts/autoscaling) is installed after the warm-up, just before the replay: the
+warm-up's calls go straight to the pods, and a CPU HPA up during them scaled before the replay
+(P3.10's review, 2026-11-17). After the replay, Prometheus gives the spec and
+Ready replicas and both triggers over it into <stem>-<variant>-autoscale.csv, and the report says
+when remaining work passed its target, when the scale-up began and when the queue passed its own.
+The object is removed and the profile's count restored right after, and in the same finally as
+the routing.
+
+An autoscaler may also be cpu (P3.10): a plain HPA on the pods' CPU, real pods only (D5), whose own
+reading goes into <stem>-<variant>-cpu-hpa.csv. It is installed only once metrics-server, which it
+reads, has a sample of each pod from after the warm-up under its target: its reading lags the
+pods by up to a sample's 32 s window, and installed at once it scaled on the warm-up (2026-11-17).
+Each autoscaled variant gets P5.2's numbers from its series and calls
+(autoscale.summarise_autoscale): in its .meta.json, in the report, and as a row of
+<stem>-autoscale-summary.csv.
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -18,7 +49,9 @@ import asyncio
 import hashlib
 import json
 import subprocess
+import tempfile
 import time
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +60,34 @@ from typing import Any, Protocol
 import httpx
 import yaml
 
+from load_generator.autoscale import (
+    CHART,
+    CPU,
+    CPU_QUERY,
+    CPU_TARGET_KEY,
+    KINDS,
+    SERIES_QUERIES,
+    AutoscaleError,
+    AutoscaleRow,
+    AutoscaleSummary,
+    CpuRow,
+    Crossings,
+    check_cpu_target,
+    check_section,
+    cpu_cores,
+    cpu_quiet,
+    cpu_rows_from,
+    crossing_text,
+    first_crossings,
+    helm_values,
+    rows_from,
+    scale_up_before_queue,
+    summarise_autoscale,
+    summary_text,
+    write_autoscale_csv,
+    write_cpu_csv,
+    write_summary_csv,
+)
 from load_generator.compare import max_gap_deviation
 from load_generator.graph import render
 from load_generator.plan import (
@@ -71,6 +132,73 @@ SIM_PROFILE = "sim"
 UNINSTALL_TIMEOUT = "120s"
 # Pods loading the model on one GPU and disk, as VLLM_DEPLOY_TIMEOUT in the Makefile.
 SCALE_TIMEOUT = "900s"
+# The Helm release of infra/charts/autoscaling, and the ScaledObject it holds (P3.9b).
+AUTOSCALING_RELEASE = "autoscaling"
+SCALED_OBJECT = "scaledobject/vllm"
+# KEDA names the HPA it makes keda-hpa-<ScaledObject's name>.
+KEDA_HPA = "hpa/keda-hpa-vllm"
+# The plain HPA of the cpu autoscaler (P3.10), infra/charts/autoscaling/templates/hpa.yaml.
+PLAIN_HPA = "hpa/vllm"
+# metrics-server's latest CPU sample of each vLLM pod, the one a plain HPA reads.
+POD_METRICS = "/apis/metrics.k8s.io/v1beta1/namespaces/default/pods?" + urllib.parse.urlencode(
+    {"labelSelector": VLLM_SELECTOR}
+)
+# metrics-server samples every 15 s (k3s's --metric-resolution) over a window that reached 32 s on
+# 2026-11-17, so a sample wholly after the warm-up comes within about 50 s of it; 120 s is a wide
+# margin. Polled at a third of that resolution, so a new sample is seen within 5 s.
+QUIET_CPU_TIMEOUT_SECONDS = 120
+QUIET_CPU_POLL_SECONDS = 5
+# KEDA's operator builds the scaler and the HPA within seconds when idle. A wide margin: in P3.9a
+# it lost its leader lease three times while vLLM pods loaded, and each time waited to win it back.
+AUTOSCALER_TIMEOUT = "120s"
+# The picker's file when a variant runs the plugin (infra/routing-values.sh), whose log has a line
+# per call with the rule that picked it (P3.5, P3.6).
+PLUGIN_CONFIG = "thesis-plugins.yaml"
+# What the GPU log samples (P3.7). As P2.5's log beside the baseline, plus the memory clock and
+# load and the memory used: temperature, clocks, power and the reasons the clocks were held down
+# (clocks_event_reasons, which this driver also names in the file's header) tell a slowed GPU from a
+# routing difference.
+GPU_FIELDS = (
+    "timestamp,temperature.gpu,utilization.gpu,utilization.memory,clocks.gr,clocks.mem,"
+    "power.draw,memory.used,clocks_event_reasons.active"
+)
+# Prometheus's HTTP API through the API server's service proxy, so no port-forward is needed:
+# kube-prometheus-stack's service under make up's release name, monitoring
+# (infra/install-monitoring.sh).
+PROMETHEUS_RANGE_API = (
+    "/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090"
+    "/proxy/api/v1/query_range"
+)
+# Per pod, at each sample: the fewest calls it had running plus the fewest waiting over the window
+# before it, and the prompt and generation tokens it made in that window. Both sides of each +
+# carry the same labels, so they add pod by pod. A pod over 0 on the first and at 0 on the second
+# had calls all through the window and made nothing: on 2026-11-12 such a pod sat 30-135 s at a
+# time while the other pod on the GPU went on (P3.7).
+BUSY_QUERY = (
+    "sum by (pod) (min_over_time(vllm:num_requests_running[{window}s]) "
+    "+ min_over_time(vllm:num_requests_waiting[{window}s]))"
+)
+TOKENS_QUERY = (
+    "sum by (pod) (increase(vllm:prompt_tokens_total[{window}s]) "
+    "+ increase(vllm:generation_tokens_total[{window}s]))"
+)
+# The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
+# overload limits (P3.5), the parallel threshold (P3.6) and the least-work slack (P3.7b): a variant
+# sets rules only (infra/routing-values.sh).
+PROFILE_ONLY_KEYS = frozenset(
+    {
+        "run_ttl_seconds",
+        "overload_queue_threshold",
+        "overload_sustained_seconds",
+        "parallel_queue_threshold",
+        "least_work_slack",
+    }
+)
+# A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
+# tokens: the 9 a replay's chat template adds after it, and up to 15 of a partly filled 16-token
+# block (P2.4, experiments/log.md). Derived, not tuned: a step short by more lost part of its run's
+# history on its own pod, a capacity effect the hit rate alone would hide.
+CACHE_SHORTFALL_TOKENS = 24
 
 
 class ExperimentError(Exception):
@@ -86,6 +214,14 @@ class Warmup:
 
 
 @dataclass(frozen=True)
+class PodStall:
+    pod: str
+    # When it stopped making tokens, in seconds since the epoch.
+    start: float
+    seconds: int
+
+
+@dataclass(frozen=True)
 class Variant:
     name: str
     # On top of infra/helm/router-values.yaml; None is the default picker.
@@ -96,6 +232,16 @@ class Variant:
     profile: str
     # None is the profile's own count.
     replicas: int | None
+    # Rules laid over the profile's routing section; None is the profile's own. Never with values.
+    routing: Mapping[str, bool] | None
+    # One of autoscale.KINDS: KEDA (P3.9b) or a plain HPA on CPU (P3.10) scales the pods from the
+    # profile's min_replicas. None is a fixed count. Never with replicas.
+    autoscaler: str | None
+
+    @property
+    def default(self) -> bool:
+        """The picker as make up installs it for the profile."""
+        return self.values is None and self.routing is None
 
 
 @dataclass(frozen=True)
@@ -113,10 +259,26 @@ class Experiment:
     warmup: Warmup
     variants: list[Variant]
     validation: Validation | None
+    # How much slower than the reference variant's p95 still counts as not worse (P3.7); None
+    # when the file makes no such claim.
+    not_worse_tolerance: float | None
+    # How much lower than the reference variant's total run time, averaged over the files, the
+    # other's must be to count as faster (P3.7b); None when the file makes no such claim.
+    faster_by: float | None
+    # The variant on the default picker, which the other is held to; None with neither claim.
+    reference_variant: str | None
+    # How long a pod with calls may make no tokens before its replay is refused (P3.7); None when
+    # replays are not checked.
+    pod_stall_seconds: int | None
 
     def profiles(self) -> list[str]:
         """Each profile once, in the variants' order."""
         return list(dict.fromkeys(variant.profile for variant in self.variants))
+
+    @property
+    def gpu_logged(self) -> bool:
+        """Whether a variant runs real pods, which share the one GPU."""
+        return any(variant.profile != SIM_PROFILE for variant in self.variants)
 
 
 @dataclass(frozen=True)
@@ -128,6 +290,26 @@ class Outputs:
 
     def replay(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}.jsonl")
+
+    @property
+    def gpu(self) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-gpu.csv")
+
+    def picker(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-picker.log")
+
+    def vllm(self, variant: str, pod: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-vllm-{pod}.log")
+
+    def autoscale(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-autoscale.csv")
+
+    def cpu_hpa(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-cpu-hpa.csv")
+
+    @property
+    def autoscale_summary(self) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-autoscale-summary.csv")
 
 
 class Cluster(Protocol):
@@ -142,15 +324,50 @@ class Cluster(Protocol):
 
     def restart_pods(self) -> None: ...
 
-    def set_routing(self, values: Path | None) -> None: ...
+    # Both None is the default picker; at most one is given.
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None: ...
 
     def epp_config_file(self) -> str: ...
 
     def warm_pods(self) -> dict[str, list[int]]: ...
 
-    def replay(self, out: Path) -> list[dict[str, Any]]: ...
+    # routing is the variant's rules, None the profile's own.
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]: ...
 
     def clock_jumps(self, since: float, until: float) -> int: ...
+
+    # Raises ExperimentError if nvidia-smi cannot read the GPU.
+    def check_gpu(self) -> None: ...
+
+    def start_gpu_log(self, path: Path) -> None: ...
+
+    # nvidia-smi's exit code if it had ended before it was stopped, else None.
+    def stop_gpu_log(self) -> int | None: ...
+
+    # The running picker's whole log.
+    def picker_log(self) -> str: ...
+
+    # Each vLLM pod's whole log, by pod name.
+    def vllm_logs(self) -> dict[str, str]: ...
+
+    # Each stretch from since to until in which a pod had calls and made no tokens for seconds.
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]: ...
+
+    # Keeps the autoscaler's kind and scales the pods to the profile's min_replicas; returns the
+    # profile's autoscaling section the autoscaler will apply.
+    def floor_autoscaler(self, kind: str) -> Mapping[str, Any]: ...
+
+    # Installs the kind the floor kept, which scales the pods from there.
+    def start_autoscaler(self) -> None: ...
+
+    # Removes the autoscaler and the HPA it made; nothing to remove is no error.
+    def stop_autoscaler(self) -> None: ...
+
+    # The replicas and both triggers from since to until, at the scrape step.
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]: ...
+
+    # The plain HPA's reading of the pods' CPU from since to until (P3.10).
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]: ...
 
 
 def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
@@ -169,9 +386,127 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
     replicas = section.get("replicas")
     if replicas is not None and replicas < 1:
         raise ExperimentError(f"variant {section['name']}: replicas {replicas}, at least 1")
+    routing = section.get("routing")
+    if routing is not None:
+        if values is not None:
+            raise ExperimentError(
+                f"variant {section['name']}: a values file and routing rules, give one"
+            )
+        if (
+            not isinstance(routing, dict)
+            or not routing
+            or not all(isinstance(on, bool) for on in routing.values())
+        ):
+            raise ExperimentError(
+                f"variant {section['name']}: routing must map rules to true or false, got {routing}"
+            )
+    autoscaler = section.get("autoscaler")
+    if autoscaler is not None:
+        if autoscaler not in KINDS:
+            raise ExperimentError(
+                f"variant {section['name']}: no autoscaler {autoscaler}, there are "
+                f"{', '.join(KINDS)}"
+            )
+        if replicas is not None:
+            raise ExperimentError(
+                f"variant {section['name']}: an autoscaler starts at the profile's min_replicas, "
+                f"so not replicas {replicas} too"
+            )
     return Variant(
-        section["name"], values, section["epp_config"], variant_profile(spec, section), replicas
+        section["name"],
+        values,
+        section["epp_config"],
+        variant_profile(spec, section),
+        replicas,
+        routing,
+        autoscaler,
     )
+
+
+def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Every rule a variant sets is one its profile has, no rule is on while the plugin is off, and
+    none of the overload guard, the parallel rule and the two first-call rules is on while affinity
+    is off: each would do nothing and the variant would read as its result. The two first-call
+    rules place the same calls by different measures, so not both. infra/routing-values.sh
+    refuses all of these too, but only when the variant's switch runs, which may be hours into the
+    run."""
+    for variant in experiment.variants:
+        routing = profiles[variant.profile]["routing"]
+        known = {rule: on for rule, on in routing.items() if rule not in PROFILE_ONLY_KEYS}
+        set_here = sorted(PROFILE_ONLY_KEYS & set(variant.routing or {}))
+        if set_here:
+            raise ExperimentError(
+                f"variant {variant.name}: {', '.join(set_here)}: the profile's, "
+                "a variant sets only rules"
+            )
+        unknown = sorted(set(variant.routing or {}) - set(known))
+        if unknown:
+            raise ExperimentError(
+                f"variant {variant.name}: no rule {', '.join(unknown)} in profile "
+                f"{variant.profile}, has {', '.join(known)}"
+            )
+        rules = {**known, **(variant.routing or {})}
+        on = [rule for rule, value in rules.items() if rule != "plugin" and value]
+        if on and not rules["plugin"]:
+            raise ExperimentError(f"variant {variant.name}: {', '.join(on)} on, but plugin is off")
+        if rules["overload_guard"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: overload_guard on, but affinity is off: the guard moves "
+                "pinned runs only"
+            )
+        if rules["parallel_spill"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: parallel_spill on, but affinity is off: a group stays "
+                "on its run's pinned pod"
+            )
+        if rules["least_work_first"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_work_first on, but affinity is off: it adds up the "
+                "work of pinned runs"
+            )
+        if rules["least_context_first"] and not rules["affinity"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_context_first on, but affinity is off: it adds up "
+                "the context of pinned runs"
+            )
+        if rules["least_work_first"] and rules["least_context_first"]:
+            raise ExperimentError(
+                f"variant {variant.name}: least_work_first and least_context_first both on: each "
+                "places a run's first call"
+            )
+
+
+def check_autoscaling(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Every variant with an autoscaler is on a profile whose autoscaling section it can scale by,
+    and cpu only on real pods. Before the run: the variant's start may be hours into it."""
+    for variant in experiment.variants:
+        if variant.autoscaler is None:
+            continue
+        profile = profiles[variant.profile]
+        if "autoscaling" not in profile:
+            raise ExperimentError(
+                f"variant {variant.name}: profile {variant.profile} has no autoscaling section"
+            )
+        if variant.autoscaler == CPU and variant.profile == SIM_PROFILE:
+            raise ExperimentError(
+                f"variant {variant.name}: cpu on simulated pods, whose CPU says nothing of their "
+                "load (D5); the simulator compares remaining and queue"
+            )
+        try:
+            check_section(profile["autoscaling"])
+            if variant.autoscaler == CPU:
+                check_cpu_target(profile["autoscaling"])
+        except AutoscaleError as error:
+            raise ExperimentError(f"variant {variant.name}: {error}") from error
+
+
+def plugin_on(
+    profile_routing: Mapping[str, Any], variant_routing: Mapping[str, bool] | None
+) -> bool:
+    """Whether the picker runs the plugin for a variant: its rules laid over its profile's, as
+    infra/routing-values.sh lays them."""
+    on: bool = {**profile_routing, **(variant_routing or {})}["plugin"]
+    return on
 
 
 def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -> None:
@@ -192,6 +527,66 @@ def check_same_replay(profiles: Mapping[str, Mapping[str, Any]], pattern: str) -
         for key, value in found.items():
             if value != expected[key]:
                 raise ExperimentError(f"{key} differs: {first} has {expected[key]}, {name} {value}")
+
+
+def _number(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int | float)
+
+
+def _not_worse(spec: Mapping[str, Any]) -> float | None:
+    tolerance = spec.get("not_worse_tolerance")
+    if tolerance is not None and (not _number(tolerance) or tolerance < 0):
+        raise ExperimentError(f"not_worse_tolerance must be a number at or over 0, got {tolerance}")
+    return None if tolerance is None else float(tolerance)
+
+
+def _faster_by(spec: Mapping[str, Any]) -> float | None:
+    """A share of the reference's total run time: at 1 or over, no time could be that much lower."""
+    share = spec.get("faster_by")
+    if share is not None and (not _number(share) or not 0 <= share < 1):
+        raise ExperimentError(f"faster_by must be a number from 0 up to but not 1, got {share}")
+    return None if share is None else float(share)
+
+
+def _reference(spec: Mapping[str, Any], variants: Sequence[Variant]) -> str | None:
+    """The variant the other is held to, the one on the default picker, when the file makes a
+    claim: not_worse_tolerance, faster_by or both."""
+    claims = [key for key in ("not_worse_tolerance", "faster_by") if spec.get(key) is not None]
+    if not claims:
+        return None
+    claim = claims[0]
+    if len(variants) != 2:
+        raise ExperimentError(f"{claim} compares two variants, the file has {len(variants)}")
+    defaults = [variant.name for variant in variants if variant.default]
+    if len(defaults) != 1:
+        raise ExperimentError(
+            f"{claim} needs one variant on the default picker to hold the other to, "
+            f"found {defaults}"
+        )
+    return defaults[0]
+
+
+def _pod_stall_seconds(spec: Mapping[str, Any]) -> int | None:
+    seconds = spec.get("pod_stall_seconds")
+    if seconds is not None and (isinstance(seconds, bool) or not isinstance(seconds, int)):
+        raise ExperimentError(f"pod_stall_seconds must be a whole number of seconds, got {seconds}")
+    if seconds is not None and seconds <= 0:
+        raise ExperimentError(f"pod_stall_seconds must be over 0, got {seconds}")
+    return seconds
+
+
+def check_stall_window(experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
+    """Prometheus tells how many tokens a pod made in a window only from two samples in it, so the
+    window must hold two of each profile's scrapes. Before the run, which takes hours."""
+    if experiment.pod_stall_seconds is None:
+        return
+    for name in experiment.profiles():
+        interval = profiles[name]["monitoring"]["scrape_interval_seconds"]
+        if experiment.pod_stall_seconds < 2 * interval:
+            raise ExperimentError(
+                f"pod_stall_seconds {experiment.pod_stall_seconds} holds fewer than two of profile "
+                f"{name}'s scrapes, {interval} s apart"
+            )
 
 
 def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
@@ -219,6 +614,8 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     validation = None
     if spec.get("validation") is not None:
         validation = load_validation(spec["validation"], names)
+    tolerance, faster_by = _not_worse(spec), _faster_by(spec)
+    reference = _reference(spec, variants)
     return Experiment(
         name=path.stem,
         hash=experiment_hash(path),
@@ -231,6 +628,10 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
         warmup=warmup,
         variants=variants,
         validation=validation,
+        not_worse_tolerance=tolerance,
+        faster_by=faster_by,
+        reference_variant=reference,
+        pod_stall_seconds=_pod_stall_seconds(spec),
     )
 
 
@@ -273,9 +674,16 @@ def _variant_meta(
     starts: Sequence[float],
     times: tuple[float, float],
     clock_jumps: int,
+    picker_log: str | None,
+    vllm_logs: list[str] | None,
+    autoscale: Mapping[str, Any] | None,
+    autoscale_summary: Mapping[str, Any] | None,
+    cpu_hpa: str | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
+        # The file's hash covers it too; here it is beside the result it explains.
+        "routing": variant.routing,
         "profile": variant.profile,
         "replicas": variant.replicas,
         "profile_sha256": profile_sha256,
@@ -289,7 +697,62 @@ def _variant_meta(
         "calls_per_pod": calls_per_pod(lines),
         "pod_switch_share": pod_switch_share(lines, starts),
         "max_gap_deviation_ms": max_gap_deviation(trace, lines),
+        # The file name beside the results, None for a variant without the plugin.
+        "picker_log": picker_log,
+        # Each vLLM pod's log beside the results, None on simulated pods.
+        "vllm_logs": vllm_logs,
+        # What KEDA scaled by and the moments the report reads; None at a fixed count.
+        "autoscale": autoscale,
+        # P5.2's numbers for the variant (P3.10); None at a fixed count.
+        "autoscale_summary": autoscale_summary,
+        # The file of the plain HPA's CPU reading, None but for the cpu autoscaler.
+        "cpu_hpa": cpu_hpa,
     }
+
+
+def _autoscale_meta(
+    variant: Variant, section: Mapping[str, Any], rows: Sequence[AutoscaleRow], out: Outputs
+) -> dict[str, Any]:
+    """The series beside the results, and when each crossing came (P3.9b)."""
+    write_autoscale_csv(out.autoscale(variant.name), rows)
+    crossings = first_crossings(rows, section)
+    return {
+        "autoscaler": variant.autoscaler,
+        "section": dict(section),
+        "csv": out.autoscale(variant.name).name,
+        "crossings": crossings.as_meta(),
+        "scale_up_before_queue": scale_up_before_queue(crossings),
+    }
+
+
+def stall_text(variant: str, stalls: Sequence[PodStall], started: float) -> str:
+    found = ", ".join(
+        f"{stall.pod} made no tokens with calls running or waiting for {stall.seconds} s from "
+        f"{stall.start - started:.0f} s into the replay"
+        for stall in stalls
+    )
+    return (
+        f"variant {variant}: {found}. Such stalls hit both pickers on 2026-11-12 (P3.7, "
+        "experiments/log.md), so this replay is not comparable; its replay file stays, move this "
+        "file's results away to run it again"
+    )
+
+
+def _summary_timing(profile: str) -> tuple[int, float]:
+    """The profile's scrape step, one sample of the series, and its call deadline, which the
+    replay holds each call to (agent.llm_timeout_seconds)."""
+    loaded: dict[str, Any] = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())
+    return loaded["monitoring"]["scrape_interval_seconds"], loaded["agent"]["llm_timeout_seconds"]
+
+
+@dataclass(frozen=True)
+class Autoscaling:
+    """An autoscaled variant's: the section its autoscaler applies, and the profile's scrape step
+    and call deadline, which its summary reads."""
+
+    section: Mapping[str, Any]
+    step_seconds: int
+    deadline_seconds: float
 
 
 def _run_variant(
@@ -299,25 +762,73 @@ def _run_variant(
     cluster: Cluster,
     clock: Callable[[], float],
     profile_sha256: str,
+    autoscaling: Autoscaling | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """autoscaling is None at a fixed count. Otherwise the pods are at its floor, and its
+    autoscaler is started after the warm-up, so the warm-up's calls cannot scale it."""
     running = cluster.epp_config_file()
     if running != variant.epp_config:
         raise ExperimentError(
             f"variant {variant.name} wants the picker on {variant.epp_config}, it runs {running}"
         )
     warmup_ttft = cluster.warm_pods()
+    if autoscaling is not None:
+        cluster.start_autoscaler()
     started = clock()
-    lines = cluster.replay(out.replay(variant.name))
+    lines = cluster.replay(out.replay(variant.name), variant.routing)
     ended = clock()
+    jumps = cluster.clock_jumps(started, ended)
+    # From the replay's start, so the warm-up's calls, which go straight to the pods, are left out.
+    # Before the stall check, so a stalled replay keeps its series too.
+    starts = start_times(experiment.pattern, experiment.seed)
+    autoscale = summary = cpu_hpa = None
+    if autoscaling is not None:
+        rows = cluster.autoscale_series(started, ended)
+        autoscale = _autoscale_meta(variant, autoscaling.section, rows, out)
+        summary = summarise_autoscale(
+            rows,
+            lines,
+            starts,
+            started,
+            experiment.warmup.runs_discarded,
+            autoscaling.section,
+            autoscaling.step_seconds,
+            autoscaling.deadline_seconds,
+        ).as_meta()
+        if variant.autoscaler == CPU:
+            write_cpu_csv(out.cpu_hpa(variant.name), cluster.cpu_series(started, ended))
+            cpu_hpa = out.cpu_hpa(variant.name).name
+    picker_log = None
+    if variant.epp_config == PLUGIN_CONFIG:
+        out.picker(variant.name).write_text(cluster.picker_log())
+        picker_log = out.picker(variant.name).name
+    # Before the stall check, so a stalled replay keeps them, and before the next restart, which
+    # replaces the pods. Real pods only: two of them share the one GPU, and on 2026-11-13 one got
+    # almost none of it for up to a minute while the other ran on (P3.7c, experiments/log.md).
+    vllm_logs = None
+    if variant.profile != SIM_PROFILE:
+        vllm_logs = []
+        for pod, log in sorted(cluster.vllm_logs().items()):
+            out.vllm(variant.name, pod).write_text(log)
+            vllm_logs.append(out.vllm(variant.name, pod).name)
+    if experiment.pod_stall_seconds is not None:
+        stalls = cluster.pod_stalls(started, ended, experiment.pod_stall_seconds)
+        if stalls:
+            raise ExperimentError(stall_text(variant.name, stalls, started))
     meta = _variant_meta(
         variant,
         profile_sha256,
         warmup_ttft,
         lines,
         _trace_lines(experiment.trace),
-        start_times(experiment.pattern, experiment.seed),
+        starts,
         (started, ended),
-        cluster.clock_jumps(started, ended),
+        jumps,
+        picker_log,
+        vllm_logs,
+        autoscale,
+        summary,
+        cpu_hpa,
     )
     return lines, meta
 
@@ -334,9 +845,17 @@ def run_experiment(
     default picker is put back, so a switch that fails after the last variant does not lose them."""
     out.csv.parent.mkdir(parents=True, exist_ok=True)
     cluster.check_ready()
+    if experiment.gpu_logged:
+        cluster.check_gpu()
     # Now and not at the end: the profiles were loaded just before, and a run takes hours.
     profile_sha256 = {
         name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
+    }
+    # Also now, and only for the profiles an autoscaler runs on, the only ones it is read for.
+    timing = {
+        variant.profile: _summary_timing(variant.profile)
+        for variant in experiment.variants
+        if variant.autoscaler is not None
     }
     starts = start_times(experiment.pattern, experiment.seed)
     rows: list[CallRow] = []
@@ -348,7 +867,15 @@ def run_experiment(
     deployed = experiment.profile
     # True once the deployed profile runs another count than its own.
     scaled = False
+    # True from the GPU log's start until it is stopped.
+    gpu_logging = False
+    # True from an autoscaler's start until it is stopped: a start that fails halfway may have
+    # installed it.
+    autoscaled = False
     try:
+        if experiment.gpu_logged:
+            cluster.start_gpu_log(out.gpu)
+            gpu_logging = True
         for variant in experiment.variants:
             if variant.profile != deployed:
                 # The release it scaled is being replaced, so there is nothing to scale back.
@@ -358,13 +885,35 @@ def run_experiment(
             if variant.replicas is not None:
                 cluster.scale(variant.replicas)
                 scaled = True
+            autoscaling = None
+            if variant.autoscaler is not None:
+                # The floor before the restart, so only its pods restart and are warmed (P3.9b);
+                # _run_variant starts the autoscaler after the warm-up.
+                scaled = autoscaled = True
+                autoscaling = Autoscaling(
+                    cluster.floor_autoscaler(variant.autoscaler), *timing[variant.profile]
+                )
             cluster.restart_pods()
-            off_default = off_default or variant.values is not None
-            cluster.set_routing(variant.values)
-            off_default = variant.values is not None
+            off_default = off_default or not variant.default
+            cluster.set_routing(variant.values, variant.routing)
+            off_default = not variant.default
             lines, variant_meta = _run_variant(
-                experiment, variant, out, cluster, clock, profile_sha256[variant.profile]
+                experiment,
+                variant,
+                out,
+                cluster,
+                clock,
+                profile_sha256[variant.profile],
+                autoscaling,
             )
+            if autoscaled:
+                # Gone before the count is restored, or its HPA would set the count back; restored
+                # now, or the next variant would start from wherever KEDA left the pods.
+                # Each flag clears once its step is done, so one that fails is tried again below.
+                cluster.stop_autoscaler()
+                autoscaled = False
+                cluster.scale(None)
+                scaled = False
             rows += call_rows(
                 variant.name,
                 lines,
@@ -373,6 +922,10 @@ def run_experiment(
                 experiment.warmup.runs_discarded,
             )
             variants_meta[variant.name] = variant_meta
+        gpu_ended_early_with = None
+        if gpu_logging:
+            gpu_logging = False
+            gpu_ended_early_with = cluster.stop_gpu_log()
         meta = {
             "experiment": experiment.name,
             "hash": experiment.hash,
@@ -387,20 +940,41 @@ def run_experiment(
             "seed": experiment.seed,
             "runs_discarded": experiment.warmup.runs_discarded,
             "kv_capacity_tokens_per_pod": experiment.kv_capacity_tokens_per_pod,
+            "gpu_log": out.gpu.name if experiment.gpu_logged else None,
+            # A gap at the end of the GPU log, which its timestamps alone would not explain.
+            "gpu_log_ended_early_with": gpu_ended_early_with,
+            "not_worse_tolerance": experiment.not_worse_tolerance,
+            "faster_by": experiment.faster_by,
+            "reference_variant": experiment.reference_variant,
+            # Every replay was checked and had no pod stalled this long; None when not checked.
+            "pod_stall_seconds": experiment.pod_stall_seconds,
             "variants": variants_meta,
         }
         if finished is not None:
             finished(rows, meta)
     finally:
+        if gpu_logging:
+            cluster.stop_gpu_log()
         if off_default:
-            cluster.set_routing(None)
+            cluster.set_routing(None, None)
+        # Before the count is restored, which its HPA would otherwise undo.
+        if autoscaled:
+            cluster.stop_autoscaler()
         if scaled:
             cluster.scale(None)
     return rows, meta
 
 
 def write_results(out: Outputs, rows: Sequence[CallRow], meta: Mapping[str, Any]) -> None:
+    """The summary CSV only when a variant was autoscaled."""
     write_csv(out.csv, rows)
+    summaries = {
+        name: (variant["autoscale"]["autoscaler"], variant["autoscale_summary"])
+        for name, variant in meta["variants"].items()
+        if variant["autoscale_summary"] is not None
+    }
+    if summaries:
+        write_summary_csv(out.autoscale_summary, summaries)
     with out.meta.open("x") as file:
         json.dump(meta, file, indent=2)
         file.write("\n")
@@ -463,6 +1037,62 @@ def count_clock_jumps(since: float, until: float) -> int:
     return sum(CLOCK_JUMP_LINE in line for line in done.stdout.splitlines())
 
 
+def pod_stalls_from(
+    busy: Sequence[Mapping[str, Any]],
+    tokens: Sequence[Mapping[str, Any]],
+    window: int,
+    step: int,
+) -> list[PodStall]:
+    """The stalls in BUSY_QUERY's and TOKENS_QUERY's range answers. A pod with calls and no token
+    series at all is an error, not a pod without stalls: a renamed counter would pass every replay.
+    A single sample with no token reading beside it, or not a number, is no evidence of a stall.
+    Stalled samples one step apart are one stall, which began a window before its first sample."""
+    counted = {series["metric"]["pod"] for series in tokens}
+    unread = sorted({series["metric"]["pod"] for series in busy} - counted)
+    if unread:
+        raise ExperimentError(
+            f"Prometheus has no token count for {', '.join(unread)}, so a stalled pod could not be "
+            "ruled out"
+        )
+    made = {
+        (series["metric"]["pod"], float(at)): float(value)
+        for series in tokens
+        for at, value in series["values"]
+    }
+    found = []
+    for series in busy:
+        pod = series["metric"]["pod"]
+        stalled = [
+            float(at)
+            for at, value in series["values"]
+            if float(value) > 0 and made.get((pod, float(at))) == 0
+        ]
+        runs: list[list[float]] = []
+        for at in stalled:
+            # Under two steps: the next sample, whatever the rounding of its timestamp.
+            if runs and at - runs[-1][-1] < 2 * step:
+                runs[-1].append(at)
+            else:
+                runs.append([at])
+        found += [PodStall(pod, run[0] - window, round(run[-1] - run[0]) + window) for run in runs]
+    return found
+
+
+def set_routing(profile: str, values: Path | None, routing: Mapping[str, bool] | None) -> None:
+    """The picker on the profile's routing, with Helm values or rules laid over it; both None is
+    the profile's own. set-routing.sh takes one file: Helm values, or rules under a top-level
+    routing key. make pod-removed switches the picker this way too (P3.4)."""
+    script = str(REPO_ROOT / "infra" / "set-routing.sh")
+    if routing is None:
+        extra = [] if values is None else [str(values)]
+        subprocess.run(["bash", script, profile, *extra], check=True)
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as rules:
+        yaml.safe_dump({"routing": dict(routing)}, rules)
+        rules.flush()
+        subprocess.run(["bash", script, profile, rules.name], check=True)
+
+
 class LiveCluster:
     def __init__(self, experiment: Experiment, profiles: Mapping[str, Mapping[str, Any]]) -> None:
         self.experiment = experiment
@@ -471,6 +1101,13 @@ class LiveCluster:
         self.current = experiment.profile
         # None is the profile's own count.
         self.replicas: int | None = None
+        # nvidia-smi while it samples the GPU.
+        self.gpu: subprocess.Popen[bytes] | None = None
+        # The kind of the autoscaler last started and not yet stopped, which says what its stop
+        # waits for; None is KEDA's, as before any start.
+        self.autoscaler: str | None = None
+        # When the last warm-up ended, which a CPU HPA's first reading must not reach back into.
+        self.warmed_at: float | None = None
 
     @property
     def profile(self) -> Mapping[str, Any]:
@@ -533,12 +1170,10 @@ class LiveCluster:
     def restart_pods(self) -> None:
         subprocess.run(["bash", str(REPO_ROOT / "infra" / "restart-vllm.sh")], check=True)
 
-    def set_routing(self, values: Path | None) -> None:
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None:
         if self.current is None:
             raise ExperimentError("no profile is deployed yet")
-        script = str(REPO_ROOT / "infra" / "set-routing.sh")
-        extra = [] if values is None else [str(values)]
-        subprocess.run(["bash", script, self.current, *extra], check=True)
+        set_routing(self.current, values, routing)
 
     def epp_config_file(self) -> str:
         return served_config_file(
@@ -552,7 +1187,9 @@ class LiveCluster:
         )
 
     def warm_pods(self) -> dict[str, list[int]]:
-        return asyncio.run(self._warm(self._ready_pods()))
+        times = asyncio.run(self._warm(self._ready_pods()))
+        self.warmed_at = time.time()
+        return times
 
     async def _warm(self, pods: Mapping[str, str]) -> dict[str, list[int]]:
         warmup = self.experiment.warmup
@@ -572,17 +1209,188 @@ class LiveCluster:
             print(f"experiment: warmed {name}, ms to first token {times[name]}", flush=True)
         return times
 
-    def replay(self, out: Path) -> list[dict[str, Any]]:
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
         return replay_to_file(
             self.profile,
             self.experiment.trace,
             self.experiment.pattern_name,
             self.experiment.seed,
             out,
+            plugin_on(self.profile["routing"], routing),
         )
 
     def clock_jumps(self, since: float, until: float) -> int:
         return count_clock_jumps(since, until)
+
+    def check_gpu(self) -> None:
+        """One sample of the fields the log takes: a field this driver does not know, or no GPU,
+        fails here and not hours later in an empty log."""
+        done = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader"],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if done.returncode != 0 or not done.stdout.strip():
+            raise ExperimentError(
+                f"nvidia-smi exited with {done.returncode} and printed {done.stdout!r}, so the GPU "
+                "could not be logged"
+            )
+
+    def start_gpu_log(self, path: Path) -> None:
+        """As often as Prometheus reads the pods, so a sample lines up with a queue reading. -f has
+        nvidia-smi write the file itself, a whole line per sample, so stopping it loses none."""
+        real = next(name for name in self.experiment.profiles() if name != SIM_PROFILE)
+        interval = self.profiles[real]["monitoring"]["scrape_interval_seconds"]
+        self.gpu = subprocess.Popen(
+            [
+                "nvidia-smi",
+                f"--query-gpu={GPU_FIELDS}",
+                "--format=csv",
+                "-l",
+                str(interval),
+                "-f",
+                str(path),
+            ]
+        )
+
+    def stop_gpu_log(self) -> int | None:
+        if self.gpu is None:
+            raise ExperimentError("the GPU log was not started")
+        ended_with = self.gpu.poll()
+        if ended_with is None:
+            self.gpu.terminate()
+            self.gpu.wait()
+        self.gpu = None
+        return ended_with
+
+    def picker_log(self) -> str:
+        """Since the picker's start, which the variant's switch was."""
+        return kubectl("logs", f"deployment/{EPP_DEPLOYMENT}")
+
+    def vllm_logs(self) -> dict[str, str]:
+        """Since each pod's start, which the variant's restart was. --timestamps, so the access
+        lines, which carry no time of their own, line up with the engine's stats lines."""
+        names = kubectl(
+            "get", "pods", "-l", VLLM_SELECTOR, "-o", "jsonpath={.items[*].metadata.name}"
+        ).split()
+        return {name: kubectl("logs", "--timestamps", name) for name in names}
+
+    def _prometheus(self, query: str, since: float, until: float, step: int) -> list[Any]:
+        arguments = urllib.parse.urlencode(
+            {"query": query, "start": f"{since:.3f}", "end": f"{until:.3f}", "step": step}
+        )
+        answer = json.loads(kubectl("get", "--raw", f"{PROMETHEUS_RANGE_API}?{arguments}"))
+        if answer["status"] != "success":
+            raise ExperimentError(f"Prometheus answered {answer.get('error')} to {query}")
+        result: list[Any] = answer["data"]["result"]
+        return result
+
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
+        """At the profile's scrape interval, so each sample is a reading. No pod at all means
+        Prometheus did not read them, which must not pass as no stall."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        busy = self._prometheus(BUSY_QUERY.format(window=seconds), since, until, step)
+        if not busy:
+            raise ExperimentError(
+                "Prometheus has no vLLM pod for the replay, so a stalled pod could not be ruled out"
+            )
+        tokens = self._prometheus(TOKENS_QUERY.format(window=seconds), since, until, step)
+        return pod_stalls_from(busy, tokens, seconds, step)
+
+    def floor_autoscaler(self, kind: str) -> Mapping[str, Any]:
+        """The kind is kept first, so a run that fails from here on stops the right objects. Until
+        start_autoscaler there are none, and stop_autoscaler passes: helm's --ignore-not-found, and
+        kubectl wait --for=delete returns at once on what is gone."""
+        self.autoscaler = kind
+        section: Mapping[str, Any] = self.profile["autoscaling"]
+        self.scale(section["min_replicas"])
+        return section
+
+    def start_autoscaler(self) -> None:
+        """At the floor, so the HPA starts from its pods. Ready is KEDA's condition that it built
+        the scaler and made the HPA; ScalingActive is the plain HPA's that it read the pods' CPU."""
+        kind = self.autoscaler
+        if kind is None:
+            raise ExperimentError("no autoscaler to start: floor_autoscaler names its kind first")
+        if kind == CPU:
+            self._wait_for_quiet_cpu()
+        subprocess.run(
+            ["helm", "upgrade", "--install", AUTOSCALING_RELEASE, str(CHART), "--values", "-"],
+            input=yaml.safe_dump(helm_values(self.profile["autoscaling"], kind)),
+            text=True,
+            check=True,
+        )
+        timeout = f"--timeout={AUTOSCALER_TIMEOUT}"
+        if kind == CPU:
+            kubectl("wait", PLAIN_HPA, "--for=condition=ScalingActive", timeout)
+        else:
+            kubectl("wait", SCALED_OBJECT, "--for=condition=Ready", timeout)
+
+    def _wait_for_quiet_cpu(self) -> None:
+        """Until the plain HPA's first reading would be the pods after the warm-up, not the
+        warm-up: installed at once after it on 2026-11-17, the HPA scaled on it (P3.10's review).
+        KEDA's signals need no wait: the replay's tracker and the queue are empty until it
+        starts."""
+        if self.warmed_at is None:
+            raise ExperimentError("no warm-up yet, so none for the CPU HPA to wait out")
+        section = self.profile["autoscaling"]
+        request = cpu_cores(self.profile["pod"]["cpu_request"])
+        began = time.monotonic()
+        while not cpu_quiet(
+            json.loads(kubectl("get", "--raw", POD_METRICS)),
+            request,
+            section[CPU_TARGET_KEY],
+            self.warmed_at,
+        ):
+            if time.monotonic() - began >= QUIET_CPU_TIMEOUT_SECONDS:
+                raise ExperimentError(
+                    f"the vLLM pods' CPU was not quiet {QUIET_CPU_TIMEOUT_SECONDS} s after the "
+                    "warm-up, so the CPU HPA would scale on it"
+                )
+            time.sleep(QUIET_CPU_POLL_SECONDS)
+        waited = time.monotonic() - began
+        print(f"experiment: the pods' CPU was quiet {waited:.0f} s into the wait", flush=True)
+
+    def stop_autoscaler(self) -> None:
+        """KEDA's finalizer deletes the HPA with the object; both are waited for, as helm 4's
+        uninstall --wait once returned before a deletion had finished (deploy above)."""
+        subprocess.run(
+            [
+                "helm",
+                "uninstall",
+                AUTOSCALING_RELEASE,
+                "--ignore-not-found",
+                "--wait",
+                "--timeout",
+                UNINSTALL_TIMEOUT,
+            ],
+            check=True,
+        )
+        timeout = f"--timeout={UNINSTALL_TIMEOUT}"
+        if self.autoscaler == CPU:
+            kubectl("wait", PLAIN_HPA, "--for=delete", timeout)
+        else:
+            kubectl("wait", SCALED_OBJECT, "--for=delete", timeout)
+            kubectl("wait", KEDA_HPA, "--for=delete", timeout)
+        self.autoscaler = None
+
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
+        """At the profile's scrape interval, so each sample is a reading. Rounded as _prometheus
+        sends them, so the first sample is not taken for one before the replay."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        start, end = round(since, 3), round(until, 3)
+        answers = {
+            name: self._prometheus(query, start, end, step)
+            for name, query in SERIES_QUERIES.items()
+        }
+        return rows_from(answers, start, end)
+
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]:
+        """As autoscale_series, for the plain HPA's reading."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        start, end = round(since, 3), round(until, 3)
+        return cpu_rows_from(self._prometheus(CPU_QUERY, start, end, step), start, end)
 
 
 def _seconds_text(milliseconds: int | None) -> str:
@@ -598,6 +1406,28 @@ def warmed_ttft_ms(warmup_ttft: Mapping[str, Sequence[int]]) -> float | None:
 
 def _number_text(value: float | None) -> str:
     return "-" if value is None else f"{value:.1f}"
+
+
+def short_of_cache(rows: Sequence[CallRow]) -> tuple[int, int]:
+    """Of a variant's later steps that stayed on their pod and have a cached count, how many found
+    less than their run's previous prompt less CACHE_SHORTFALL_TOKENS cached, and how many there
+    are. The calls of a fanned-out step send one prompt, so the step's first row has it."""
+    previous: dict[tuple[str, int], int] = {}
+    for row in rows:
+        previous.setdefault((row.run, row.step), row.prompt_tokens)
+    checked = [
+        row
+        for row in rows
+        if row.moved is False
+        and row.cached_tokens is not None
+        and (row.run, row.step - 1) in previous
+    ]
+    short = sum(
+        row.cached_tokens is not None
+        and row.cached_tokens < previous[(row.run, row.step - 1)] - CACHE_SHORTFALL_TOKENS
+        for row in checked
+    )
+    return short, len(checked)
 
 
 def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
@@ -628,6 +1458,10 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
             f"  speed, mostly the host's: generation {generation} ms per token, warm-up calls "
             f"{warmed} ms to first token"
         )
+        short, checked = short_of_cache(calls)
+        report.append(
+            f"  stayed later steps short of their previous prompt in cache: {short} of {checked}"
+        )
         for limit, over in (("under", False), ("over", True)):
             for label, moved in (("all", None), ("stayed", False), ("moved", True)):
                 stats = ttft_stats(calls, over, moved)
@@ -635,6 +1469,16 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
                     f"  {limit} the KV limit, {label}: {stats.calls} calls, TTFT p50 "
                     f"{_seconds_text(stats.p50_ms)}, p95 {_seconds_text(stats.p95_ms)}"
                 )
+        autoscale = extra["autoscale"]
+        if autoscale is not None:
+            report.append(
+                crossing_text(
+                    autoscale["autoscaler"],
+                    autoscale["section"],
+                    Crossings(**autoscale["crossings"]),
+                )
+            )
+            report.append(summary_text(AutoscaleSummary(**extra["autoscale_summary"])))
     return report
 
 
@@ -646,6 +1490,13 @@ def finish(
     for line in report_lines(rows, meta):
         print(line)
     print(f"experiment: wrote {out.csv}, {out.meta} and {out.graph}")
+    if meta["gpu_log"] is not None:
+        print(f"experiment: GPU log {out.gpu}")
+    if meta["gpu_log_ended_early_with"] is not None:
+        print(
+            f"experiment: nvidia-smi ended early with exit {meta['gpu_log_ended_early_with']}, so "
+            "the GPU log stops before the run did"
+        )
     if experiment.validation is not None:
         entries = table(rows, experiment.validation)
         write_table(out.validation, entries)
@@ -668,6 +1519,9 @@ def main() -> None:
     first = next(iter(profiles.values()))
     patterns = load_replay_config(first["replay"]).patterns
     experiment = load_experiment(args.experiment, patterns)
+    check_routing(experiment, profiles)
+    check_autoscaling(experiment, profiles)
+    check_stall_window(experiment, profiles)
     out = outputs(experiment, REPO_ROOT)
     refuse_leftovers(experiment, out)
 

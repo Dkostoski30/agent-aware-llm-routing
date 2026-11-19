@@ -1,0 +1,24 @@
+# P3.4: a pinned pod disappears (docs/task-cards/39-P3.4-pod-removed.md). Run with
+# make pod-removed EXPERIMENT=experiments/pod-removed.yaml after make up PROFILE=sim, about 17 min. On sim, where the
+# replacement pod costs no model load and the check is behaviour, not latency.
+profile: sim
+# The plugin with affinity alone, as experiments/affinity.yaml's variant, so each run has a pin to lose.
+routing:
+  plugin: true
+  affinity: true
+# The converted trace of P2.4, which config/sim.yaml was calibrated on (P2.8). Its steps follow each other within a few
+# ms, so a pinned run is nearly always mid-call when its pod goes, and its next step is the remap.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# 20 runs at 0.02 runs/s; its load is measured (P2.4: 1.68 calls in flight on average, at most 5), so the one pod left
+# for the replacement's 140 s start (simulator.startup_duration) should not push calls past the 120 s deadline.
+pattern: steady-long
+# P2.5's seed, chosen in P2.4 by a stated rule for its mix of task types.
+seed: 6
+# In P3.1's sim replay at this seed (self-built-check-e141b17ac44c-self-built.jsonl) 3 runs were active 120 s in, the
+# most of any 30 s mark. The pod deleted is the one holding the most live pins in the picker's log then: the first run,
+# pod-removed-07fcbf93ea76, deleted the first pod by name, which held none, and tested nothing (2026-11-11). Counted
+# from the replay's start, its prompt check (about 1 s) included.
+delete_after_seconds: 120
+# A first guess: the picker drops the pod once its deletion is asked for, through its pod informer, and the VM's wall
+# clock, which ts_start and the delete are both on, can step 2.5 s (P2.3).
+settle_seconds: 5

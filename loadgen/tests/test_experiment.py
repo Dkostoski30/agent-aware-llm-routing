@@ -10,6 +10,7 @@ import csv
 import hashlib
 import json
 import subprocess
+import urllib.parse
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,22 +18,40 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from load_generator.autoscale import (
+    AutoscaleRow,
+    AutoscaleSummary,
+    CpuRow,
+    Crossings,
+    crossing_text,
+    helm_values,
+    summary_text,
+)
 from load_generator.experiment import (
+    GPU_FIELDS,
     Experiment,
     ExperimentError,
+    LiveCluster,
+    PodStall,
     Warmup,
+    check_autoscaling,
     check_journal_readable,
+    check_routing,
     check_same_replay,
+    check_stall_window,
     count_clock_jumps,
     finish,
     load_experiment,
     main,
     outputs,
+    plugin_on,
+    pod_stalls_from,
     pods_to_warm,
     refuse_leftovers,
     report_lines,
     run_experiment,
     served_config_file,
+    short_of_cache,
     warm_pod,
     warmed_ttft_ms,
     write_results,
@@ -46,8 +65,27 @@ from load_generator.plan import (
     warmup_run,
 )
 from load_generator.record import experiment_hash
+from load_generator.results import CallRow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# What the fake cluster's autoscaler applies, and the series it then reads from Prometheus:
+# remaining work passes 10 per pod at 5 s, spec replicas rise at 10 s, the queue passes 1 per pod
+# at 15 s.
+AUTOSCALING = {
+    "min_replicas": 1,
+    "max_replicas": 8,
+    "remaining_work_target": 10,
+    "queue_target": 1,
+    "scale_down_stabilization_seconds": 300,
+}
+AUTOSCALE_ROWS = [
+    AutoscaleRow(0.0, 1, 1, 0, 5),
+    AutoscaleRow(5.0, 1, 1, 0, 11),
+    AutoscaleRow(10.0, 2, 1, 2, 20),
+    AutoscaleRow(15.0, 2, 1, 3, 20),
+]
+# The plain HPA's reading of the pods' CPU over the same replay (P3.10).
+CPU_ROWS = [CpuRow(0.0, 12), CpuRow(5.0, 97.5)]
 ROUND_ROBIN_VALUES = REPO_ROOT / "infra" / "helm" / "router-round-robin-values.yaml"
 BASELINE = REPO_ROOT / "experiments" / "baseline.yaml"
 BASELINE_CHECK = REPO_ROOT / "experiments" / "baseline-check.yaml"
@@ -134,16 +172,38 @@ class FakeCluster:
         fail_replay_of: str | None = None,
         fail_restart_number: int | None = None,
         fail_switch_number: int | None = None,
+        fail_gpu_check: bool = False,
+        gpu_exit: int | None = None,
+        stalls: Mapping[str, Sequence[PodStall]] | None = None,
+        fail_autoscaler_start: bool = False,
     ) -> None:
         self.asked: list[str] = []
+        self.fail_autoscaler_start = fail_autoscaler_start
+        # Each variant's pod stalls, found after its replay (P3.7).
+        self.stalls = stalls or {}
+        self.replayed_variant: str | None = None
+        # The GPU log's steps apart from the others, each with how many cluster steps came before
+        # it, so the order holds without every sequence above naming them (P3.7).
+        self.gpu: list[tuple[str, int]] = []
+        self.fail_gpu_check = fail_gpu_check
+        self.gpu_exit = gpu_exit
+        # Each vLLM-log take, with the variant just replayed and how many cluster steps came
+        # before it, apart from asked for the same reason as the GPU log's (P3.7c).
+        self.vllm: list[tuple[str | None, int]] = []
         self.replays = replays
         self.fail_replay_of = fail_replay_of
         self.fail_restart_number = fail_restart_number
         self.fail_switch_number = fail_switch_number
         self.values: Path | None = None
-        self.running_config = running_config or (
-            lambda values: "default-plugins.yaml" if values is None else "round-robin.yaml"
-        )
+        self.routing: Mapping[str, bool] | None = None
+        # The routing each replay was handed, in order.
+        self.replayed_routing: list[Mapping[str, bool] | None] = []
+        self.running_config = running_config or self._config_of
+
+    def _config_of(self, values: Path | None) -> str:
+        if self.routing is not None:
+            return "thesis-plugins.yaml"
+        return "default-plugins.yaml" if values is None else "round-robin.yaml"
 
     def check_ready(self) -> None:
         self.asked.append("check")
@@ -159,13 +219,17 @@ class FakeCluster:
         if self.asked.count("restart") == self.fail_restart_number:
             raise RuntimeError("the restart broke")
 
-    def set_routing(self, values: Path | None) -> None:
-        name = f"routing {values.name if values else 'default'}"
+    def set_routing(self, values: Path | None, routing: Mapping[str, bool] | None) -> None:
+        if routing is not None:
+            name = "routing " + ",".join(f"{rule}={on}" for rule, on in sorted(routing.items()))
+        else:
+            name = f"routing {values.name if values else 'default'}"
         self.asked.append(name)
         switches = sum(step.startswith("routing") for step in self.asked)
         if switches == self.fail_switch_number:
             raise RuntimeError("the switch broke")
         self.values = values
+        self.routing = routing
 
     def epp_config_file(self) -> str:
         self.asked.append("config")
@@ -175,11 +239,13 @@ class FakeCluster:
         self.asked.append("warm")
         return {"pod-a": [9000, 100], "pod-b": [8000, 90]}
 
-    def replay(self, out: Path) -> list[dict[str, Any]]:
+    def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
         self.asked.append(f"replay {out.name}")
+        self.replayed_routing.append(routing)
         if self.fail_replay_of and self.fail_replay_of in out.name:
             raise RuntimeError("the replay broke")
         variant = out.stem.rsplit("-", 1)[-1]
+        self.replayed_variant = variant
         lines = (self.replays or {}).get(variant, replay_lines())
         out.write_text("".join(json.dumps(line) + "\n" for line in lines))
         return [dict(line) for line in lines]
@@ -187,6 +253,50 @@ class FakeCluster:
     def clock_jumps(self, since: float, until: float) -> int:
         self.asked.append(f"jumps {since:.0f} {until:.0f}")
         return 3
+
+    def check_gpu(self) -> None:
+        self.gpu.append(("gpu check", len(self.asked)))
+        if self.fail_gpu_check:
+            raise ExperimentError("nvidia-smi exited with 9")
+
+    def start_gpu_log(self, path: Path) -> None:
+        self.gpu.append((f"gpu log {path.name}", len(self.asked)))
+
+    def stop_gpu_log(self) -> int | None:
+        self.gpu.append(("gpu stop", len(self.asked)))
+        return self.gpu_exit
+
+    def picker_log(self) -> str:
+        self.asked.append("picker log")
+        return "the picker's log\n"
+
+    def vllm_logs(self) -> dict[str, str]:
+        self.vllm.append((self.replayed_variant, len(self.asked)))
+        return {"vllm-x-pod-a": "pod a's log\n", "vllm-x-pod-b": "pod b's log\n"}
+
+    def pod_stalls(self, since: float, until: float, seconds: int) -> list[PodStall]:
+        self.asked.append(f"stalls {since:.0f} {until:.0f} {seconds}")
+        return list(self.stalls.get(self.replayed_variant or "", []))
+
+    def floor_autoscaler(self, kind: str) -> dict[str, Any]:
+        self.asked.append(f"floor {kind}")
+        return dict(AUTOSCALING)
+
+    def start_autoscaler(self) -> None:
+        self.asked.append("autoscaler on")
+        if self.fail_autoscaler_start:
+            raise RuntimeError("the autoscaler start broke")
+
+    def stop_autoscaler(self) -> None:
+        self.asked.append("autoscaler off")
+
+    def autoscale_series(self, since: float, until: float) -> list[AutoscaleRow]:
+        self.asked.append(f"autoscale series {since:.0f} {until:.0f}")
+        return list(AUTOSCALE_ROWS)
+
+    def cpu_series(self, since: float, until: float) -> list[CpuRow]:
+        self.asked.append(f"cpu series {since:.0f} {until:.0f}")
+        return list(CPU_ROWS)
 
 
 def ticking_clock() -> Callable[[], float]:
@@ -253,6 +363,293 @@ def test_a_values_file_that_is_not_there_is_refused(tmp_path: Path) -> None:
     variant = {"name": "gone", "values": "gone.yaml", "epp_config": "x.yaml"}
     with pytest.raises(ExperimentError, match=r"gone\.yaml"):
         loaded(tmp_path, variants=[variant])
+
+
+ROUTER_VARIANT = {
+    "name": "run-router",
+    "values": None,
+    "routing": {"plugin": True, "affinity": True},
+    "epp_config": "thesis-plugins.yaml",
+}
+DEFAULT_VARIANT = {"name": "default", "values": None, "epp_config": "default-plugins.yaml"}
+
+
+def test_a_variant_may_turn_routing_rules_on(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    default, router = experiment.variants
+    assert default.routing is None
+    assert router.routing == {"plugin": True, "affinity": True}
+    assert router.values is None
+    assert router.epp_config == "thesis-plugins.yaml"
+
+
+def test_a_variant_with_a_values_file_and_routing_is_refused(tmp_path: Path) -> None:
+    """A routing variant needs the picker built from gateway/ on thesis-plugins.yaml, and a values
+    file swaps the image or the config file, so the two never mean one thing together."""
+    variant = {**ROUTER_VARIANT, "values": "round-robin-values.yaml"}
+    with pytest.raises(ExperimentError, match="run-router"):
+        loaded(tmp_path, variants=[variant])
+
+
+@pytest.mark.parametrize("routing", [{"affinity": "yes"}, {"affinity": None}, {}, ["affinity"]])
+def test_routing_that_is_not_rules_set_to_true_or_false_is_refused(
+    tmp_path: Path, routing: Any
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": routing}
+    with pytest.raises(ExperimentError, match="run-router"):
+        loaded(tmp_path, variants=[variant])
+
+
+def test_routing_rules_the_profile_has_are_accepted(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+def test_a_routing_rule_the_profile_lacks_is_refused(tmp_path: Path) -> None:
+    """A typo would otherwise fail only when the variant's switch runs, maybe hours in."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "afinity": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="afinity"):
+        check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [({}, {"affinity": True}), ({"affinity": True}, {"priority": False})],
+)
+def test_a_rule_on_while_the_plugin_is_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """It would do nothing, and the variant would read as the rule's result. infra/routing-values.sh
+    refuses it too, but only at the variant's switch."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="plugin is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_main_refuses_a_routing_rule_the_profile_lacks_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "afinity": True}}
+    path = experiment_file(tmp_path, variants=[variant])
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="afinity"):
+        main()
+
+
+def test_a_routing_variant_switches_the_picker_and_the_default_comes_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    _rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), cluster, ticking_clock()
+    )
+    switches = [step for step in cluster.asked if step.startswith("routing")]
+    assert switches == [
+        "routing default",
+        "routing affinity=True,plugin=True",
+        "routing default",
+    ]
+    assert meta["variants"]["run-router"]["routing"] == {"plugin": True, "affinity": True}
+    assert meta["variants"]["default"]["routing"] is None
+
+
+def test_a_variant_may_not_set_the_profiles_ttl(tmp_path: Path) -> None:
+    """Variants differ in rules only; infra/routing-values.sh refuses it too, but at the switch."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "run_ttl_seconds": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="run_ttl_seconds"):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_ttl_is_not_a_rule_that_is_on(tmp_path: Path) -> None:
+    """A TTL of 300 is truthy, and must not read as a rule on while the plugin is off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["run_ttl_seconds"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize("key", ["overload_queue_threshold", "overload_sustained_seconds"])
+def test_a_variant_may_not_set_the_profiles_overload_limits(tmp_path: Path, key: str) -> None:
+    """The overload limits are the profile's, as the TTL is (P3.5); infra/routing-values.sh refuses
+    them too, but at the switch. True, as for the TTL: a number is refused on loading already."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, key: True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match=key):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_overload_limits_are_not_rules_that_are_on(tmp_path: Path) -> None:
+    """A threshold of 1 and 10 s are truthy, and must not read as rules on while the plugin is
+    off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["overload_queue_threshold"] > 0
+    assert real["routing"]["overload_sustained_seconds"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "overload_guard": True}),
+        ({"plugin": True, "overload_guard": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "overload_guard": True}, {"affinity": False}),
+    ],
+)
+def test_the_overload_guard_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The guard moves pinned runs only: with affinity off it would do nothing, and the variant
+    would read as its result. infra/routing-values.sh refuses it too, but at the switch."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_a_variant_may_not_set_the_profiles_parallel_threshold(tmp_path: Path) -> None:
+    """The parallel threshold is the profile's, as the overload limits are (P3.6)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "parallel_queue_threshold": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="parallel_queue_threshold"):
+        check_routing(experiment, {"real": real})
+
+
+def test_the_profiles_parallel_threshold_is_not_a_rule_that_is_on(tmp_path: Path) -> None:
+    """A threshold of 2 is truthy, and must not read as a rule on while the plugin is off."""
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["routing"]["parallel_queue_threshold"] > 0
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "parallel_spill": True}),
+        ({"plugin": True, "parallel_spill": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "parallel_spill": True}, {"affinity": False}),
+    ],
+)
+def test_parallel_spill_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The parallel rule keeps a group on its run's pinned pod (P3.6): with affinity off it would do
+    nothing, and the variant would read as its result. infra/routing-values.sh refuses it too."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="parallel_spill on, but affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_parallel_spill_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "parallel_spill": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+def test_the_overload_guard_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "overload_guard": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize(
+    ("profile_plugin", "variant_routing", "on"),
+    [
+        (False, None, False),
+        (False, {"plugin": True, "affinity": True}, True),
+        (True, None, True),
+        (True, {"plugin": False}, False),
+        (False, {"affinity": False}, False),
+    ],
+)
+def test_the_plugin_runs_by_the_variants_rules_over_its_profiles(
+    profile_plugin: bool, variant_routing: dict[str, bool] | None, on: bool
+) -> None:
+    profile_routing = {"plugin": profile_plugin, "affinity": False, "run_ttl_seconds": 300}
+    assert plugin_on(profile_routing, variant_routing) is on
+
+
+def test_each_replay_is_handed_its_variants_routing(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.replayed_routing == [None, {"plugin": True, "affinity": True}]
+
+
+@pytest.mark.parametrize(
+    ("routing", "end_runs"),
+    [(None, False), ({"plugin": True, "affinity": True}, True)],
+    ids=["the profile's picker, plugin off", "a variant with the plugin on"],
+)
+def test_the_live_cluster_ends_runs_only_when_the_running_picker_has_the_plugin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    routing: dict[str, bool] | None,
+    end_runs: bool,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    handed: list[bool] = []
+
+    def replay_to_file(*args: Any) -> list[dict[str, Any]]:
+        handed.append(args[-1])
+        return []
+
+    monkeypatch.setattr("load_generator.experiment.replay_to_file", replay_to_file)
+    LiveCluster(experiment, {"real": real}).replay(tmp_path / "out.jsonl", routing)
+    assert handed == [end_runs]
+
+
+def test_the_live_cluster_hands_set_routing_a_file_of_the_variants_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    handed: list[tuple[list[str], Any]] = []
+
+    def run(args: list[str], check: bool) -> None:
+        assert check
+        handed.append((args, yaml.safe_load(Path(args[-1]).read_text())))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    LiveCluster(experiment, {}).set_routing(None, {"plugin": True, "affinity": True})
+    ((args, content),) = handed
+    assert args[:3] == ["bash", str(REPO_ROOT / "infra" / "set-routing.sh"), "real"]
+    assert content == {"routing": {"plugin": True, "affinity": True}}
 
 
 def test_a_trace_that_is_not_there_is_refused(tmp_path: Path) -> None:
@@ -504,9 +901,9 @@ def test_the_stamp_is_of_the_profile_at_the_start_not_after_the_long_run(
     profile.write_text("as loaded\n")
 
     class EditedDuringTheRun(FakeCluster):
-        def replay(self, out: Path) -> list[dict[str, Any]]:
+        def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]:
             profile.write_text("edited later\n")
-            return super().replay(out)
+            return super().replay(out, routing)
 
     experiment = loaded(tmp_path)
     out = outputs(experiment, tmp_path)
@@ -751,6 +1148,72 @@ def test_the_report_gives_each_variants_numbers_and_the_kv_split(tmp_path: Path)
     assert "largest gap deviation 1 ms" in report
     assert "under the KV limit, all: 1 calls, TTFT p50 0.01 s" in report
     assert "over the KV limit, moved: 0 calls" in report
+
+
+def call_row(run: str, step: int, prompt: int, cached: int | None, moved: bool | None) -> CallRow:
+    return CallRow(
+        variant="affinity",
+        run=run,
+        task_type="csv",
+        step=step,
+        pod="pod-a",
+        ttft_ms=10,
+        duration_ms=100,
+        gap_before_ms=1,
+        prompt_tokens=prompt,
+        completion_tokens=5,
+        cached_tokens=cached,
+        moved=moved,
+        tokens_on_pod=prompt + 5,
+        over_kv_limit=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("later", "short", "checked"),
+    [
+        # 24 less than the previous prompt of 100: the replay's 9 template tokens and a block's 15.
+        (call_row("r", 2, 150, 76, False), 0, 1),
+        (call_row("r", 2, 150, 75, False), 1, 1),
+        (call_row("r", 2, 150, 100, False), 0, 1),
+        # A moved step finds nothing of its run on its new pod: that is the cost of moving.
+        (call_row("r", 2, 150, 0, True), 0, 0),
+        # A reply with no cached count says nothing.
+        (call_row("r", 2, 150, None, False), 0, 0),
+    ],
+    ids=["exactly 24 short", "25 short", "all cached", "moved", "no cached count"],
+)
+def test_a_stayed_step_is_short_of_cache_below_its_previous_prompt_less_24(
+    later: CallRow, short: int, checked: int
+) -> None:
+    rows = [call_row("r", 1, 100, 0, None), later]
+    assert short_of_cache(rows) == (short, checked)
+
+
+def test_short_of_cache_reads_each_runs_own_previous_step() -> None:
+    rows = [
+        call_row("r1", 1, 100, 0, None),
+        call_row("r2", 1, 400, 0, None),
+        call_row("r1", 2, 150, 80, False),
+        call_row("r2", 2, 450, 80, False),
+        call_row("r1", 3, 200, 130, False),
+    ]
+    assert short_of_cache(rows) == (1, 3)
+
+
+def test_the_report_counts_the_stayed_steps_short_of_cache(tmp_path: Path) -> None:
+    lines = [
+        {**line, "run_id": "a-2", "step": step, "prompt_tokens": prompt, "cached_tokens": cached}
+        for step, prompt, cached in ((1, 50, 0), (2, 100, 10))
+        for line in replay_lines()[1:]
+    ]
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(
+        experiment, out, FakeCluster(replays={"default": lines}), ticking_clock()
+    )
+    report = "\n".join(report_lines(rows, meta))
+    assert "stayed later steps short of their previous prompt in cache: 1 of 1" in report
 
 
 def test_warmed_time_leaves_out_each_pods_first_call() -> None:
@@ -1108,3 +1571,1473 @@ def test_validate_sim_replays_the_baseline_load_on_both_profiles_at_1_and_2_pods
         ("real-2pods", "sim-2pods"),
     ]
     load_trace(experiment.trace)
+
+
+# P3.7: the GPU log, the picker's log of a plugin variant, the not-worse tolerance, the burst files.
+
+ROUTING_BURST = REPO_ROOT / "experiments" / "routing-burst.yaml"
+ROUTING_BURST_REVERSED = REPO_ROOT / "experiments" / "routing-burst-reversed.yaml"
+WHOLE_PLUGIN = {"plugin": True, "affinity": True, "overload_guard": True, "parallel_spill": True}
+
+
+def test_a_real_profile_checks_the_gpu_first_and_logs_it_around_the_variants(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    # After the readiness check and before the first restart; stopped after the last replay.
+    assert cluster.gpu == [
+        ("gpu check", 1),
+        (f"gpu log {stem}-gpu.csv", 1),
+        ("gpu stop", len(cluster.asked)),
+    ]
+    assert cluster.asked[:2] == ["check", "restart"]
+    assert cluster.asked[-1].startswith("jumps")
+
+
+def test_a_sim_only_experiment_has_no_gpu_log(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.gpu == []
+    assert meta["gpu_log"] is None
+
+
+def test_a_gpu_that_cannot_be_read_stops_the_experiment_before_any_restart(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_gpu_check=True)
+    with pytest.raises(ExperimentError, match="nvidia-smi"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked == ["check"]
+    assert cluster.gpu == [("gpu check", 1)]
+
+
+def test_a_replay_that_breaks_still_stops_the_gpu_log_before_the_default_comes_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_replay_of="round-robin")
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    stops = [steps for event, steps in cluster.gpu if event == "gpu stop"]
+    assert stops == [len(cluster.asked) - 1]
+    assert cluster.asked[-1] == "routing default"
+
+
+def test_the_meta_names_the_gpu_log_and_whether_nvidia_smi_ended_early(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    _, running = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    _, ended = run_experiment(experiment, out, FakeCluster(gpu_exit=6), ticking_clock())
+    assert running["gpu_log"] == out.gpu.name
+    assert running["gpu_log_ended_early_with"] is None
+    assert ended["gpu_log_ended_early_with"] == 6
+
+
+def test_finish_says_when_the_gpu_log_has_a_gap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(gpu_exit=6), ticking_clock())
+    finish(experiment, out, rows, meta)
+    printed = capsys.readouterr().out
+    assert f"GPU log {out.gpu}" in printed
+    assert "nvidia-smi ended early with exit 6, so the GPU log stops before the run did" in printed
+
+
+def test_the_gpu_log_is_an_output_and_a_leftover(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    assert out.gpu == out.csv.with_name(f"exp-{experiment.hash}-gpu.csv")
+    out.gpu.parent.mkdir(parents=True)
+    out.gpu.write_text("")
+    with pytest.raises(ExperimentError, match="exist"):
+        refuse_leftovers(experiment, out)
+
+
+def test_a_plugin_variants_picker_log_is_kept_before_the_next_switch(tmp_path: Path) -> None:
+    """Switching back to the default restarts the picker, and its log goes with it."""
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    picked = cluster.asked.index("picker log")
+    assert cluster.asked[picked - 1].startswith("jumps")
+    assert cluster.asked[picked + 1] == "restart"
+    assert cluster.asked.count("picker log") == 1
+    assert out.picker("run-router").read_text() == "the picker's log\n"
+    assert meta["variants"]["run-router"]["picker_log"] == out.picker("run-router").name
+    assert meta["variants"]["default"]["picker_log"] is None
+
+
+def test_a_picker_log_is_kept_when_the_plugin_variant_is_last(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[cluster.asked.index("picker log") + 1 :] == ["routing default"]
+    assert out.picker("run-router").exists()
+
+
+def test_the_tolerance_and_the_reference_variant_go_into_the_meta(tmp_path: Path) -> None:
+    experiment = loaded(
+        tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], not_worse_tolerance=0.05
+    )
+    assert experiment.not_worse_tolerance == 0.05
+    assert experiment.reference_variant == "default"
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["not_worse_tolerance"] == 0.05
+    assert meta["reference_variant"] == "default"
+
+
+def test_without_a_tolerance_the_meta_has_none(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["not_worse_tolerance"] is None
+    assert meta["reference_variant"] is None
+
+
+@pytest.mark.parametrize("tolerance", [-0.01, True, "0.05"])
+def test_a_tolerance_that_is_not_a_number_at_or_over_zero_is_refused(
+    tmp_path: Path, tolerance: object
+) -> None:
+    with pytest.raises(ExperimentError, match="not_worse_tolerance"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], not_worse_tolerance=tolerance)
+
+
+def test_a_tolerance_with_no_default_variant_to_hold_to_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="one variant on the default picker"):
+        loaded(tmp_path, variants=[ROUTER_VARIANT, other], not_worse_tolerance=0.05)
+
+
+def test_a_tolerance_over_other_than_two_variants_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="two variants"):
+        loaded(
+            tmp_path,
+            variants=[DEFAULT_VARIANT, ROUTER_VARIANT, other],
+            not_worse_tolerance=0.05,
+        )
+
+
+def test_the_live_cluster_checks_the_gpu_with_the_fields_it_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="2026/11/12 12:00:00.000, 43\n")
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    LiveCluster(experiment, {}).check_gpu()
+    ((args,),) = [handed]
+    assert args[0] == "nvidia-smi"
+    assert args[1] == f"--query-gpu={GPU_FIELDS}"
+
+
+@pytest.mark.parametrize(("code", "stdout"), [(2, ""), (0, "")], ids=["exits 2", "prints nothing"])
+def test_a_gpu_check_that_fails_or_prints_nothing_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, stdout: str
+) -> None:
+    experiment = loaded(tmp_path)
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, code, stdout=stdout)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    with pytest.raises(ExperimentError, match="nvidia-smi"):
+        LiveCluster(experiment, {}).check_gpu()
+
+
+class FakeProcess:
+    def __init__(self, args: list[str], exited: int | None) -> None:
+        self.args = args
+        self.exited = exited
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return self.exited
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self) -> int:
+        return 0
+
+
+def test_the_live_gpu_log_samples_at_the_profiles_scrape_interval_into_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    started: list[FakeProcess] = []
+
+    def popen(args: list[str]) -> FakeProcess:
+        started.append(FakeProcess(args, None))
+        return started[-1]
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.Popen", popen)
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.start_gpu_log(tmp_path / "gpu.csv")
+    assert cluster.stop_gpu_log() is None
+    (process,) = started
+    interval = str(real["monitoring"]["scrape_interval_seconds"])
+    assert process.args == [
+        "nvidia-smi",
+        f"--query-gpu={GPU_FIELDS}",
+        "--format=csv",
+        "-l",
+        interval,
+        "-f",
+        str(tmp_path / "gpu.csv"),
+    ]
+    assert process.terminated
+
+
+def test_a_live_gpu_log_that_ended_early_gives_its_exit_and_is_not_terminated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    started: list[FakeProcess] = []
+
+    def popen(args: list[str]) -> FakeProcess:
+        started.append(FakeProcess(args, 6))
+        return started[-1]
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.Popen", popen)
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.start_gpu_log(tmp_path / "gpu.csv")
+    assert cluster.stop_gpu_log() == 6
+    assert not started[0].terminated
+
+
+def test_the_live_picker_log_is_the_pickers_whole_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return "lines\n"
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    assert LiveCluster(experiment, {}).picker_log() == "lines\n"
+    assert asked == [("logs", "deployment/vllm-pool-epp")]
+
+
+@pytest.mark.parametrize("path", [ROUTING_BURST, ROUTING_BURST_REVERSED], ids=lambda p: p.stem)
+def test_the_routing_burst_files_load_and_pass_the_routing_checks(path: Path) -> None:
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    assert experiment.profile == "real"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == "burst-fan-out"
+    assert experiment.seed == 6
+    assert experiment.not_worse_tolerance == 0.05
+    assert experiment.reference_variant == "default"
+    plugin = next(variant for variant in experiment.variants if not variant.default)
+    assert plugin.routing == WHOLE_PLUGIN
+    assert plugin.epp_config == "thesis-plugins.yaml"
+
+
+def test_routing_burst_discards_the_runs_before_the_first_burst() -> None:
+    """They start on empty caches and empty queues, before the load the file is about."""
+    experiment = committed(ROUTING_BURST)
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+def test_routing_burst_reversed_differs_only_in_the_order() -> None:
+    """Otherwise a difference between the two could come from something other than the order."""
+    forward = yaml.safe_load(ROUTING_BURST.read_text())
+    backward = yaml.safe_load(ROUTING_BURST_REVERSED.read_text())
+    assert [variant["name"] for variant in forward["variants"]] == ["default", "plugin"]
+    assert backward["variants"] == list(reversed(forward["variants"]))
+    del forward["variants"], backward["variants"]
+    assert backward == forward
+    assert (
+        outputs(committed(ROUTING_BURST), REPO_ROOT).csv
+        != outputs(committed(ROUTING_BURST_REVERSED), REPO_ROOT).csv
+    )
+
+
+# P3.7, after the first run: a vLLM pod that made no tokens while it had calls, a host stall that
+# hit one variant and not the other, so the replay is refused rather than compared.
+
+STALL = PodStall(pod="pod-a", start=150.0, seconds=65)
+
+
+def test_with_pod_stall_seconds_each_replay_is_checked_after_its_logs(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT], pod_stall_seconds=30)
+    assert experiment.pod_stall_seconds == 30
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    checks = [step for step in cluster.asked if step.startswith("stalls")]
+    # The replay's own clock readings, and the file's seconds.
+    assert checks == ["stalls 101 102 30", "stalls 103 104 30"]
+    first = cluster.asked.index(checks[0])
+    assert cluster.asked[first - 2].startswith("jumps")
+    assert cluster.asked[first - 1] == "picker log"
+    assert cluster.asked[first + 1] == "restart"
+    assert meta["pod_stall_seconds"] == 30
+
+
+def test_without_pod_stall_seconds_no_replay_is_checked(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    assert experiment.pod_stall_seconds is None
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert not any(step.startswith("stalls") for step in cluster.asked)
+    assert meta["pod_stall_seconds"] is None
+
+
+def test_a_stall_stops_the_experiment_before_the_next_variant_and_says_where(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"default": [STALL]})
+    out = outputs(experiment, tmp_path)
+    handed: list[dict[str, Any]] = []
+    with pytest.raises(ExperimentError) as stopped:
+        run_experiment(
+            experiment, out, cluster, ticking_clock(), lambda _, meta: handed.append(meta)
+        )
+    # started is 101 on the ticking clock, so the stall began 49 s into the replay.
+    assert str(stopped.value) == (
+        "variant default: pod-a made no tokens with calls running or waiting for 65 s from 49 s "
+        "into the replay. Such stalls hit both pickers on 2026-11-12 (P3.7, experiments/log.md), "
+        "so this replay is not comparable; its replay file stays, move this file's results away "
+        "to run it again"
+    )
+    assert cluster.asked.count("restart") == 1
+    assert handed == []
+    assert out.replay("default").exists()
+    stops = [steps for event, steps in cluster.gpu if event == "gpu stop"]
+    assert stops == [len(cluster.asked)]
+
+
+def test_a_stall_in_a_plugin_variant_keeps_its_picker_log_and_puts_the_default_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[ROUTER_VARIANT, DEFAULT_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"router": [STALL, PodStall("pod-b", 160.0, 30)]})
+    out = outputs(experiment, tmp_path)
+    with pytest.raises(ExperimentError, match=r"pod-a .* 65 s from 49 s.*pod-b .* 30 s from 59 s"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.picker("run-router").exists()
+    assert cluster.asked[-1] == "routing default"
+    assert cluster.asked.count("restart") == 1
+
+
+@pytest.mark.parametrize("seconds", [0, -5, True, 2.5, "30"])
+def test_pod_stall_seconds_that_are_not_a_whole_number_over_zero_are_refused(
+    tmp_path: Path, seconds: object
+) -> None:
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        loaded(tmp_path, pod_stall_seconds=seconds)
+
+
+def test_a_stall_window_under_two_scrapes_is_refused_before_the_cluster_is_touched(
+    tmp_path: Path,
+) -> None:
+    """Prometheus needs two samples in the window to tell how many tokens came."""
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    interval = real["monitoring"]["scrape_interval_seconds"]
+    check_stall_window(loaded(tmp_path, pod_stall_seconds=2 * interval), {"real": real})
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        check_stall_window(loaded(tmp_path, pod_stall_seconds=2 * interval - 1), {"real": real})
+    check_stall_window(loaded(tmp_path), {"real": real})
+
+
+def series(pod: str, values: Mapping[float, float]) -> dict[str, Any]:
+    """One pod's series in a Prometheus range answer, whose values are text."""
+    return {"metric": {"pod": pod}, "values": [[t, str(v)] for t, v in values.items()]}
+
+
+def test_a_stall_is_a_run_of_windows_with_calls_and_no_tokens() -> None:
+    times = [100.0 + 5 * k for k in range(8)]
+    busy = [series("pod-a", dict.fromkeys(times, 2.0)), series("pod-b", dict.fromkeys(times, 0.0))]
+    tokens = [
+        # pod-a: no tokens in the windows ending at 110 to 120, and again at 135.
+        series("pod-a", {t: 0.0 if t in (110.0, 115.0, 120.0, 135.0) else 40.0 for t in times}),
+        # pod-b made none, but it had no calls: idle, not stalled.
+        series("pod-b", dict.fromkeys(times, 0.0)),
+    ]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == [
+        # Each window reaches 30 s back from its end.
+        PodStall("pod-a", start=80.0, seconds=40),
+        PodStall("pod-a", start=105.0, seconds=30),
+    ]
+
+
+def test_a_window_with_no_token_reading_is_not_a_stall() -> None:
+    busy = [series("pod-a", {100.0: 3.0, 105.0: 3.0})]
+    tokens = [series("pod-a", {100.0: 50.0})]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == []
+
+
+def test_not_a_number_is_not_a_stall() -> None:
+    busy = [{"metric": {"pod": "pod-a"}, "values": [[100.0, "NaN"]]}]
+    tokens = [series("pod-a", {100.0: 0.0})]
+    assert pod_stalls_from(busy, tokens, window=30, step=5) == []
+
+
+def prometheus_answer(result: list[dict[str, Any]]) -> str:
+    return json.dumps({"status": "success", "data": {"resultType": "matrix", "result": result}})
+
+
+def test_the_live_cluster_asks_prometheus_through_the_api_server_for_the_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    asked: list[tuple[str, ...]] = []
+    answers = [
+        prometheus_answer([series("pod-a", {200.0: 1.0, 205.0: 1.0})]),
+        prometheus_answer([series("pod-a", {200.0: 0.0, 205.0: 7.0})]),
+    ]
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return answers[len(asked) - 1]
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    found = LiveCluster(experiment, {"real": real}).pod_stalls(170.5, 400.25, 30)
+    assert found == [PodStall("pod-a", start=170.0, seconds=30)]
+    assert [args[:2] for args in asked] == [("get", "--raw"), ("get", "--raw")]
+    paths = [urllib.parse.urlsplit(args[2]) for args in asked]
+    assert {path.path for path in paths} == {
+        "/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090"
+        "/proxy/api/v1/query_range"
+    }
+    busy, made = (urllib.parse.parse_qs(path.query) for path in paths)
+    interval = str(real["monitoring"]["scrape_interval_seconds"])
+    for query in (busy, made):
+        assert query["start"] == ["170.500"]
+        assert query["end"] == ["400.250"]
+        assert query["step"] == [interval]
+    assert busy["query"] == [
+        "sum by (pod) (min_over_time(vllm:num_requests_running[30s]) "
+        "+ min_over_time(vllm:num_requests_waiting[30s]))"
+    ]
+    assert made["query"] == [
+        "sum by (pod) (increase(vllm:prompt_tokens_total[30s]) "
+        "+ increase(vllm:generation_tokens_total[30s]))"
+    ]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        json.dumps({"status": "error", "error": "bad query"}),
+        prometheus_answer([]),
+    ],
+    ids=["an error", "no pods"],
+)
+def test_a_prometheus_answer_with_no_pods_is_an_error_not_no_stalls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *_: answer)
+    with pytest.raises(ExperimentError, match="Prometheus"):
+        LiveCluster(experiment, {"real": real}).pod_stalls(170.0, 400.0, 30)
+
+
+@pytest.mark.parametrize("path", [ROUTING_BURST, ROUTING_BURST_REVERSED], ids=lambda p: p.stem)
+def test_the_routing_burst_files_check_each_replay_for_a_stalled_pod(path: Path) -> None:
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    assert experiment.pod_stall_seconds == 30
+    check_stall_window(experiment, profiles)
+
+
+def test_main_refuses_a_stall_window_under_two_scrapes_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    interval = profile["monitoring"]["scrape_interval_seconds"]
+    path = experiment_file(tmp_path, pod_stall_seconds=2 * interval - 1)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="pod_stall_seconds"):
+        main()
+
+
+def test_a_pod_with_calls_and_no_token_count_is_an_error_not_no_stall() -> None:
+    """A renamed counter, or a pod whose tokens Prometheus did not read, would otherwise pass every
+    replay as stall-free."""
+    busy = [series("pod-a", {100.0: 2.0}), series("pod-b", {100.0: 2.0})]
+    tokens = [series("pod-a", {100.0: 40.0})]
+    with pytest.raises(ExperimentError, match="pod-b"):
+        pod_stalls_from(busy, tokens, window=30, step=5)
+
+
+def test_a_live_token_answer_with_no_pods_is_an_error_not_no_stalls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, pod_stall_seconds=30)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    answers = [prometheus_answer([series("pod-a", {200.0: 1.0})]), prometheus_answer([])]
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return answers[len(asked) - 1]
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    with pytest.raises(ExperimentError, match="pod-a"):
+        LiveCluster(experiment, {"real": real}).pod_stalls(170.0, 400.0, 30)
+
+
+# P3.7b: the least-work rule, and the files that hold the plugin with it to faster runs.
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules"),
+    [
+        ({}, {"plugin": True, "least_work_first": True}),
+        ({"plugin": True, "least_work_first": True}, {"priority": False}),
+        ({"plugin": True, "affinity": True, "least_work_first": True}, {"affinity": False}),
+    ],
+)
+def test_least_work_first_with_affinity_off_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool]
+) -> None:
+    """The least-work rule adds up the work of pinned runs, and only affinity keeps pins: with
+    affinity off it would do nothing, and the variant would read as its result."""
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match="least_work_first on, but affinity is off"):
+        check_routing(experiment, {"real": real})
+
+
+def test_least_work_first_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "least_work_first": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+def test_a_variant_may_not_set_the_profiles_least_work_slack(tmp_path: Path) -> None:
+    """The slack is the profile's, as the parallel threshold is (P3.7b). True passes the loader's
+    check that rules are true or false, so the refusal is check_routing's."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "least_work_slack": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="least_work_slack"):
+        check_routing(experiment, {"real": real})
+
+
+def test_faster_by_and_the_reference_variant_go_into_the_meta(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], faster_by=0.05)
+    assert experiment.faster_by == 0.05
+    assert experiment.not_worse_tolerance is None
+    assert experiment.reference_variant == "default"
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["faster_by"] == 0.05
+    assert meta["reference_variant"] == "default"
+
+
+def test_without_faster_by_the_meta_has_none(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["faster_by"] is None
+
+
+@pytest.mark.parametrize("share", [-0.01, 1, 1.5, True, "0.05"])
+def test_faster_by_that_is_not_a_share_under_one_is_refused(tmp_path: Path, share: object) -> None:
+    with pytest.raises(ExperimentError, match="faster_by"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], faster_by=share)
+
+
+def test_faster_by_with_no_default_variant_to_hold_to_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="faster_by needs one variant on the default picker"):
+        loaded(tmp_path, variants=[ROUTER_VARIANT, other], faster_by=0.05)
+
+
+def test_faster_by_over_other_than_two_variants_is_refused(tmp_path: Path) -> None:
+    other = {**ROUTER_VARIANT, "name": "other"}
+    with pytest.raises(ExperimentError, match="faster_by compares two variants"):
+        loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT, other], faster_by=0.05)
+
+
+ROUTING_FASTER = REPO_ROOT / "experiments" / "routing-faster.yaml"
+ROUTING_FASTER_REVERSED = REPO_ROOT / "experiments" / "routing-faster-reversed.yaml"
+
+
+@pytest.mark.parametrize(
+    "path", [ROUTING_FASTER, ROUTING_FASTER_REVERSED], ids=lambda path: path.stem
+)
+def test_the_routing_faster_files_are_routing_burst_with_the_least_work_rule(path: Path) -> None:
+    """The same replay, checks and variants as P3.7's, so the only change is the rule; the claim is
+    faster runs, by 5% of default's p95 averaged over both orders."""
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    check_stall_window(experiment, profiles)
+    assert experiment.faster_by == 0.05
+    assert experiment.reference_variant == "default"
+    faster = yaml.safe_load(path.read_text())
+    burst = yaml.safe_load(
+        (ROUTING_BURST if path == ROUTING_FASTER else ROUTING_BURST_REVERSED).read_text()
+    )
+    plugin = next(variant for variant in faster["variants"] if variant["name"] == "plugin")
+    assert plugin["routing"] == {**WHOLE_PLUGIN, "least_work_first": True}
+    plugin["routing"] = WHOLE_PLUGIN
+    assert faster.pop("faster_by") == 0.05
+    assert faster == burst
+
+
+def test_routing_faster_reversed_differs_only_in_the_order() -> None:
+    forward = yaml.safe_load(ROUTING_FASTER.read_text())
+    backward = yaml.safe_load(ROUTING_FASTER_REVERSED.read_text())
+    assert [variant["name"] for variant in forward["variants"]] == ["default", "plugin"]
+    assert backward["variants"] == list(reversed(forward["variants"]))
+
+
+# P3.7b's second try: the least-context rule.
+
+
+@pytest.mark.parametrize(
+    ("profile_rules", "variant_rules", "says"),
+    [
+        ({}, {"plugin": True, "least_context_first": True}, "least_context_first on, but affinity"),
+        (
+            {},
+            {
+                "plugin": True,
+                "affinity": True,
+                "least_work_first": True,
+                "least_context_first": True,
+            },
+            "least_work_first and least_context_first",
+        ),
+    ],
+)
+def test_least_context_first_without_affinity_or_beside_least_work_is_refused(
+    tmp_path: Path, profile_rules: dict[str, bool], variant_rules: dict[str, bool], says: str
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": variant_rules}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["routing"].update(profile_rules)
+    with pytest.raises(ExperimentError, match=says):
+        check_routing(experiment, {"real": real})
+
+
+def test_least_context_first_with_affinity_on_is_accepted(tmp_path: Path) -> None:
+    variant = {
+        **ROUTER_VARIANT,
+        "routing": {"plugin": True, "affinity": True, "least_context_first": True},
+    }
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
+ROUTING_CONTEXT = REPO_ROOT / "experiments" / "routing-context.yaml"
+ROUTING_CONTEXT_REVERSED = REPO_ROOT / "experiments" / "routing-context-reversed.yaml"
+
+
+@pytest.mark.parametrize(
+    "path", [ROUTING_CONTEXT, ROUTING_CONTEXT_REVERSED], ids=lambda path: path.stem
+)
+def test_the_routing_context_files_are_routing_faster_with_the_other_first_call_rule(
+    path: Path,
+) -> None:
+    """The same replay, checks, claim and variants as routing-faster's, so the only change is
+    which first-call rule is on."""
+    experiment = committed(path)
+    profiles = {"real": yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())}
+    check_routing(experiment, profiles)
+    check_stall_window(experiment, profiles)
+    assert experiment.faster_by == 0.05
+    context = yaml.safe_load(path.read_text())
+    faster = yaml.safe_load(
+        (ROUTING_FASTER if path == ROUTING_CONTEXT else ROUTING_FASTER_REVERSED).read_text()
+    )
+    plugin = next(variant for variant in context["variants"] if variant["name"] == "plugin")
+    assert plugin["routing"] == {**WHOLE_PLUGIN, "least_context_first": True}
+    plugin["routing"] = {**WHOLE_PLUGIN, "least_work_first": True}
+    assert context == faster
+
+
+# P3.7c: both vLLM pods' logs, kept per variant, so a pod stall comes with the engine's own numbers.
+
+
+def test_each_real_variant_keeps_both_vllm_pods_logs_after_its_replay(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT])
+    cluster = FakeCluster()
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    # One take per variant, each after that variant's replay and before the next restart wipes
+    # its pods.
+    replays = [index for index, step in enumerate(cluster.asked) if step.startswith("replay")]
+    restarts = [index for index, step in enumerate(cluster.asked) if step == "restart"]
+    takes = [steps for _, steps in cluster.vllm]
+    assert len(takes) == 2
+    assert replays[0] < takes[0] <= restarts[1] < replays[1] < takes[1]
+    for variant in ("default", "run-router"):
+        names = meta["variants"][variant]["vllm_logs"]
+        assert names == [
+            out.vllm(variant, "vllm-x-pod-a").name,
+            out.vllm(variant, "vllm-x-pod-b").name,
+        ]
+        assert out.vllm(variant, "vllm-x-pod-a").read_text() == "pod a's log\n"
+        assert out.vllm(variant, "vllm-x-pod-b").read_text() == "pod b's log\n"
+
+
+def test_a_stalled_replay_keeps_its_vllm_logs(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], pod_stall_seconds=30)
+    cluster = FakeCluster(stalls={"default": [STALL]})
+    out = outputs(experiment, tmp_path)
+    with pytest.raises(ExperimentError):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.vllm("default", "vllm-x-pod-a").exists()
+    assert out.vllm("default", "vllm-x-pod-b").exists()
+    ((variant, steps),) = cluster.vllm
+    assert variant == "default"
+    assert cluster.asked[steps].startswith("stalls")
+
+
+def test_a_sim_variant_keeps_no_vllm_logs(tmp_path: Path) -> None:
+    """Simulated pods share no GPU, which is what the logs are kept for."""
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.vllm == []
+    assert all(variant["vllm_logs"] is None for variant in meta["variants"].values())
+
+
+def test_the_live_cluster_takes_each_vllm_pods_log_with_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        if args[:2] == ("get", "pods"):
+            return "vllm-x-pod-a vllm-x-pod-b"
+        return f"log of {args[-1]}\n"
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    assert LiveCluster(experiment, {}).vllm_logs() == {
+        "vllm-x-pod-a": "log of vllm-x-pod-a\n",
+        "vllm-x-pod-b": "log of vllm-x-pod-b\n",
+    }
+    assert asked[0][:4] == ("get", "pods", "-l", "app.kubernetes.io/name=vllm")
+    assert asked[1:] == [
+        ("logs", "--timestamps", "vllm-x-pod-a"),
+        ("logs", "--timestamps", "vllm-x-pod-b"),
+    ]
+
+
+# P3.9b: a variant scaled by KEDA on remaining work.
+AUTOSCALED_VARIANT = {
+    "name": "remaining",
+    "values": None,
+    "epp_config": "default-plugins.yaml",
+    "autoscaler": "remaining",
+}
+AUTOSCALE_REMAINING = REPO_ROOT / "experiments" / "autoscale-remaining.yaml"
+
+
+def test_a_variant_may_be_scaled_by_an_autoscaler(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    assert [variant.autoscaler for variant in experiment.variants] == ["remaining", None]
+
+
+def test_an_autoscaler_with_no_object_is_refused(tmp_path: Path) -> None:
+    """P3.10 made cpu a kind, so an unknown name is now memory (spec change, experiments/log.md)."""
+    with pytest.raises(ExperimentError, match="memory"):
+        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "autoscaler": "memory"}])
+
+
+def test_an_autoscaler_with_a_replica_count_of_its_own_is_refused(tmp_path: Path) -> None:
+    """It starts at the profile's min_replicas; a count of its own would say otherwise."""
+    with pytest.raises(ExperimentError, match="replicas"):
+        loaded(tmp_path, variants=[{**AUTOSCALED_VARIANT, "replicas": 2}])
+
+
+def test_an_autoscaler_on_a_profile_without_autoscaling_is_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    del real["autoscaling"]
+    with pytest.raises(ExperimentError, match="autoscaling"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_an_autoscaler_on_a_profile_whose_section_could_not_scale_is_refused(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["autoscaling"]["max_replicas"] = real["autoscaling"]["min_replicas"]
+    with pytest.raises(ExperimentError, match="max_replicas"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_without_an_autoscaler_a_profile_needs_no_section(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    demo = yaml.safe_load((REPO_ROOT / "config" / "demo.yaml").read_text())
+    check_autoscaling(experiment, {"real": demo})
+
+
+def test_main_refuses_an_autoscaler_the_profile_has_no_section_for_before_the_cluster_is_touched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = experiment_file(tmp_path, variants=[AUTOSCALED_VARIANT])
+    profile = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    profile["replay"]["patterns"]["baseline"] = {"runs": 2, "rate_per_second": 0.02}
+    del profile["autoscaling"]
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "real.yaml").write_text(yaml.safe_dump(profile))
+    monkeypatch.setattr("load_generator.experiment.REPO_ROOT", tmp_path)
+
+    def no_cluster(_experiment: Experiment, _profiles: Any) -> FakeCluster:
+        raise AssertionError("the cluster was touched")
+
+    monkeypatch.setattr("load_generator.experiment.LiveCluster", no_cluster)
+    monkeypatch.setattr("sys.argv", ["experiment", str(path)])
+    with pytest.raises(ExperimentError, match="autoscaling"):
+        main()
+
+
+def test_an_autoscaled_variant_starts_at_the_floor_before_its_restart_and_ends_scaled_back(
+    tmp_path: Path,
+) -> None:
+    """The floor before the restart, so its pods are the ones warmed; the autoscaler after the
+    warm-up, whose calls go straight to the pods and scaled a CPU HPA before the replay on
+    2026-11-17 (P3.10's review); and it is gone before the count is restored, which it would
+    otherwise undo."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    assert cluster.asked == [
+        "check",
+        "floor remaining",
+        "restart",
+        "routing default",
+        "config",
+        "warm",
+        "autoscaler on",
+        f"replay {stem}-remaining.jsonl",
+        "jumps 101 102",
+        "autoscale series 101 102",
+        "autoscaler off",
+        "scale profile",
+    ]
+
+
+def test_the_variant_after_an_autoscaled_one_starts_at_the_profiles_count(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    second_restart = len(cluster.asked) - 1 - cluster.asked[::-1].index("restart")
+    assert cluster.asked[second_restart - 2 : second_restart] == ["autoscaler off", "scale profile"]
+    assert cluster.asked.count("autoscaler off") == 1
+    assert cluster.asked.count("scale profile") == 1
+
+
+def test_a_replay_that_breaks_still_removes_the_autoscaler_and_scales_back(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster(fail_replay_of="remaining")
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[-2:] == ["autoscaler off", "scale profile"]
+
+
+def test_a_start_that_breaks_halfway_is_removed_and_scaled_back_too(tmp_path: Path) -> None:
+    """It may have scaled the pods, or installed the object, before it failed."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    cluster = FakeCluster(fail_autoscaler_start=True)
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="autoscaler start broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    assert cluster.asked[-3:] == ["autoscaler on", "autoscaler off", "scale profile"]
+
+
+def test_a_variant_without_an_autoscaler_never_touches_one(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert not any(step.startswith("autoscale") for step in cluster.asked)
+
+
+def test_an_autoscaled_variant_writes_its_series_and_the_meta_holds_the_crossings(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    out = outputs(experiment, tmp_path)
+    _, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    assert out.autoscale("remaining") == out.csv.with_name(
+        f"exp-{experiment.hash}-remaining-autoscale.csv"
+    )
+    with out.autoscale("remaining").open() as file:
+        rows = list(csv.DictReader(file))
+    assert [row["seconds"] for row in rows] == ["0.0", "5.0", "10.0", "15.0"]
+    assert meta["variants"]["remaining"]["autoscale"] == {
+        "autoscaler": "remaining",
+        "section": AUTOSCALING,
+        "csv": out.autoscale("remaining").name,
+        "crossings": {
+            "remaining_seconds": 5.0,
+            "scale_up_seconds": 10.0,
+            "queue_seconds": 15.0,
+            "scaled_before_replay": False,
+        },
+        "scale_up_before_queue": True,
+    }
+    assert meta["variants"]["default"]["autoscale"] is None
+    assert not out.autoscale("default").exists()
+
+
+def test_the_report_gives_an_autoscaled_variants_crossings(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert crossing_text("remaining", AUTOSCALING, Crossings(5.0, 10.0, 15.0)) in report_lines(
+        rows, meta
+    )
+
+
+def test_the_live_cluster_asks_prometheus_for_the_four_series_at_the_scrape_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    asked: list[str] = []
+
+    def kubectl(*args: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[2]).query)
+        assert query["start"] == ["100.000"]
+        assert query["end"] == ["110.000"]
+        assert query["step"] == [str(real["monitoring"]["scrape_interval_seconds"])]
+        asked.append(query["query"][0])
+        return prometheus_answer([{"metric": {}, "values": [[100.0, "1"], [105.0, "2"]]}])
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    rows = LiveCluster(experiment, {"real": real}).autoscale_series(100.0, 110.0)
+    assert rows == [AutoscaleRow(0.0, 1, 1, 1, 1), AutoscaleRow(5.0, 2, 2, 2, 2)]
+    assert asked == [
+        'max(kube_deployment_spec_replicas{namespace="default",deployment="vllm"})',
+        'max(kube_deployment_status_replicas_ready{namespace="default",deployment="vllm"})',
+        "sum(vllm:num_requests_waiting)",
+        "sum(thesis_remaining_work)",
+    ]
+
+
+def test_the_live_cluster_scales_to_the_floor_then_installs_the_profiles_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    steps: list[Any] = []
+
+    def run(args: list[str], input: str, text: bool, check: bool) -> None:
+        assert text and check
+        steps.append((args, yaml.safe_load(input)))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: steps.append(args))
+    cluster = LiveCluster(experiment, {"real": real})
+    monkeypatch.setattr(cluster, "scale", lambda replicas: steps.append(("scale", replicas)))
+    section = cluster.floor_autoscaler("remaining")
+    assert section == real["autoscaling"]
+    assert steps == [("scale", real["autoscaling"]["min_replicas"])]
+    cluster.start_autoscaler()
+    args, values = steps[1]
+    assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
+    assert args[4] == str(REPO_ROOT / "infra" / "charts" / "autoscaling")
+    assert values["query"] == "sum(thesis_remaining_work)"
+    assert values["threshold"] == real["autoscaling"]["remaining_work_target"]
+    assert steps[2][:3] == ("wait", "scaledobject/vllm", "--for=condition=Ready")
+
+
+def test_the_live_cluster_starts_no_autoscaler_before_its_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor names the kind; without it there is nothing to install."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    with pytest.raises(ExperimentError, match="floor"):
+        LiveCluster(experiment, {"real": profile_file("real")}).start_autoscaler()
+
+
+def test_the_live_cluster_removes_the_object_and_waits_for_its_hpa_to_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The HPA KEDA made would otherwise set the count back after it is restored."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    steps: list[Any] = []
+
+    def run(args: list[str], check: bool) -> None:
+        assert check
+        steps.append(args)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: steps.append(args))
+    LiveCluster(experiment, {}).stop_autoscaler()
+    assert steps[0][:4] == ["helm", "uninstall", "autoscaling", "--ignore-not-found"]
+    assert [step[:3] for step in steps[1:]] == [
+        ("wait", "scaledobject/vllm", "--for=delete"),
+        ("wait", "hpa/keda-hpa-vllm", "--for=delete"),
+    ]
+
+
+def test_the_autoscale_file_scales_sim_pods_on_remaining_work_through_the_burst() -> None:
+    experiment = committed(AUTOSCALE_REMAINING)
+    sim = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())
+    check_routing(experiment, {"sim": sim})
+    check_autoscaling(experiment, {"sim": sim})
+    assert experiment.profile == "sim"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == "burst"
+    assert experiment.seed == 6
+    [variant] = experiment.variants
+    assert (variant.name, variant.autoscaler, variant.default) == ("remaining", "remaining", True)
+    assert variant.epp_config == "default-plugins.yaml"
+    load_trace(experiment.trace)
+
+
+def test_the_autoscale_file_discards_the_runs_before_the_first_burst() -> None:
+    """As routing-burst's: the runs that start on empty caches and an empty queue."""
+    experiment = committed(AUTOSCALE_REMAINING)
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+def test_the_autoscale_files_kv_capacity_is_the_simulated_pods_cache() -> None:
+    simulator = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["simulator"]
+    experiment = committed(AUTOSCALE_REMAINING)
+    assert experiment.kv_capacity_tokens_per_pod == (
+        simulator["kv_cache_blocks"] * simulator["block_size"]
+    )
+
+
+# P3.10: a plain HPA on CPU (real pods only, D5), each autoscaled variant's summary, and the files.
+# 2026-11-17T16:41:00Z: the warm-up's end in the LiveCluster's quiet-CPU tests (P3.10's review).
+WARMED = 1794933660.0
+# metrics-server's samples of one vLLM pod: wholly after the warm-up and idle, and one whose 32 s
+# window reaches back into the warm-up, at its CPU.
+QUIET_SAMPLE = {"timestamp": "2026-11-17T16:41:30Z", "window": "15s", "cpu": "140m"}
+LOUD_SAMPLE = {"timestamp": "2026-11-17T16:41:30Z", "window": "32s", "cpu": "1150m"}
+
+
+def metrics_answer(sample: Mapping[str, str]) -> str:
+    return json.dumps(
+        {
+            "kind": "PodMetricsList",
+            "items": [
+                {
+                    "metadata": {"name": "vllm-a"},
+                    "timestamp": sample["timestamp"],
+                    "window": sample["window"],
+                    "containers": [{"name": "vllm", "usage": {"cpu": sample["cpu"]}}],
+                }
+            ],
+        }
+    )
+
+
+def answering_kubectl(steps: list[Any], metrics: list[str]) -> Callable[..., str]:
+    """Records each call; the metrics API gets the next of metrics, anything else ''."""
+
+    def kubectl(*args: str) -> str:
+        steps.append(args)
+        if args[:2] == ("get", "--raw"):
+            return metrics.pop(0)
+        return ""
+
+    return kubectl
+
+
+def quiet_kubectl(steps: list[Any]) -> Callable[..., str]:
+    return answering_kubectl(steps, [metrics_answer(QUIET_SAMPLE)])
+
+
+CPU_VARIANT = {
+    "name": "cpu",
+    "values": None,
+    "epp_config": "default-plugins.yaml",
+    "autoscaler": "cpu",
+}
+CPU_QUERY = (
+    'max(kube_horizontalpodautoscaler_status_target_metric{namespace="default",'
+    'horizontalpodautoscaler="vllm",metric_name="cpu",metric_target_type="utilization"})'
+)
+AUTOSCALE_SIM = REPO_ROOT / "experiments" / "autoscale-sim.yaml"
+AUTOSCALE_SIM_FAN_OUT = REPO_ROOT / "experiments" / "autoscale-sim-fan-out.yaml"
+AUTOSCALE_REAL = REPO_ROOT / "experiments" / "autoscale-real.yaml"
+
+
+def profile_file(name: str) -> dict[str, Any]:
+    loaded_profile: dict[str, Any] = yaml.safe_load(
+        (REPO_ROOT / "config" / f"{name}.yaml").read_text()
+    )
+    return loaded_profile
+
+
+def test_a_variant_may_be_scaled_by_a_plain_hpa_on_cpu(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    check_autoscaling(experiment, {"real": profile_file("real")})
+    assert [variant.autoscaler for variant in experiment.variants] == ["cpu"]
+
+
+def test_cpu_on_simulated_pods_is_refused(tmp_path: Path) -> None:
+    """A simulated pod's CPU says nothing of its load (D5)."""
+    experiment = loaded(tmp_path, profile="sim", variants=[CPU_VARIANT])
+    with pytest.raises(ExperimentError, match="D5"):
+        check_autoscaling(experiment, {"sim": profile_file("sim")})
+
+
+def test_cpu_on_a_profile_with_no_cpu_target_is_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    del real["autoscaling"]["cpu_target_percent"]
+    with pytest.raises(ExperimentError, match="cpu_target_percent"):
+        check_autoscaling(experiment, {"real": real})
+
+
+def test_keda_on_a_profile_with_no_cpu_target_is_not_refused(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    real = profile_file("real")
+    del real["autoscaling"]["cpu_target_percent"]
+    check_autoscaling(experiment, {"real": real})
+
+
+def test_a_cpu_variant_writes_the_hpas_reading_beside_its_series(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT, AUTOSCALED_VARIANT])
+    out = outputs(experiment, tmp_path)
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    assert out.cpu_hpa("cpu") == out.csv.with_name(f"exp-{experiment.hash}-cpu-cpu-hpa.csv")
+    with out.cpu_hpa("cpu").open() as file:
+        assert list(csv.DictReader(file)) == [
+            {"seconds": "0.0", "cpu_utilization_percent": "12"},
+            {"seconds": "5.0", "cpu_utilization_percent": "97.5"},
+        ]
+    assert meta["variants"]["cpu"]["cpu_hpa"] == out.cpu_hpa("cpu").name
+    assert meta["variants"]["remaining"]["cpu_hpa"] is None
+    assert not out.cpu_hpa("remaining").exists()
+    assert sum(step.startswith("cpu series") for step in cluster.asked) == 1
+
+
+def test_an_autoscaled_variant_has_its_summary_in_the_meta(tmp_path: Path) -> None:
+    """Run 1 is discarded; run 2, the kept one, is one call of 1 ms gap and 100 ms, timed from its
+    planned start. On the VM's clock the replay starts at 101 s (the ticking clock's first
+    reading in the variant), run 1's call runs 1-101 ms in and run 2's 9.95-10.05 s in, so the one
+    Ready pod is busy at the 10 s sample and idle at the other 3. Spec replicas rise to 2 at 10 s
+    and Ready never follows, so capacity never came."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    lines = replay_lines()
+    lines[0]["ts_start"] = 101_001
+    lines[1]["ts_start"] = 110_950
+    cluster = FakeCluster(replays={"remaining": lines})
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert meta["variants"]["remaining"]["autoscale_summary"] == {
+        "runs": 1,
+        "finished_runs": 1,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 101,
+        "completion_p95_ms": 101,
+        "completion_total_ms": 101,
+        "makespan_ms": 101,
+        "runs_per_minute": pytest.approx(60_000 / 101),
+        "scaled_before_replay": False,
+        "time_to_capacity_seconds": None,
+        "idle_pod_minutes": pytest.approx(15 / 60),
+    }
+    assert meta["variants"]["default"]["autoscale_summary"] is None
+
+
+def test_the_results_have_a_summary_csv_with_a_row_per_autoscaled_variant(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT, DEFAULT_VARIANT])
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    write_results(out, rows, meta)
+    assert out.autoscale_summary == out.csv.with_name(
+        f"exp-{experiment.hash}-autoscale-summary.csv"
+    )
+    with out.autoscale_summary.open() as file:
+        summary_rows = list(csv.DictReader(file))
+    assert [(row["variant"], row["autoscaler"]) for row in summary_rows] == [
+        ("remaining", "remaining")
+    ]
+    assert summary_rows[0]["makespan_ms"] == "101"
+
+
+def test_results_with_no_autoscaled_variant_have_no_summary_csv(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    write_results(out, rows, meta)
+    assert not out.autoscale_summary.exists()
+
+
+def test_the_report_gives_an_autoscaled_variants_summary(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    summary = AutoscaleSummary(**meta["variants"]["remaining"]["autoscale_summary"])
+    assert summary_text(summary) in report_lines(rows, meta)
+
+
+def test_the_live_cluster_installs_a_plain_hpa_for_cpu_and_waits_until_it_reads_the_cpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ScalingActive: the HPA could compute a count from the pods' CPU."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    steps: list[Any] = []
+
+    def run(args: list[str], input: str, text: bool, check: bool) -> None:
+        assert text and check
+        steps.append((args, yaml.safe_load(input)))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", quiet_kubectl(steps))
+    cluster = LiveCluster(experiment, {"real": real})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: steps.append(("scale", replicas)))
+    assert cluster.floor_autoscaler("cpu") == real["autoscaling"]
+    cluster.start_autoscaler()
+    assert steps[0] == ("scale", real["autoscaling"]["min_replicas"])
+    assert steps[1][:2] == ("get", "--raw")
+    args, values = steps[2]
+    assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
+    assert values == helm_values(real["autoscaling"], "cpu")
+    assert steps[3][:3] == ("wait", "hpa/vllm", "--for=condition=ScalingActive")
+
+
+def test_the_live_cluster_installs_the_cpu_hpa_once_the_pods_cpu_is_quiet_after_the_warm_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its first reading is metrics-server's latest sample, whose window reached into the warm-up
+    on 2026-11-17 and scaled it (P3.10's review). Asked again each poll until it is quiet."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    steps: list[Any] = []
+    answers = [metrics_answer(LOUD_SAMPLE), metrics_answer(QUIET_SAMPLE)]
+    monkeypatch.setattr(
+        "load_generator.experiment.subprocess.run",
+        lambda args, **_: steps.append(args[:2]),
+    )
+    monkeypatch.setattr("load_generator.experiment.kubectl", answering_kubectl(steps, answers))
+    monkeypatch.setattr(
+        "load_generator.experiment.time.sleep", lambda s: steps.append(("sleep", s))
+    )
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    cluster.start_autoscaler()
+    metrics = (
+        "get",
+        "--raw",
+        "/apis/metrics.k8s.io/v1beta1/namespaces/default/pods"
+        "?labelSelector=app.kubernetes.io%2Fname%3Dvllm",
+    )
+    assert steps[:4] == [metrics, ("sleep", 5), metrics, ["helm", "upgrade"]]
+
+
+def test_the_live_cluster_gives_up_on_cpu_that_stays_busy_after_the_warm_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    now = [0.0]
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    monkeypatch.setattr(
+        "load_generator.experiment.kubectl", lambda *args: metrics_answer(LOUD_SAMPLE)
+    )
+    monkeypatch.setattr("load_generator.experiment.time.sleep", sleep)
+    monkeypatch.setattr("load_generator.experiment.time.monotonic", lambda: now[0])
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    with pytest.raises(ExperimentError, match="not quiet 120 s after the warm-up"):
+        cluster.start_autoscaler()
+    assert now[0] == 120
+
+
+def test_the_live_cluster_installs_no_cpu_hpa_without_a_warm_up_to_wait_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", pytest.fail)
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    with pytest.raises(ExperimentError, match="warm"):
+        cluster.start_autoscaler()
+
+
+def test_the_live_cluster_keeps_when_its_warm_up_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+
+    async def warm(pods: Mapping[str, str]) -> dict[str, list[int]]:
+        return {name: [1] for name in pods}
+
+    monkeypatch.setattr(cluster, "_ready_pods", lambda: {"vllm-a": "10.0.0.1"})
+    monkeypatch.setattr(cluster, "_warm", warm)
+    monkeypatch.setattr("load_generator.experiment.time.time", lambda: WARMED)
+    assert cluster.warm_pods() == {"vllm-a": [1]}
+    assert cluster.warmed_at == WARMED
+
+
+def test_after_a_cpu_start_the_live_cluster_waits_for_the_plain_hpa_to_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No KEDA object was made, so it has none to wait for; the plain HPA would set the count
+    back after it is restored."""
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    steps: list[Any] = []
+
+    def run(args: list[str], check: bool, **_: Any) -> None:
+        steps.append(args)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", quiet_kubectl(steps))
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    cluster.warmed_at = WARMED
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("cpu")
+    cluster.start_autoscaler()
+    steps.clear()
+    cluster.stop_autoscaler()
+    assert steps[0][:4] == ["helm", "uninstall", "autoscaling", "--ignore-not-found"]
+    assert [step[:3] for step in steps[1:]] == [("wait", "hpa/vllm", "--for=delete")]
+
+
+def test_the_live_cluster_asks_prometheus_for_the_hpas_cpu_at_the_scrape_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[CPU_VARIANT])
+    real = profile_file("real")
+    asked: list[str] = []
+
+    def kubectl(*args: str) -> str:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[2]).query)
+        assert (query["start"], query["end"]) == (["100.000"], ["110.000"])
+        assert query["step"] == [str(real["monitoring"]["scrape_interval_seconds"])]
+        asked.append(query["query"][0])
+        return prometheus_answer([{"metric": {}, "values": [[100.0, "12"], [105.0, "97.5"]]}])
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    rows = LiveCluster(experiment, {"real": real}).cpu_series(100.0, 110.0)
+    assert rows == [CpuRow(0.0, 12), CpuRow(5.0, 97.5)]
+    assert asked == [CPU_QUERY]
+
+
+@pytest.mark.parametrize(
+    ("path", "pattern"),
+    [(AUTOSCALE_SIM, "burst"), (AUTOSCALE_SIM_FAN_OUT, "burst-fan-out")],
+    ids=["burst", "burst-fan-out"],
+)
+def test_the_sim_autoscale_files_run_remaining_then_queue_on_one_replay(
+    path: Path, pattern: str
+) -> None:
+    experiment = committed(path)
+    sim = profile_file("sim")
+    check_routing(experiment, {"sim": sim})
+    check_autoscaling(experiment, {"sim": sim})
+    assert experiment.profile == "sim"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert experiment.pattern_name == pattern
+    assert experiment.seed == 6
+    assert [(v.name, v.autoscaler, v.default) for v in experiment.variants] == [
+        ("remaining", "remaining", True),
+        ("queue", "queue", True),
+    ]
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+    simulator = sim["simulator"]
+    assert experiment.kv_capacity_tokens_per_pod == (
+        simulator["kv_cache_blocks"] * simulator["block_size"]
+    )
+    load_trace(experiment.trace)
+
+
+def test_the_sim_autoscale_files_differ_only_in_the_pattern() -> None:
+    burst = yaml.safe_load(AUTOSCALE_SIM.read_text())
+    fan_out = yaml.safe_load(AUTOSCALE_SIM_FAN_OUT.read_text())
+    assert {**burst, "pattern": fan_out["pattern"]} == fan_out
+
+
+def test_the_real_autoscale_file_runs_cpu_on_real_pods_through_the_burst() -> None:
+    experiment = committed(AUTOSCALE_REAL)
+    real = profile_file("real")
+    check_routing(experiment, {"real": real})
+    check_autoscaling(experiment, {"real": real})
+    check_stall_window(experiment, {"real": real})
+    assert experiment.profile == "real"
+    assert experiment.trace.name == f"{APB_TRACE}.jsonl"
+    assert (experiment.pattern_name, experiment.seed) == ("burst", 6)
+    [variant] = experiment.variants
+    assert (variant.name, variant.autoscaler, variant.default) == ("cpu", "cpu", True)
+    assert experiment.pod_stall_seconds == 30
+    assert (
+        experiment.kv_capacity_tokens_per_pod
+        == committed(ROUTING_FASTER).kv_capacity_tokens_per_pod
+    )
+    burst = experiment.pattern.burst
+    assert burst is not None
+    starts = start_times(experiment.pattern, experiment.seed)
+    assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)

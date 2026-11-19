@@ -10,6 +10,10 @@ export interface RunView {
 
 export const NO_RUN: RunView = { steps: [] };
 
+/** A step as the agent runtime saves it and GET /runs/{id} answers it: a step event without the run_id and
+ * expected_steps that only the events carry. */
+export type SavedStep = Pick<RunStep, 'step' | 'content' | 'tool_calls' | 'error'>;
+
 export function applyEvent(view: RunView, event: RunEvent): RunView {
   switch (event.kind) {
     // A reconnect replays the run from its run event, so the run event starts the view over.
@@ -55,8 +59,7 @@ export function stepInFlight(view: RunView): number {
 /** The landed steps, each with its call record if calls has one; while the run goes, also the call in flight and
  * dashed cards up to the estimate. */
 export function stepCards(view: RunView, calls: RunCall[] = []): StepCardData[] {
-  const callOfStep = new Map(calls.map((call) => [call.step, call]));
-  const cards = view.steps.map((step) => landedCard(step, callOfStep.get(step.step)));
+  const cards = savedStepCards(view.steps, calls);
   if (view.end) return cards;
   const running = stepInFlight(view);
   cards.push({ n: running, tool: 'Waiting for the model', args: '', state: 'running' });
@@ -66,7 +69,13 @@ export function stepCards(view: RunView, calls: RunCall[] = []): StepCardData[] 
   return cards;
 }
 
-function landedCard(step: RunStep, call: RunCall | undefined): StepCardData {
+/** The steps taken, each with its call record if calls has one: an ended run's cards, or a saved run's (P3.13c). */
+export function savedStepCards(steps: SavedStep[], calls: RunCall[] = []): StepCardData[] {
+  const callOfStep = new Map(calls.map((call) => [call.step, call]));
+  return steps.map((step) => landedCard(step, callOfStep.get(step.step)));
+}
+
+function landedCard(step: SavedStep, call: RunCall | undefined): StepCardData {
   const card: StepCardData = {
     n: step.step,
     tool: toolLabel(step.tool_calls),
@@ -147,7 +156,7 @@ export function segments(view: RunView): string[] {
 }
 
 /** The tools whose results the answer can rest on: every tool that ran without an error, final_answer aside. */
-export function computedBy(view: RunView): string[] {
+export function computedBy(view: { steps: SavedStep[] }): string[] {
   const names = view.steps.flatMap((step) =>
     step.tool_calls
       .filter((call) => call.name !== 'final_answer' && call.result !== null && !resultError(call))
@@ -159,7 +168,7 @@ export function computedBy(view: RunView): string[] {
 /** The run tried a tool and none gave a result, so nothing computed stands behind the answer: the model may have made
  * it up (P2.6c). A reply that never tried a tool, such as a greeting, is not flagged. step.error counts as trying: it
  * is how the runtime rejects a call the model wrote as text. */
-export function answerUnbacked(view: RunView): boolean {
+export function answerUnbacked(view: { steps: SavedStep[] }): boolean {
   const tried = view.steps.some(
     (step) => step.error !== null || step.tool_calls.some((call) => call.name !== 'final_answer'),
   );

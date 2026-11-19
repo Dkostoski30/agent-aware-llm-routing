@@ -1,13 +1,21 @@
 """make experiment-compare (P2.5): numbers across an experiment's CSVs, from the CSVs alone."""
 
+import json
 from pathlib import Path
 
 import pytest
 from load_generator.experiment_compare import (
+    Faster,
+    HitRateCounts,
+    NotWorse,
+    hit_rate_counts,
     main,
+    moved_runs,
+    p95_ms,
     paired_differences,
     report_lines,
     run_differences_summary,
+    run_hit_rates,
     without_largest,
 )
 from load_generator.results import (
@@ -171,6 +179,43 @@ def test_leaving_out_the_largest_goes_with_the_totals_direction() -> None:
     assert without_largest(second, first, 1) == (950, 900)
 
 
+def test_each_runs_hit_rate_is_over_its_calls_with_a_count() -> None:
+    rates = run_hit_rates(
+        [
+            row("a", "r-1", prompt_tokens=100, cached_tokens=40),
+            row("a", "r-1", step=2, prompt_tokens=300, cached_tokens=260),
+            row("a", "r-1", step=3, prompt_tokens=500, cached_tokens=None),
+            row("a", "r-2", cached_tokens=None),
+        ]
+    )
+    assert rates == {"r-1": 0.75, "r-2": None}
+
+
+def test_a_run_counts_as_moved_by_any_later_step_that_moved() -> None:
+    rows = [
+        row("a", "r-1", moved=None),
+        row("a", "r-1", step=2, moved=False),
+        row("a", "r-1", step=3, moved=True),
+        row("a", "r-2", moved=None),
+        row("a", "r-2", step=2, moved=False),
+    ]
+    assert moved_runs(rows) == {"r-1"}
+
+
+def test_hit_rates_are_paired_over_the_named_runs_with_a_count_on_both_sides() -> None:
+    first = {"r-1": 0.9, "r-2": 0.5, "r-3": 0.7, "r-4": 0.8, "r-5": None}
+    second = {"r-1": 0.6, "r-2": 0.8, "r-3": 0.7, "r-4": 0.1, "r-5": 0.4}
+    assert hit_rate_counts(first, second, ["r-1", "r-2", "r-3", "r-5"]) == HitRateCounts(
+        first_higher=1, second_higher=1, same=1, without_count=1
+    )
+
+
+def test_hit_rates_differing_at_all_are_not_the_same() -> None:
+    """No tolerance: a run nothing changed for gives an equal count, so equal rates."""
+    counts = hit_rate_counts({"r-1": 0.8836}, {"r-1": 0.8834}, ["r-1"])
+    assert counts == HitRateCounts(first_higher=1, second_higher=0, same=0, without_count=0)
+
+
 def write_chain(path: Path, order: tuple[str, str], slow: int) -> Path:
     write_csv(
         path,
@@ -261,6 +306,51 @@ def test_calls_with_no_cached_count_are_said(tmp_path: Path) -> None:
     assert "uncached tokens 0, and 1 calls with no count" in report
 
 
+def hit_rate_rows(variant: str, cached: dict[str, int], moved: set[str]) -> list[CallRow]:
+    """Each run as two steps of 100 prompt tokens, the first with nothing cached."""
+    return [
+        call
+        for run, tokens in cached.items()
+        for call in (
+            row(variant, run, cached_tokens=0),
+            row(variant, run, step=2, cached_tokens=tokens, moved=run in moved),
+        )
+    ]
+
+
+def test_the_report_pairs_each_runs_hit_rate_and_again_over_the_runs_each_side_moved(
+    tmp_path: Path,
+) -> None:
+    """b moves r-1 and r-2; a is higher on r-1 and r-3, b on r-2, and r-4 is the same."""
+    csv = tmp_path / "one.csv"
+    write_csv(
+        csv,
+        hit_rate_rows("a", {"r-1": 90, "r-2": 50, "r-3": 80, "r-4": 70}, moved=set())
+        + hit_rate_rows("b", {"r-1": 20, "r-2": 60, "r-3": 60, "r-4": 70}, moved={"r-1", "r-2"}),
+    )
+    report = report_lines([csv], stall_ms=5000)
+    assert "  hit rate per run: a higher in 2 of 4 runs, b in 1, the same in 1" in report
+    assert "    of the 0 runs a moved a step in: a higher in 0, b in 0, the same in 0" in report
+    assert "    of the 2 runs b moved a step in: a higher in 1, b in 1, the same in 0" in report
+
+
+def test_the_report_says_the_runs_whose_hit_rate_it_could_not_pair(tmp_path: Path) -> None:
+    csv = tmp_path / "one.csv"
+    write_csv(
+        csv,
+        [
+            *hit_rate_rows("a", {"r-1": 90}, moved=set()),
+            row("a", "r-2", cached_tokens=None),
+            *hit_rate_rows("b", {"r-1": 20, "r-2": 60}, moved=set()),
+        ],
+    )
+    report = report_lines([csv], stall_ms=5000)
+    assert (
+        "  hit rate per run: a higher in 1 of 1 runs, b in 0, the same in 0; "
+        "1 runs with no count on a side left out"
+    ) in report
+
+
 def test_a_variant_with_no_finished_run_still_gets_a_report(tmp_path: Path) -> None:
     """An overload experiment may end this way, and that is a result."""
     one = tmp_path / "one.csv"
@@ -344,3 +434,249 @@ def test_the_csv_round_trip_keeps_what_the_report_reads(tmp_path: Path) -> None:
     rows = [row("a", "r-1", over_kv_limit=True, ttft_ms=9000, duration_ms=9500)]
     write_csv(csv, rows)
     assert variant_totals(read_csv(csv)) == variant_totals(rows)
+
+
+def write_with_meta(path: Path, rows: list[CallRow], meta: dict[str, object] | None) -> Path:
+    """A CSV and, unless None, the .meta.json make experiment writes beside it."""
+    write_csv(path, rows)
+    if meta is not None:
+        path.with_suffix(".meta.json").write_text(json.dumps(meta))
+    return path
+
+
+NOT_WORSE = {"not_worse_tolerance": 0.05, "reference_variant": "default"}
+
+
+def timed_runs(variant: str, run_ms: list[int], ttft_ms: int = 500) -> list[CallRow]:
+    """One call per run, so each run's completion time is its call's duration."""
+    return [
+        row(variant, f"r-{number}", duration_ms=duration, ttft_ms=ttft_ms)
+        for number, duration in enumerate(run_ms, start=1)
+    ]
+
+
+def test_p95_is_the_nearest_rank_over_the_finished_runs_and_answered_calls() -> None:
+    rows = timed_runs("plugin", [1000 * second for second in range(1, 21)])
+    rows.append(a_failed_call("plugin", "r-21"))
+    # 20 finished runs: the nearest rank of 0.95 is the 19th, 19 s; the failed run is left out.
+    assert p95_ms(rows, "run completion") == 19_000
+    assert p95_ms(rows, "first token") == 500
+
+
+def test_a_variant_with_no_finished_run_has_no_p95() -> None:
+    assert p95_ms([a_failed_call("plugin", "r-1")], "run completion") is None
+
+
+def test_not_worse_averages_each_sides_p95_over_the_files_and_allows_the_tolerance() -> None:
+    verdict = NotWorse(
+        "run completion", "default", "plugin", [10_000, 20_000], [15_750, 15_750], 0.05
+    )
+    # Default averages 15 s, so the limit is 15.75 s; at the limit is not worse.
+    assert verdict.limit_ms == 15_750
+    assert verdict.not_worse
+
+
+def test_over_the_limit_is_worse() -> None:
+    verdict = NotWorse("first token", "default", "plugin", [1000, 1000], [1000, 1201], 0.10)
+    # The candidate averages 1100.5 ms against a limit of 1100.
+    assert not verdict.not_worse
+
+
+def test_the_report_ends_with_the_verdict_from_the_metas_tolerance(tmp_path: Path) -> None:
+    one = write_with_meta(
+        tmp_path / "one.csv",
+        timed_runs("default", [2000, 4000]) + timed_runs("plugin", [2000, 4100]),
+        NOT_WORSE,
+    )
+    other = write_with_meta(
+        tmp_path / "other.csv",
+        timed_runs("plugin", [2000, 4300], ttft_ms=600) + timed_runs("default", [2000, 4000]),
+        NOT_WORSE,
+    )
+    report = report_lines([one, other], stall_ms=5000)
+    verdict = report[report.index("p95 over 2 files, plugin against default, tolerance 5%:") :]
+    assert verdict[1] == (
+        "  run completion: plugin 4.20 s (4.10 s, 4.30 s), default 4.00 s (4.00 s, 4.00 s), "
+        "limit 4.20 s -> not worse"
+    )
+    assert verdict[2] == (
+        "  first token: plugin 0.55 s (0.50 s, 0.60 s), default 0.50 s (0.50 s, 0.50 s), "
+        "limit 0.53 s -> worse"
+    )
+
+
+def test_without_a_tolerance_in_any_meta_there_is_no_verdict(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, {"hash": "a"})
+    other = write_with_meta(tmp_path / "other.csv", rows, None)
+    assert not any(line.startswith("p95 over") for line in report_lines([one, other], 5000))
+
+
+def test_files_whose_tolerance_differs_are_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    other = write_with_meta(
+        tmp_path / "other.csv", rows, {**NOT_WORSE, "not_worse_tolerance": 0.10}
+    )
+    with pytest.raises(ValueError, match="not_worse_tolerance"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_file_without_the_tolerance_beside_one_with_it_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    other = write_with_meta(tmp_path / "other.csv", rows, None)
+    with pytest.raises(ValueError, match="not_worse_tolerance"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_reference_that_is_not_one_of_the_variants_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("round-robin", [2000]) + timed_runs("plugin", [2000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    with pytest.raises(ValueError, match="reference"):
+        report_lines([one], stall_ms=5000)
+
+
+def test_a_side_with_no_finished_run_in_a_file_gets_no_verdict_on_that_measure(
+    tmp_path: Path,
+) -> None:
+    rows = [*timed_runs("default", [2000]), a_failed_call("plugin", "r-1")]
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    report = report_lines([one], stall_ms=5000)
+    assert "  run completion: no verdict, plugin has no p95 in one.csv" in report
+
+
+def test_run_completion_is_the_whole_run_not_its_slowest_call() -> None:
+    rows = [row("plugin", "r-1", 1, duration_ms=1000), row("plugin", "r-1", 2, duration_ms=1000)]
+    assert p95_ms(rows, "run completion") == 2000
+
+
+# P3.7b: the faster verdict, from faster_by in the metas.
+
+FASTER = {"faster_by": 0.05, "reference_variant": "default"}
+
+
+def test_faster_needs_each_files_total_lower_and_the_averaged_total_lower_by_the_share() -> None:
+    verdict = Faster(
+        "default", "plugin", [4000, 4000], [3700, 3900], [6000, 6000], [5600, 5800], 0.05
+    )
+    # Default's total averages 6 s, so the limit is 5.7 s; plugin's averages 5.7 s, at the limit.
+    assert verdict.limit_ms == 5700
+    assert verdict.lower_in_each
+    assert verdict.faster
+
+
+@pytest.mark.parametrize(
+    ("candidate_p95", "candidate_total", "lower", "faster"),
+    [
+        # The total at default's in one file: not lower there, though the average is 8.3% lower.
+        ([3700, 3700], [6000, 5000], False, False),
+        # Lower in each file, but the average only 3.3% lower.
+        ([3700, 3700], [5800, 5800], True, False),
+        # The p95 higher in both files is reported, not judged (P3.7b, decided 2026-11-12): at 26
+        # runs it is the second-slowest run.
+        ([4100, 4100], [5600, 5600], True, True),
+    ],
+)
+def test_faster_is_judged_on_total_run_time_alone(
+    candidate_p95: list[int], candidate_total: list[int], lower: bool, faster: bool
+) -> None:
+    verdict = Faster(
+        "default", "plugin", [4000, 4000], candidate_p95, [6000, 6000], candidate_total, 0.05
+    )
+    assert verdict.lower_in_each is lower
+    assert verdict.faster is faster
+
+
+def test_the_report_ends_with_the_faster_verdict_from_the_metas_share(tmp_path: Path) -> None:
+    one = write_with_meta(
+        tmp_path / "one.csv",
+        timed_runs("default", [2000, 4000]) + timed_runs("plugin", [1900, 3700]),
+        FASTER,
+    )
+    other = write_with_meta(
+        tmp_path / "other.csv",
+        timed_runs("plugin", [2000, 3800]) + timed_runs("default", [2000, 4000]),
+        FASTER,
+    )
+    report = report_lines([one, other], stall_ms=5000)
+    start = report.index("faster by 5% over 2 files, plugin against default:")
+    assert report[start + 1 :] == [
+        "  one.csv: total run time plugin 5.60 s, default 6.00 s -> lower; run completion p95 "
+        "plugin 3.70 s, default 4.00 s (reported, not judged)",
+        "  other.csv: total run time plugin 5.80 s, default 6.00 s -> lower; run completion p95 "
+        "plugin 3.80 s, default 4.00 s (reported, not judged)",
+        "  total run time averaged: plugin 5.70 s, default 6.00 s, limit 5.70 s",
+        "  run completion: faster",
+    ]
+
+
+def test_the_report_says_not_faster_when_one_file_is_not_lower(tmp_path: Path) -> None:
+    one = write_with_meta(
+        tmp_path / "one.csv",
+        timed_runs("default", [2000, 4000]) + timed_runs("plugin", [2500, 3500]),
+        FASTER,
+    )
+    other = write_with_meta(
+        tmp_path / "other.csv",
+        timed_runs("default", [2000, 4000]) + timed_runs("plugin", [1000, 3000]),
+        FASTER,
+    )
+    report = report_lines([one, other], stall_ms=5000)
+    assert (
+        "  one.csv: total run time plugin 6.00 s, default 6.00 s -> not lower; run completion p95 "
+        "plugin 3.50 s, default 4.00 s (reported, not judged)"
+    ) in report
+    assert report[-1] == "  run completion: not faster"
+
+
+def test_a_run_that_did_not_finish_gives_no_faster_verdict(tmp_path: Path) -> None:
+    rows = [
+        *timed_runs("default", [2000, 4000]),
+        *timed_runs("plugin", [1000]),
+        a_failed_call("plugin", "r-2"),
+    ]
+    one = write_with_meta(tmp_path / "one.csv", rows, FASTER)
+    report = report_lines([one], stall_ms=5000)
+    assert report[-1] == (
+        "  run completion: no verdict, plugin did not finish 1 of its runs in one.csv"
+    )
+
+
+def test_both_claims_give_both_verdicts(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000, 4000]) + timed_runs("plugin", [1900, 3700])
+    one = write_with_meta(tmp_path / "one.csv", rows, {**NOT_WORSE, **FASTER})
+    report = report_lines([one], stall_ms=5000)
+    assert "p95 over 1 files, plugin against default, tolerance 5%:" in report
+    assert "faster by 5% over 1 files, plugin against default:" in report
+    assert report[-1] == "  run completion: faster"
+
+
+def test_without_faster_by_in_any_meta_there_is_no_faster_verdict(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [1000])
+    one = write_with_meta(tmp_path / "one.csv", rows, NOT_WORSE)
+    other = write_with_meta(tmp_path / "other.csv", rows, NOT_WORSE)
+    assert not any(line.startswith("faster by") for line in report_lines([one, other], 5000))
+
+
+def test_files_whose_faster_by_differs_are_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [1000])
+    one = write_with_meta(tmp_path / "one.csv", rows, FASTER)
+    other = write_with_meta(tmp_path / "other.csv", rows, {**FASTER, "faster_by": 0.10})
+    with pytest.raises(ValueError, match="faster_by"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_file_without_faster_by_beside_one_with_it_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("default", [2000]) + timed_runs("plugin", [1000])
+    one = write_with_meta(tmp_path / "one.csv", rows, FASTER)
+    other = write_with_meta(tmp_path / "other.csv", rows, None)
+    with pytest.raises(ValueError, match="faster_by"):
+        report_lines([one, other], stall_ms=5000)
+
+
+def test_a_faster_reference_that_is_not_one_of_the_variants_is_refused(tmp_path: Path) -> None:
+    rows = timed_runs("round-robin", [2000]) + timed_runs("plugin", [1000])
+    one = write_with_meta(tmp_path / "one.csv", rows, FASTER)
+    with pytest.raises(ValueError, match="reference"):
+        report_lines([one], stall_ms=5000)
