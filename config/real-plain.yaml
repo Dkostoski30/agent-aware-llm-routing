@@ -18,6 +18,11 @@ model:
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
   tool_call_parser: hermes
+  # vLLM's scheduling policy (P4.1, card 57): priority serves the request with the lowest body priority first, ties by
+  # arrival, and preempts the highest under KV pressure; fcfs refuses any priority but 0 with a 400. With the priority
+  # rule off every call is 0, so waiting calls still go first come, first served; only the preemption victim changes,
+  # the latest arrival instead of the last scheduled call, against what P2.8 calibrated on fcfs (experiments/log.md).
+  scheduling_policy: priority
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).
 replicas: 2
 # Kubernetes pod settings for the vLLM chart (P0.7).
@@ -81,6 +86,11 @@ routing:
   # work: within 2 calls the scorers' pick by queue and prefix stands; P3.7's runs that started on the heavier pod were
   # 1-28 calls heavier, median 10-14 (experiments/log.md, P3.7b's spike).
   least_work_slack: 2
+  # The priority rule's aging (P4.1): a call of a run close to finishing may go ahead of calls that arrived up to this
+  # long before it, and no call is overtaken by one arriving more than this after it. A first guess, which P5.1
+  # measures: about one median real run (27-29 s at Gate 2), so a run's first step can be overtaken only by calls that
+  # arrive within one typical run after it.
+  priority_aging_seconds: 30
 # KEDA on the vLLM Deployment for an experiment variant with an autoscaler (P3.9b, D2): infra/charts/autoscaling, from
 # this section. A variant without one runs replicas pods. First guesses, which P3.10's and P4.5's replays measure.
 autoscaling:

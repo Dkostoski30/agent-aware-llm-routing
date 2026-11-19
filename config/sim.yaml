@@ -13,6 +13,9 @@ model:
   # Same as "real". The sim chart does not read it: no agent runs on this profile, and the simulator's replies
   # carry no tool calls the replayer reads.
   tool_call_parser: hermes
+  # The simulator has no priority scheduling, and the sim chart does not read this: infra/routing-values.sh and
+  # make experiment refuse the priority rule on any profile that is not priority (P4.1).
+  scheduling_policy: fcfs
 # Starts at the same size as "real"; autoscaling changes the count from here.
 replicas: 2
 # llm-d-inference-sim's behaviour (P2.7), calibrated on real pods (P2.8b): the timings come from the adapter's pods, as
@@ -103,6 +106,11 @@ routing:
   # work: within 2 calls the scorers' pick by queue and prefix stands; P3.7's runs that started on the heavier pod were
   # 1-28 calls heavier, median 10-14 (experiments/log.md, P3.7b's spike).
   least_work_slack: 2
+  # The priority rule's aging (P4.1): a call of a run close to finishing may go ahead of calls that arrived up to this
+  # long before it, and no call is overtaken by one arriving more than this after it. A first guess, which P5.1
+  # measures: about one median real run (27-29 s at Gate 2), so a run's first step can be overtaken only by calls that
+  # arrive within one typical run after it.
+  priority_aging_seconds: 30
 # KEDA on the vLLM Deployment for an experiment variant with an autoscaler (P3.9b, D2): infra/charts/autoscaling, from
 # this section. A variant without one runs replicas pods. First guesses, which P3.9b's and P3.10's replays measure.
 autoscaling:

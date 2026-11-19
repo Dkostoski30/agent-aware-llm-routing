@@ -34,7 +34,7 @@ RULES_OFF = {
     "warmup": False,
 }
 # A profile's routing section: the rules, the pin TTL (P3.3), the overload limits (P3.5), the
-# parallel threshold (P3.6) and the least-work slack (P3.7b).
+# parallel threshold (P3.6), the least-work slack (P3.7b) and the priority aging (P4.1).
 ROUTING_OFF = {
     **RULES_OFF,
     "run_ttl_seconds": 300,
@@ -42,10 +42,13 @@ ROUTING_OFF = {
     "overload_sustained_seconds": 10,
     "parallel_queue_threshold": 2,
     "least_work_slack": 2,
+    "priority_aging_seconds": 30,
 }
+# A profile whose pods run vLLM's priority scheduling (P4.1), which the priority rule needs.
+PRIORITY_MODEL = {"name": "m", "scheduling_policy": "priority"}
 
 
-def repo(tmp_path: Path, routing: Any = None) -> Path:
+def repo(tmp_path: Path, routing: Any = None, model: Any = None) -> Path:
     """A repo with infra/'s scripts, an empty gateway/ for picker-image.sh's hash, and profile p."""
     (tmp_path / "infra" / "helm").mkdir(parents=True)
     for name in INFRA_FILES:
@@ -54,7 +57,10 @@ def repo(tmp_path: Path, routing: Any = None) -> Path:
     (tmp_path / "gateway").mkdir()
     (tmp_path / "gateway" / "go.mod").write_text("module example\n")
     (tmp_path / "config").mkdir()
-    profile = {"model": {"name": "m"}, "routing": ROUTING_OFF if routing is None else routing}
+    profile = {
+        "model": {"name": "m"} if model is None else model,
+        "routing": ROUTING_OFF if routing is None else routing,
+    }
     (tmp_path / "config" / "p.yaml").write_text(yaml.safe_dump(profile))
     return tmp_path
 
@@ -109,6 +115,7 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
         "overloadSustainedSeconds": 10,
         "parallelQueueThreshold": 2,
         "leastWorkSlack": 2,
+        "priorityAgingSeconds": 30,
         "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
@@ -252,6 +259,45 @@ def test_least_context_first_reaches_the_plugin(tmp_path: Path) -> None:
     assert router["parameters"]["leastWorkFirst"] is False
 
 
+def test_priority_and_its_aging_reach_the_plugin_as_an_integer(tmp_path: Path) -> None:
+    """As the least-work slack: 45.0 must reach the plugin as 45."""
+    root = repo(tmp_path, {**ROUTING_OFF, "priority_aging_seconds": 45.0}, PRIORITY_MODEL)
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "priority": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    assert router["parameters"]["priority"] is True
+    assert type(router["parameters"]["priorityAgingSeconds"]) is int
+    assert router["parameters"]["priorityAgingSeconds"] == 45
+
+
+def test_an_aging_of_zero_is_accepted(tmp_path: Path) -> None:
+    """0 is first come, first served by arrival at the picker: a rule with no reordering, for a
+    control."""
+    root = repo(tmp_path, {**ROUTING_OFF, "priority_aging_seconds": 0}, PRIORITY_MODEL)
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "priority": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+
+
+@pytest.mark.parametrize(
+    ("profile", "accepted"), [("real", True), ("real-plain", True), ("demo", True), ("sim", False)]
+)
+def test_priority_is_accepted_only_on_profiles_whose_pods_run_priority_scheduling(
+    tmp_path: Path, profile: str, accepted: bool
+) -> None:
+    """The simulator has no priority scheduling (card 57), so on sim the rule would do nothing."""
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "priority": True}})
+    done = routing_values(REPO_ROOT, profile, str(rules))
+    assert (done.returncode == 0) is accepted, done.stderr
+    if not accepted:
+        assert "scheduling_policy" in done.stderr
+
+
 @pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
 def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
     done = routing_values(REPO_ROOT, profile)
@@ -367,6 +413,21 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
             },
             "least_work_first and least_context_first",
         ),
+        # The priority aging is the profile's too (P4.1), and the plugin refuses a bad one only at
+        # start.
+        (None, {"routing": {"plugin": True, "priority_aging_seconds": 10}}, "the profile's"),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "priority_aging_seconds"},
+            None,
+            "routing.priority_aging_seconds",
+        ),
+        ({**ROUTING_OFF, "priority_aging_seconds": -1}, None, "priority_aging_seconds"),
+        ({**ROUTING_OFF, "priority_aging_seconds": 1.5}, None, "priority_aging_seconds"),
+        ({**ROUTING_OFF, "priority_aging_seconds": "30"}, None, "priority_aging_seconds"),
+        ({**ROUTING_OFF, "priority_aging_seconds": True}, None, "priority_aging_seconds"),
+        # vLLM answers 400 to a priority other than 0 unless its pods run priority scheduling, and
+        # the rule writes one on every call; a profile without the key says nothing of its pods.
+        (None, {"routing": {"plugin": True, "priority": True}}, "model.scheduling_policy"),
         (True, None, "map"),
         (None, {"routing": True}, "map"),
         (None, {"routing": ["plugin"]}, "map"),

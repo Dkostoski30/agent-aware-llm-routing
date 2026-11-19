@@ -8,7 +8,8 @@
 // one x-parallel-group stay on the run's pod while it has room for them, and the rest go to pods that have room. With
 // least work first on (P3.7b), a run's first call goes to the pod whose pinned runs have the least work left, unless
 // the pods are level within the slack; with least context first on instead, to the pod whose pinned runs' latest
-// calls are the smallest in bytes.
+// calls are the smallest in bytes. With priority on (P4.1), every call's body carries a vLLM priority that serves runs
+// close to finishing first, within an aging bound.
 package runrouter
 
 import (
@@ -29,6 +30,7 @@ import (
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
@@ -88,8 +90,8 @@ func Register() {
 	registerDecisions.Do(func() { ctrlmetrics.Registry.MustRegister(decisions) })
 }
 
-// RunRouter holds the routing flags, the runs' pins, the pods' overload timers, the parallel groups' calls in flight
-// and the first-call rule that is on, if any.
+// RunRouter holds the routing flags, the runs' pins, the pods' overload timers, the parallel groups' calls in flight,
+// the first-call rule that is on, if any, and the priority rule's aging.
 type RunRouter struct {
 	typedName fwkplugin.TypedName
 	flags     Flags
@@ -98,14 +100,17 @@ type RunRouter struct {
 	parallel  *parallel
 	// nil when neither first-call rule is on; parseParameters refuses both.
 	firstCall *firstCallRule
+	// The priority rule's aging, and the clock it reads a call's arrival from.
+	aging time.Duration
+	now   func() time.Time
 	// The factory's logger, for the end-of-run server, whose requests carry none.
 	logger logr.Logger
 }
 
 func newRunRouter(typedName fwkplugin.TypedName, flags Flags, ttl time.Duration, limits Limits,
-	parallelThreshold, leastWorkSlack int, now func() time.Time, logger logr.Logger) *RunRouter {
+	parallelThreshold, leastWorkSlack int, aging time.Duration, now func() time.Time, logger logr.Logger) *RunRouter {
 	router := &RunRouter{typedName: typedName, flags: flags, pins: newPins(ttl, now), overload: newOverload(limits, now),
-		parallel: newParallel(parallelThreshold), logger: logger}
+		parallel: newParallel(parallelThreshold), aging: aging, now: now, logger: logger}
 	switch {
 	case flags.LeastWork:
 		rule := leastWorkRule(leastWorkSlack)
@@ -132,7 +137,7 @@ func Factory(name string, parameters *json.Decoder, handle fwkplugin.Handle) (fw
 		return nil, fmt.Errorf("plugin %s: end-of-run port: %w", Type, err)
 	}
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: name}, params.Flags, params.RunTTL, params.Overload,
-		params.ParallelQueueThreshold, params.LeastWorkSlack, time.Now, logger)
+		params.ParallelQueueThreshold, params.LeastWorkSlack, params.PriorityAging, time.Now, logger)
 	go router.serve(ctx, listener)
 	flags := params.Flags
 	logger.Info("Plugin loaded", "type", Type, "name", name,
@@ -142,7 +147,8 @@ func Factory(name string, parameters *json.Decoder, handle fwkplugin.Handle) (fw
 		"runTTLSeconds", int(params.RunTTL/time.Second), "endOfRunPort", params.EndOfRunPort,
 		"overloadQueueThreshold", params.Overload.QueueThreshold,
 		"overloadSustainedSeconds", int(params.Overload.Sustained/time.Second),
-		"parallelQueueThreshold", params.ParallelQueueThreshold, "leastWorkSlack", params.LeastWorkSlack)
+		"parallelQueueThreshold", params.ParallelQueueThreshold, "leastWorkSlack", params.LeastWorkSlack,
+		"priorityAgingSeconds", int(params.PriorityAging/time.Second))
 	return router, nil
 }
 
@@ -256,6 +262,11 @@ func (r *RunRouter) pinnedCandidate(runID string, endpoints []scheduling.Endpoin
 // rule's reason when it left one pod, first when the scorers chose among level pods; the run is pinned to the pod
 // chosen. Every pin written or renewed holds the run's progress as of this call.
 func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, result *scheduling.SchedulingResult) error {
+	var priority int64
+	written := false
+	if r.flags.Priority {
+		priority, written = r.writePriority(ctx, request)
+	}
 	runID := request.Headers[headerRunID]
 	if runID == "" {
 		return nil
@@ -266,6 +277,9 @@ func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.Inferenc
 	}
 	target := primary.TargetEndpoints[0].GetMetadata().ID.Name
 	fields := []any{"run-id", runID, "step", request.Headers[headerStep], "pod", target}
+	if written {
+		fields = append(fields, "priority", priority)
+	}
 	if r.flags.Affinity {
 		now := progressOf(request)
 		reason := ""
@@ -327,6 +341,28 @@ func (r *RunRouter) ResponseBody(_ context.Context, request *scheduling.Inferenc
 		verdict.held != nil {
 		r.parallel.release(verdict.held)
 	}
+}
+
+// writePriority puts the call's priority (priorityOf) into its body, in place of any the client sent, and reports it.
+// It runs for every call, a run's or not: vLLM reads a call without one as 0, which would go ahead of every call the
+// rule numbered. The picker re-serializes a body marked mutated before the gateway forwards it (llm-d-router v0.11.0,
+// requestcontrol/director.go's repackage); requestHandler.propagatePriority stays off, or the picker would write its
+// InferenceObjective's one priority over this. A body the picker did not parse into a map cannot take it, and the call
+// goes on at vLLM's 0, said in a line under its request-id.
+func (r *RunRouter) writePriority(ctx context.Context, request *scheduling.InferenceRequest) (int64, bool) {
+	priority := priorityOf(request.Headers, r.now(), r.aging)
+	written := false
+	if request.Body != nil {
+		request.Body.MutatePayloadMap(func(payload fwkrh.PayloadMap) {
+			payload["priority"] = priority
+			written = true
+		})
+	}
+	if !written {
+		log.FromContext(ctx).Info("Priority not written", "request-id", request.RequestID,
+			"run-id", request.Headers[headerRunID], "reason", "the body is not a parsed JSON map")
+	}
+	return priority, written
 }
 
 // progressOf is what a pin keeps of this call: its run's remaining work and the call's body size in bytes, which

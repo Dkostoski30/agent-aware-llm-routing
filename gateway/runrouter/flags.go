@@ -53,6 +53,9 @@ type Parameters struct {
 	// A pod whose pinned remaining work is at most this over the lightest pod's is level with it for a run's first call
 	// (routing.least_work_slack, P3.7b).
 	LeastWorkSlack int
+	// How far ahead of later arrivals a run close to finishing may go; a call is never overtaken by one arriving more
+	// than this after it (routing.priority_aging_seconds, P4.1).
+	PriorityAging time.Duration
 	// The port POST /runs/{id}/end is served on (infra/routing-values.sh, which opens it on the picker's Service).
 	EndOfRunPort int
 }
@@ -83,13 +86,15 @@ type raw struct {
 	ParallelQueueThreshold *int `json:"parallelQueueThreshold"`
 	// The least-work rule's slack.
 	LeastWorkSlack *int `json:"leastWorkSlack"`
+	// The priority rule's aging.
+	PriorityAgingSeconds *int `json:"priorityAgingSeconds"`
 }
 
 // parseParameters reads every parameter from the decoder the framework hands the factory. It refuses unknown keys
 // (the decoder is strict), missing or null ones, a TTL that is not a positive whole number of seconds, a port outside
 // 1-65535, a queue threshold or a parallel threshold that is not a whole number of calls, 0 or more, a sustained time
-// that is not a positive whole number of seconds, a least-work slack that is not a whole number, 0 or more, both
-// first-call rules on, and no parameters at all.
+// that is not a positive whole number of seconds, a least-work slack that is not a whole number, 0 or more, a priority
+// aging that is not a whole number of seconds, 0 or more, both first-call rules on, and no parameters at all.
 func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if decoder == nil {
 		return Parameters{}, errors.New("no parameters: every routing flag must be set")
@@ -136,6 +141,11 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if in.LeastWorkSlack == nil || *in.LeastWorkSlack < 0 {
 		return Parameters{}, errors.New("parameters: leastWorkSlack must be a whole number, 0 or more")
 	}
+	if in.PriorityAgingSeconds == nil || *in.PriorityAgingSeconds < 0 || *in.PriorityAgingSeconds > maxDurationSeconds {
+		return Parameters{}, fmt.Errorf(
+			"parameters: priorityAgingSeconds must be a whole number of seconds, 0 or more, at most %d",
+			maxDurationSeconds)
+	}
 	if *in.LeastWork && *in.LeastContext {
 		return Parameters{}, errors.New("parameters: leastWorkFirst and leastContextFirst are both on: each places a " +
 			"run's first call, by another measure")
@@ -157,6 +167,7 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 		},
 		ParallelQueueThreshold: *in.ParallelQueueThreshold,
 		LeastWorkSlack:         *in.LeastWorkSlack,
+		PriorityAging:          time.Duration(*in.PriorityAgingSeconds) * time.Second,
 		EndOfRunPort:           *in.EndOfRunPort,
 	}, nil
 }

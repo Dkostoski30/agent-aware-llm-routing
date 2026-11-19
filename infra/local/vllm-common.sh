@@ -19,13 +19,14 @@ VLLM_EXTRA_ARGS=()
 
 # vllm_serve_args <profile>: fills the array VLLM_ARGS with the vLLM server flags for the profile.
 vllm_serve_args() {
-  local name revision gpu_util kv_bytes max_len parser
+  local name revision gpu_util kv_bytes max_len parser policy
   name=$(profile_value "$1" .model.name)
   revision=$(profile_value "$1" .model.revision)
   gpu_util=$(profile_value "$1" .model.gpu_memory_utilization)
   kv_bytes=$(profile_value "$1" .model.kv_cache_memory_bytes)
   max_len=$(profile_value "$1" .model.max_model_len)
   parser=$(profile_value "$1" .model.tool_call_parser)
+  policy=$(profile_value "$1" .model.scheduling_policy)
   # --tokenizer-revision: without it vLLM loads the tokenizer (and chat template) from main, not from the pinned commit.
   # --enforce-eager: CUDA graphs cost extra VRAM and startup time; on a 4GB GPU shared by two replicas both matter.
   VLLM_ARGS=(
@@ -36,6 +37,7 @@ vllm_serve_args() {
     --kv-cache-memory "$kv_bytes"
     --max-model-len "$max_len"
     --tool-call-parser "$parser"
+    --scheduling-policy "$policy"
     --enable-auto-tool-choice
     --enable-prefix-caching
     --enforce-eager

@@ -39,6 +39,9 @@ spec:
             - --kv-cache-memory={{ required "model.kv_cache_memory_bytes from the profile" .Values.model.kv_cache_memory_bytes | int64 }}
             - --max-model-len={{ required "model.max_model_len from the profile" .Values.model.max_model_len }}
             - --tool-call-parser={{ required "model.tool_call_parser from the profile" .Values.model.tool_call_parser }}
+            # The order vLLM serves waiting calls in (P4.1): priority reads each call's body priority, which the picker's
+            # priority rule writes; with the rule off every call is 0, first come, first served.
+            - --scheduling-policy={{ required "model.scheduling_policy from the profile" .Values.model.scheduling_policy }}
             - --enable-auto-tool-choice
             - --enable-prefix-caching
             - --enforce-eager

@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -144,6 +144,14 @@ service-check:
 # logs its choices (P1.2).
 gateway-check:
 	bash infra/checks/gateway_check.sh
+
+# Priority through the gateway, shown live (P4.1): vLLM scaled to one pod, long first-step calls fill it, then a
+# last-step call must go ahead of the ones still waiting with the priority rule on, and not with it off. Switches the
+# picker twice with infra/set-routing.sh, then puts the profile's routing and replicas back (the second pod reloads the
+# model, 2-3 min). Real pods only: the simulator has no priority scheduling.
+priority-check:
+	@if [ -z "$(PROFILE)" ]; then echo "usage: make priority-check PROFILE=real|demo"; exit 2; fi
+	uv run --locked python infra/checks/priority_check.py $(PROFILE)
 
 # The Endpoint Picker's image built from gateway/ into k3s, tagged with a hash of gateway/; skipped if k3s has that tag
 # (P3.1). Run it after a change to gateway/, then infra/set-routing.sh, which deploys the build but never makes it. The

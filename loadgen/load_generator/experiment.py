@@ -183,8 +183,8 @@ TOKENS_QUERY = (
     "+ increase(vllm:generation_tokens_total[{window}s]))"
 )
 # The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
-# overload limits (P3.5), the parallel threshold (P3.6) and the least-work slack (P3.7b): a variant
-# sets rules only (infra/routing-values.sh).
+# overload limits (P3.5), the parallel threshold (P3.6), the least-work slack (P3.7b) and the
+# priority aging (P4.1): a variant sets rules only (infra/routing-values.sh).
 PROFILE_ONLY_KEYS = frozenset(
     {
         "run_ttl_seconds",
@@ -192,6 +192,7 @@ PROFILE_ONLY_KEYS = frozenset(
         "overload_sustained_seconds",
         "parallel_queue_threshold",
         "least_work_slack",
+        "priority_aging_seconds",
     }
 )
 # A later step that stayed on its pod finds its run's previous prompt cached, less up to this many
@@ -427,9 +428,10 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
     """Every rule a variant sets is one its profile has, no rule is on while the plugin is off, and
     none of the overload guard, the parallel rule and the two first-call rules is on while affinity
     is off: each would do nothing and the variant would read as its result. The two first-call
-    rules place the same calls by different measures, so not both. infra/routing-values.sh
-    refuses all of these too, but only when the variant's switch runs, which may be hours into the
-    run."""
+    rules place the same calls by different measures, so not both. The priority rule needs pods
+    that run vLLM's priority scheduling, or every call it numbers gets a 400 (P4.1).
+    infra/routing-values.sh refuses all of these too, but only when the variant's switch runs, which
+    may be hours into the run."""
     for variant in experiment.variants:
         routing = profiles[variant.profile]["routing"]
         known = {rule: on for rule, on in routing.items() if rule not in PROFILE_ONLY_KEYS}
@@ -473,6 +475,12 @@ def check_routing(experiment: Experiment, profiles: Mapping[str, Mapping[str, An
             raise ExperimentError(
                 f"variant {variant.name}: least_work_first and least_context_first both on: each "
                 "places a run's first call"
+            )
+        policy = profiles[variant.profile]["model"].get("scheduling_policy")
+        if rules["priority"] and policy != "priority":
+            raise ExperimentError(
+                f"variant {variant.name}: priority on, but profile {variant.profile}'s "
+                f"model.scheduling_policy is {policy}, not priority: vLLM would refuse every call"
             )
 
 

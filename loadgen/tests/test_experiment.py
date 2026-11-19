@@ -2161,6 +2161,42 @@ def test_a_variant_may_not_set_the_profiles_least_work_slack(tmp_path: Path) -> 
         check_routing(experiment, {"real": real})
 
 
+def test_a_variant_may_not_set_the_profiles_priority_aging(tmp_path: Path) -> None:
+    """The aging is the profile's, as the least-work slack is (P4.1)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "priority_aging_seconds": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match="priority_aging_seconds"):
+        check_routing(experiment, {"real": real})
+
+
+def test_priority_on_a_profile_whose_pods_run_priority_scheduling_is_accepted(
+    tmp_path: Path,
+) -> None:
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "priority": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    assert real["model"]["scheduling_policy"] == "priority"
+    check_routing(experiment, {"real": real})
+
+
+@pytest.mark.parametrize("policy", ["fcfs", None])
+def test_priority_on_a_profile_without_priority_scheduling_is_refused(
+    tmp_path: Path, policy: str | None
+) -> None:
+    """vLLM answers 400 to a priority other than 0 under fcfs, so every call of the variant would
+    fail; infra/routing-values.sh refuses it too, but only at the variant's switch (P4.1)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "priority": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    if policy is None:
+        del real["model"]["scheduling_policy"]
+    else:
+        real["model"]["scheduling_policy"] = policy
+    with pytest.raises(ExperimentError, match="scheduling_policy"):
+        check_routing(experiment, {"real": real})
+
+
 def test_faster_by_and_the_reference_variant_go_into_the_meta(tmp_path: Path) -> None:
     experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, ROUTER_VARIANT], faster_by=0.05)
     assert experiment.faster_by == 0.05

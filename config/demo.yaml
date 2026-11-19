@@ -15,6 +15,8 @@ model:
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
   tool_call_parser: hermes
+  # Same as "real" (P4.1): the priority rule needs it, and with the rule off every call is 0, first come, first served.
+  scheduling_policy: priority
 # Only one 1.7B pod fits on the 4GB GPU (D8).
 replicas: 1
 # Kubernetes pod settings for the vLLM chart (P0.7).
@@ -76,6 +78,11 @@ routing:
   # work: within 2 calls the scorers' pick by queue and prefix stands; P3.7's runs that started on the heavier pod were
   # 1-28 calls heavier, median 10-14 (experiments/log.md, P3.7b's spike).
   least_work_slack: 2
+  # The priority rule's aging (P4.1): a call of a run close to finishing may go ahead of calls that arrived up to this
+  # long before it, and no call is overtaken by one arriving more than this after it. A first guess, which P5.1
+  # measures: about one median real run (27-29 s at Gate 2), so a run's first step can be overtaken only by calls that
+  # arrive within one typical run after it.
+  priority_aging_seconds: 30
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

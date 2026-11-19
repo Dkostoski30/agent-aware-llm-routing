@@ -38,11 +38,15 @@ const parallelJSON = `"parallelQueueThreshold": 2`
 // The least-work slack infra/routing-values.sh writes from every profile (testLeastWorkSlack).
 const leastWorkJSON = `"leastWorkSlack": 2`
 
+// The priority rule's aging infra/routing-values.sh writes from every profile (testAging).
+const agingJSON = `"priorityAgingSeconds": 30`
+
 // parametersJSON is the plugin's config as infra/routing-values.sh writes it: the rules, the profile's
-// routing.run_ttl_seconds, overload limits, parallel threshold and least-work slack, and the end-of-run port.
+// routing.run_ttl_seconds, overload limits, parallel threshold, least-work slack and priority aging, and the end-of-run
+// port.
 func parametersJSON(rules string, port int) string {
-	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, %s, "endOfRunPort": %d}`, rules, overloadJSON, parallelJSON,
-		leastWorkJSON, port)
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, %s, %s, "endOfRunPort": %d}`, rules, overloadJSON,
+		parallelJSON, leastWorkJSON, agingJSON, port)
 }
 
 // freePort is a port nothing listens on, for a factory that opens the end-of-run server. Each test takes its own, so
@@ -86,7 +90,7 @@ func capture() (context.Context, *[]map[string]any) {
 // newRouter builds the plugin without the factory, so no port is opened, on a clock the test moves.
 func newRouter(flags Flags, clock *fakeClock) *RunRouter {
 	return newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, flags, testTTL, testLimits,
-		testParallelThreshold, testLeastWorkSlack, clock.now, logr.Discard())
+		testParallelThreshold, testLeastWorkSlack, testAging, clock.now, logr.Discard())
 }
 
 func endpoint(name string) scheduling.Endpoint {
@@ -379,7 +383,7 @@ func TestEndOfRunLogsTheRunUnderRunID(t *testing.T) {
 		lines = append(lines, line)
 	}, funcr.Options{Verbosity: 3})
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: "thesis"}, Flags{Affinity: true}, testTTL,
-		testLimits, testParallelThreshold, testLeastWorkSlack, newFakeClock().now, logger)
+		testLimits, testParallelThreshold, testLeastWorkSlack, testAging, newFakeClock().now, logger)
 	if err := router.PreRequest(context.Background(), request(map[string]string{headerRunID: "run-1"}),
 		resultOn("pod-a")); err != nil {
 		t.Fatal(err)
@@ -394,7 +398,8 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	port := freePort(t)
 	raw := fmt.Sprintf(`{"affinity": true, "overloadGuard": false, "parallelSpill": true, "leastWorkFirst": false,
 		"leastContextFirst": true, "priority": false, "warmup": true, "runTTLSeconds": 120, "overloadQueueThreshold": 3,
-		"overloadSustainedSeconds": 20, "parallelQueueThreshold": 4, "leastWorkSlack": 5, "endOfRunPort": %d}`, port)
+		"overloadSustainedSeconds": 20, "parallelQueueThreshold": 4, "leastWorkSlack": 5, "priorityAgingSeconds": 45,
+		"endOfRunPort": %d}`, port)
 	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
 	if err != nil {
 		t.Fatal(err)
@@ -417,12 +422,15 @@ func TestFactoryReadsEveryParameter(t *testing.T) {
 	if router.firstCall == nil || router.firstCall.reason != reasonLeastContext {
 		t.Fatalf("first-call rule %+v, want least context", router.firstCall)
 	}
+	if router.aging != 45*time.Second {
+		t.Fatalf("priority aging %s, want 45s", router.aging)
+	}
 }
 
 func TestFactoryHandsTheLeastWorkRuleItsSlack(t *testing.T) {
 	rules := strings.Replace(allOffRules, `"leastWorkFirst": false`, `"leastWorkFirst": true`, 1)
-	raw := fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": 5, "endOfRunPort": %d}`, rules,
-		overloadJSON, parallelJSON, freePort(t))
+	raw := fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, "leastWorkSlack": 5, %s, "endOfRunPort": %d}`, rules,
+		overloadJSON, parallelJSON, agingJSON, freePort(t))
 	built, err := Factory("thesis", fwkplugin.StrictDecoder(json.RawMessage(raw)), testHandle{ctx: t.Context()})
 	if err != nil {
 		t.Fatal(err)
@@ -577,6 +585,14 @@ func TestFactoryRefusesParametersItCannotTrust(t *testing.T) {
 		{"a sustained time too long for a duration",
 			overloadParameters(`"overloadQueueThreshold": 1, "overloadSustainedSeconds": 9223372037`),
 			"overloadSustainedSeconds"},
+		{"no priority aging", agingParameters(""), "priorityAgingSeconds"},
+		{"null for the priority aging", agingParameters(`, "priorityAgingSeconds": null`), "priorityAgingSeconds"},
+		{"a negative priority aging", agingParameters(`, "priorityAgingSeconds": -1`), "priorityAgingSeconds"},
+		{"a priority aging that is not whole seconds", agingParameters(`, "priorityAgingSeconds": 1.5`),
+			"priorityAgingSeconds"},
+		// One second more than a time.Duration holds.
+		{"a priority aging too long for a duration", agingParameters(`, "priorityAgingSeconds": 9223372037`),
+			"priorityAgingSeconds"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -597,6 +613,12 @@ func overloadParameters(limits string) string {
 		leastWorkJSON)
 }
 
+// agingParameters is every parameter but the priority aging, then aging, which is empty or starts with a comma.
+func agingParameters(aging string) string {
+	return fmt.Sprintf(`{%s, "runTTLSeconds": 300, %s, %s, %s, "endOfRunPort": 9010%s}`, allOffRules, overloadJSON,
+		parallelJSON, leastWorkJSON, aging)
+}
+
 func TestFactoryLogsItsParametersOnce(t *testing.T) {
 	ctx, lines := capture()
 	ctx, cancel := context.WithCancel(ctx)
@@ -612,9 +634,10 @@ func TestFactoryLogsItsParametersOnce(t *testing.T) {
 	if line["type"] != Type || line["affinity"] != false || line["warmup"] != false ||
 		line["runTTLSeconds"] != float64(300) || line["overloadQueueThreshold"] != float64(1) ||
 		line["overloadSustainedSeconds"] != float64(10) || line["parallelQueueThreshold"] != float64(2) ||
-		line["leastWorkFirst"] != false || line["leastWorkSlack"] != float64(2) || line["leastContextFirst"] != false {
-		t.Fatalf("line %v lacks the type, the flags, the TTL, the overload limits, the parallel threshold or the "+
-			"least-work slack", line)
+		line["leastWorkFirst"] != false || line["leastWorkSlack"] != float64(2) || line["leastContextFirst"] != false ||
+		line["priority"] != false || line["priorityAgingSeconds"] != float64(30) {
+		t.Fatalf("line %v lacks the type, the flags, the TTL, the overload limits, the parallel threshold, the "+
+			"least-work slack or the priority aging", line)
 	}
 }
 

@@ -13,6 +13,29 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-19 · P4.1 · green (a last step went ahead of six waiting first steps with priority on, of none with it off)
+Command: tests first (Claude: `make test`'s Python and Go parts, 2066 Python tests, `make lint`; 23 changes to rule lines over three rounds: 2 survivors were redundant code (a step-0 guard, a fallback for a pod name vLLM never sends late), removed; 2 showed missing cases (a stray call in an engine, a preempted filler), added; all caught after) · the user: `make lint`, `make down`, `make up`, then `make priority-check PROFILE=real` four times (the last 13:06-13:16 local), each through the gateway and the picker built from `gateway/`
+Result:
+- **`priority-check: passed`**, on one real pod (vllm-6cbddb6859-26kjm), the adapter's model, prompts of 1,752-1,753 tokens (the KV cache of 4,384 tokens holds two), 150 tokens each:
+  | mode | queue when the finisher went (running, waiting) | fillers waiting at its send | of them served after it | finisher's first byte after its send |
+  |---|---|---|---|---|
+  | priority on | (2, 6) | 3, 4, 5, 6, 7, 8 | all six | 31.8 s |
+  | priority off (plugin on, the control) | (2, 6) | 3, 4, 5, 6, 7, 8 | none | 81.7 s |
+- With priority on, the finisher took the first free slot, beside filler-3: its first byte came 1.8 s before filler-3's, and fillers 4-8 followed two at a time. With priority off it came in the fourth pair, after filler-7. So the picker's rewritten body reaches vLLM through agentgateway v1.6.0 (D3's spike), and vLLM v0.31.0 orders its queue by it.
+- The profile's routing and both pods came back at the end (`set-routing: config/real.yaml is serving`, `deployment "vllm" successfully rolled out`).
+Notes:
+- Decided while planning (the user, 2026-11-19, card 57): the picker's plugin writes the priority in PreRequest, behind `routing.priority`, through llm-d-router v0.11.0's `MutatePayloadMap`, with `propagatePriority` left off (on, it would write the InferenceObjective's one priority over it). Priority = arrival in Unix ms + `priority_aging_seconds` × (expected − step) / expected, 0 past the expected steps; lower first. Aging as a deadline: no call is overtaken by one arriving more than the aging after it, proven by a property test over 10,000 random pairs, not by this check, since vLLM cannot raise a queued call's priority. First guess 30 s, about one median real run. `model.scheduling_policy` is priority in real, real-plain and demo and fcfs in sim; the rule on an fcfs profile is refused by `routing-values.sh` and `make experiment`, since vLLM answers 400 to any priority but 0 there.
+- Claude's choices: every call gets a priority, also one without `x-run-id` (set-routing's probe, smoke), since vLLM reads a missing one as 0, ahead of everything; a call without the headers gets the whole aging. A body the picker did not parse into a map keeps vLLM's 0 and a "Priority not written" line.
+- With the rule off every call is 0, so the waiting queue is first come, first served as before; under KV pressure vLLM now preempts the latest arrival instead of the last scheduled call. P2.8 calibrated on fcfs; not rerun.
+- **Three tries before the pass, each the check's fault, not the rule's** (rule 8: stopped after each from the second on and asked the user):
+  - First try: crash, `KeyError: system_fingerprint`. vLLM v0.31.0 names the pod on the last chunk only (`chat_completion/serving.py`); the check now reads it there.
+  - 11:48-11:55, on two pods after `make down`, `make up`: FAIL by the check's verdict. Priority on, the finisher went ahead of fillers 3, 4 and 8 but not filler-2; off, after all. Prometheus showed pod 26kjm's engine counted no call for ~50 s after the fillers were sent, then running 2 and waiting 3 in one scrape: all five reached it together, and vLLM started the finisher and filler-2 at once. The check had counted filler-2 as waiting for having no first token. Since then the finisher goes only once the pods' own `/metrics` show every filler running past its first token, waiting or ended (the user's choice).
+  - ~12:16: no queue formed in 180 s, no finisher sent. One pod got its fillers ~15 s before the other, and a call counts as running ~10 s before its first token, so the two pods' queues never stood at once. Since then the check scales vLLM to one pod and back (the user's choice).
+- Finding, for P4.3-P4.5: right after `make up` a pod took ~50 s before its engine counted the calls sent to it, while the other took 12 s; the delay is between the client and the engine, and its place is not known.
+- Spec changes to existing tests: the plugin's config gained a required `priorityAgingSeconds`, so `plugin_test.go`'s JSON helpers and one least-work factory test, and `test_routing_values.py`'s profile fixture and expected parameters, carry it. No assertion was weakened.
+- What this does not show: any effect on run completion or first-token time under a replay; P5.1's ablation measures it. One pod, one seedless check. The simulator has no priority scheduling, so the rule has no sim result.
+- Size: ~1,260 changed lines with tests, over PLAN rule 1's rough 200, as P3.3 and P3.4.
+
 ### 2026-11-19 · Gate 3 · green with stated limits (closed from the existing results, no rerun)
 Command: none new. The gate is read from the Phase 3 entries below (decided by the user, 2026-11-19); `make test` and `make lint` are the user's run before the `gate-3` tag
 Result:
