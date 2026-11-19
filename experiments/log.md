@@ -13,6 +13,18 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-19 · P3.13c · green (steps under each answer, the cluster panel beside the chat behind a toggle)
+Command: tests first (Claude: 218 UI specs, `make lint`; 15 changes to rule lines, each failed a spec; headless Chrome screenshots against a throwaway mock app backend, not kept in the repo) · the user: card 52's done-when (`make test`, `make lint`, `make down`, `make up`, `make app-forward`, `make ui PROFILE=real`, the browser check of PLAN.md's P3.13 row)
+Result:
+- The user: "its good". The full output of `make test`, `make lint` and the browser check was not handed to Claude.
+- Claude's side: 218/218 UI specs (24 new: saved answers 12, the panel toggle 3, the layout 3, the top bar 2, saved step cards 3, the chat screen 1), `make lint` green. Screenshots at 1366 px with the chat list and panel each shown or hidden: three columns fit (list 240 px, panel 400 px), three step cards per row; the login screen was not screenshotted.
+Notes:
+- Decided while planning (the user, 2026-11-19): one task, no split. The panel moved from app.ts into the chat screens as their third column (chat list | chat | panel), so the login screens have none; the top bar's Cluster button beside Chats shows or hides it, remembered per browser like the list. Saved steps from `GET /runs/{id}` lack `run_id` and `expected_steps`, so `run-view.ts` gained `savedStepCards` on the fields both share. The answer whose run just ended opens with its steps; every other answer, and all of them after a reload, start folded. UI cohesion stays in Phase 6.
+- Claude's choices: the steps are read on the first expand only (run and calls together); a 404 says in one line that the steps are no longer kept, with no TTL number since the UI does not know it, and is not asked again; any other failure says the steps could not be read and is tried again on the next expand; calls that fail leave the cards without badges. A run whose event stream was lost also counts as just ended. Live and saved steps share one grid (`chats/step-grid.ts`). Hiding the panel removes it, so it stops polling `/cluster`.
+- Known limit: P2.6c's warning ("No tool result backs this answer") needs the steps, so on a saved answer it shows only once expanded; since P3.13b a saved answer had shown none.
+- Two existing chat-screen specs gained an expectation for the run read of the answer that now opens on its own; a spec change for the new behaviour, nothing weakened. `ui/icon.ts` gained the design system's `pods` icon for the Cluster button, outside the files agreed at planning.
+- The design system README's "the panel never collapses" gives way to D14's toggle; the README is not edited.
+
 ### 2026-11-19 · P3.11 · green (the cluster panel's numbers match Grafana's during a real burst replay)
 Command: tests first (Claude: `make test` 2014 Python + Go + 22 training + 194 UI specs, `make lint`; 14 changes to rule lines, 12 failed a test and the 2 left were redundant code, removed) · the user: `make test`, `make lint`, `make down`, `make up`, `make app-forward`, `make ui PROFILE=real`, `make grafana`, `make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=burst PROFILE=real OUT=experiments/results/replays/p3-11-panel-burst.jsonl` (started ~01:53 local), the panel beside Grafana's "vLLM pods" dashboard while it ran
 Result:

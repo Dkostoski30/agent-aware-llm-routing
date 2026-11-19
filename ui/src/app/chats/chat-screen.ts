@@ -2,19 +2,20 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { Subject, catchError, of, startWith, switchMap, tap } from 'rxjs';
-import { Answer } from '../ui/answer';
 import { Composer } from '../ui/composer';
 import { Icon } from '../ui/icon';
 import { Attachments } from './attachments';
 import { ChatWithMessages, Chats, refusal } from './chats';
 import { RunProgress } from './run-progress';
+import { SavedAnswer } from './saved-answer';
 
 /** An open chat (P3.13b): its saved messages, the composer docked below. An answer whose run is still running
  * follows the run's events through the app backend; when the run ends the chat is read again, so the saved answer
- * is what stays on screen, after a reload too. */
+ * is what stays on screen, after a reload too. That answer opens with its steps, which were on screen until then;
+ * every other saved answer starts with them folded away (P3.13c). */
 @Component({
   selector: 'app-chat-screen',
-  imports: [Answer, Composer, Icon, RunProgress],
+  imports: [Composer, Icon, RunProgress, SavedAnswer],
   template: `
     <div class="ag-scroll">
       <div class="ag-column">
@@ -31,16 +32,12 @@ import { RunProgress } from './run-progress';
               }
             </div>
           } @else if (message.status === 'running' && message.run_id) {
-            <app-run-progress [runId]="message.run_id" (runEnded)="readAgain()" />
-          } @else if (message.status === 'done') {
-            <app-answer [text]="message.text" />
+            <app-run-progress [runId]="message.run_id" (runEnded)="ended(message.run_id)" />
           } @else {
-            <div class="ag-section">
-              <div class="ag-notice ag-notice--fail">
-                <app-icon name="warn" />
-                <div><b>The run failed.</b> {{ message.text }}</div>
-              </div>
-            </div>
+            <app-saved-answer
+              [message]="message"
+              [open]="message.run_id === justEnded()"
+            />
           }
         }
         @if (lost()) {
@@ -92,6 +89,8 @@ export class ChatScreen {
   protected readonly lost = signal(false);
   protected readonly task = signal('');
   protected readonly hint = signal<string | undefined>(undefined);
+  // The run this screen saw end, whose saved answer opens with its steps.
+  protected readonly justEnded = signal<string | undefined>(undefined);
   protected readonly attachments = new Attachments();
   private readonly sending = signal(false);
   // One run at a time per chat, so the next question's files and the answer it builds on are settled.
@@ -115,6 +114,7 @@ export class ChatScreen {
           this.task.set('');
           this.hint.set(undefined);
           this.attachments.clear();
+          this.justEnded.set(undefined);
         }),
         switchMap((id) =>
           this.readAgainNow.pipe(
@@ -130,7 +130,12 @@ export class ChatScreen {
       });
   }
 
-  protected readAgain(): void {
+  protected ended(runId: string): void {
+    this.justEnded.set(runId);
+    this.readAgain();
+  }
+
+  private readAgain(): void {
     this.readAgainNow.next();
   }
 

@@ -6,6 +6,7 @@ import { RunCalls } from '../runs/run-calls';
 import { RunEnd, RunEvent, RunEvents, RunStarted } from '../runs/run-events';
 import { ChatScreen } from './chat-screen';
 import { ChatWithMessages, Message } from './chats';
+import { SavedRun } from './saved-runs';
 
 const SALES = 'region,revenue\nNorth,1\n';
 const ASKED: Message = {
@@ -43,6 +44,17 @@ const END: RunEnd = {
   elapsed_ms: 2_100,
 };
 
+const SAVED_RUN: SavedRun = {
+  run_id: ANSWERED.run_id as string,
+  status: 'done',
+  task: 'Total revenue?',
+  answer: 'Total revenue is 1.',
+  error: null,
+  expected_steps: 2,
+  invalid_calls: 0,
+  steps: [{ step: 1, content: 'Total revenue is 1.', tool_calls: [], error: null }],
+};
+
 const chat = (id: number, ...messages: Message[]): ChatWithMessages => ({
   id,
   title: 'Total revenue?',
@@ -65,6 +77,10 @@ describe('ChatScreen', () => {
   const picker = () => page.querySelector('input[type=file]') as HTMLInputElement;
   const attached = () =>
     Array.from(page.querySelectorAll('.ag-composer .ag-tag')).map((tag) => tag.textContent?.trim());
+  const expanded = () =>
+    Array.from(page.querySelectorAll('button[aria-expanded]')).map((button) =>
+      button.getAttribute('aria-expanded'),
+    );
   const hint = () => page.querySelector('.ag-composer-hint')?.textContent ?? '';
 
   async function answerRead(id: number, ...messages: Message[]) {
@@ -144,9 +160,28 @@ describe('ChatScreen', () => {
     streams[0].next({ kind: 'end', data: END });
     await fixture.whenStable();
     await answerRead(7, ASKED, ANSWERED);
+    // The answer whose run just ended opens with its steps (P3.13c), so they are read once more.
+    http.expectOne(`/api/runs/${ANSWERED.run_id}`).flush(SAVED_RUN);
+    await fixture.whenStable();
     expect(text('.ag-answer p')).toBe('Total revenue is 1.');
     expect(page.querySelector('.ag-answer-wait')).toBeNull();
     expect(page.querySelector('.ag-run-head')).toBeNull();
+  });
+
+  it('opens only the answer whose run just ended, and folds it again in another chat', async () => {
+    const older: Message = { ...ANSWERED, id: 4, run_id: 'run-ffffffffffff' };
+    await answerRead(7, ASKED, older, { ...ASKED, id: 5 }, RUNNING);
+    streams[0].next({ kind: 'end', data: END });
+    await fixture.whenStable();
+    await answerRead(7, ASKED, older, { ...ASKED, id: 5 }, ANSWERED);
+    http.expectOne(`/api/runs/${ANSWERED.run_id}`).flush(SAVED_RUN);
+    await fixture.whenStable();
+    expect(expanded()).toEqual(['false', 'true']);
+    expect(page.querySelectorAll('.ag-step').length).toBe(1);
+
+    await open('9');
+    await answerRead(9, ASKED, ANSWERED);
+    expect(expanded()).toEqual(['false']);
   });
 
   it('reads the chat again when the run events cannot be read, and says so if it still runs', async () => {
@@ -163,6 +198,11 @@ describe('ChatScreen', () => {
     streams[0].error(new Error('closed'));
     await fixture.whenStable();
     await answerRead(7, ASKED, { ...RUNNING, status: 'failed', text: 'The run expired.' });
+    // Its run just ended too, so it opens and asks for its steps (P3.13c); the runtime no longer has them.
+    http
+      .expectOne(`/api/runs/${RUNNING.run_id}`)
+      .flush({ detail: 'unknown run' }, { status: 404, statusText: 'Not Found' });
+    await fixture.whenStable();
     expect(text('.ag-notice--fail')).toBe('The run failed. The run expired.');
   });
 

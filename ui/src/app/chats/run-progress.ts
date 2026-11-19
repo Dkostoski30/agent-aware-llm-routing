@@ -17,14 +17,14 @@ import {
 import { Answer } from '../ui/answer';
 import { Icon } from '../ui/icon';
 import { RunHeader } from '../ui/run-header';
-import { StepCard } from '../ui/step-card';
+import { StepGrid } from './step-grid';
 
 /** An answer still running in a chat, as its events arrive (RunScreen card, moved from /runs/:id in P3.13b): the
  * header, the step cards filling the grid, then the answer. The chat reads its saved answer once this says the run
  * ended, and shows that instead. */
 @Component({
   selector: 'app-run-progress',
-  imports: [Answer, Icon, RunHeader, StepCard],
+  imports: [Answer, Icon, RunHeader, StepGrid],
   template: `
     <div class="ag-scroll">
       <div class="ag-column">
@@ -39,28 +39,7 @@ import { StepCard } from '../ui/step-card';
             [segments]="segments()"
           />
           @if (cards().length > 0) {
-            <div class="ag-section">
-              <div class="ag-section-head">
-                Steps<small>{{ caption() }}</small>
-              </div>
-              <div class="ag-steps">
-                @for (card of cards(); track card.n) {
-                  <app-step-card
-                    [n]="card.n"
-                    [tool]="card.tool"
-                    [args]="card.args"
-                    [state]="card.state"
-                    [note]="card.note"
-                    [served]="card.served"
-                  />
-                }
-              </div>
-              @if (callsLost()) {
-                <div class="ag-step-note ag-calls-lost">
-                  Pod, cache and duration could not be read.
-                </div>
-              }
-            </div>
+            <app-step-grid [cards]="cards()" [caption]="caption()" [callsLost]="callsLost()" />
           }
           @if (view().end; as end) {
             @if (end.status === 'done') {
@@ -107,14 +86,7 @@ import { StepCard } from '../ui/step-card';
       </div>
     </div>
   `,
-  styles: `
-    :host {
-      display: contents;
-    }
-    .ag-calls-lost {
-      margin-top: var(--space-2);
-    }
-  `,
+  styles: ':host { display: contents; }',
 })
 export class RunProgress {
   readonly runId = input.required<string>();

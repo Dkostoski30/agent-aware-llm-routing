@@ -4,6 +4,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
+import { CLUSTER_PANEL_STORAGE_KEY, ClusterToggle } from '../cluster/cluster-toggle';
 import { ChatListToggle } from './chat-list-toggle';
 import { Chat } from './chats';
 import { ChatsLayout } from './chats-layout';
@@ -109,5 +110,49 @@ describe('ChatsLayout', () => {
     await harness.fixture.whenStable();
     expect(titles()).toEqual(['Which clauses are in the contract?', 'Total revenue?']);
     http.expectNone('/api/chats');
+  });
+
+  it('shows the cluster panel beside the chat', async () => {
+    await open('/chats/7');
+    page = harness.routeNativeElement as HTMLElement;
+    expect(page.querySelector('aside[aria-label="Cluster"] app-cluster-panel')).not.toBeNull();
+  });
+
+  it('hides and shows the panel with its toggle, without reading or drawing the chat again', async () => {
+    await open('/chats/7');
+    page = harness.routeNativeElement as HTMLElement;
+    const chat = page.querySelector('.opened');
+    TestBed.inject(ClusterToggle).toggle();
+    await harness.fixture.whenStable();
+    expect(page.querySelector('aside[aria-label="Cluster"]')).toBeNull();
+    expect(page.querySelector('.opened')).toBe(chat);
+
+    TestBed.inject(ClusterToggle).toggle();
+    await harness.fixture.whenStable();
+    expect(page.querySelector('aside[aria-label="Cluster"] app-cluster-panel')).not.toBeNull();
+    expect(page.querySelector('.opened')).toBe(chat);
+    http.expectNone('/api/chats');
+  });
+});
+
+describe('ChatsLayout in a browser that hid the panel', () => {
+  it('starts with the panel hidden', async () => {
+    localStorage.clear();
+    localStorage.setItem(CLUSTER_PANEL_STORAGE_KEY, 'hidden');
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([{ path: 'chats', component: ChatsLayout }]),
+      ],
+    });
+    const http = TestBed.inject(HttpTestingController);
+    const harness = await RouterTestingHarness.create('/chats');
+    http.expectOne('/api/chats').flush([]);
+    await harness.fixture.whenStable();
+    const page = harness.routeNativeElement as HTMLElement;
+    expect(page.querySelector('nav[aria-label="Chats"]')).not.toBeNull();
+    expect(page.querySelector('aside[aria-label="Cluster"]')).toBeNull();
+    http.verify();
   });
 });

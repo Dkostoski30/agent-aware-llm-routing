@@ -2,13 +2,15 @@ import { Component, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
 import { Auth } from '../auth/auth';
 import { ChatListToggle } from '../chats/chat-list-toggle';
+import { ClusterToggle } from '../cluster/cluster-toggle';
 import { Theme } from '../theme/theme';
 import { Horse } from './horse';
 import { Icon } from './icon';
 
 /** Across the top of every screen (TopBar card). The chip names the profile and model, so a screenshot says
  * which setup produced it; it is left out when the UI was started without a profile. Chats, New chat and Log out
- * show only to a logged-in user (P3.13a); Chats shows or hides the chat list (P3.13b). */
+ * show only to a logged-in user (P3.13a); Chats shows or hides the chat list (P3.13b), Cluster the cluster panel
+ * (P3.13c). */
 @Component({
   selector: 'app-top-bar',
   imports: [Horse, Icon],
@@ -23,6 +25,14 @@ import { Icon } from './icon';
           (click)="chatList.toggle()"
         >
           <app-icon name="chat" />Chats
+        </button>
+        <button
+          type="button"
+          class="ag-btn ag-btn--ghost ag-btn--sm"
+          [attr.aria-pressed]="cluster.shown()"
+          (click)="cluster.toggle()"
+        >
+          <app-icon name="pods" />Cluster
         </button>
         <button type="button" class="ag-btn ag-btn--ghost ag-btn--sm" (click)="newChat()">
           <app-icon name="plus" />New chat
@@ -58,6 +68,7 @@ export class TopBar {
   protected readonly theme = inject(Theme);
   protected readonly auth = inject(Auth);
   protected readonly chatList = inject(ChatListToggle);
+  protected readonly cluster = inject(ClusterToggle);
   private readonly router = inject(Router);
 
   protected newChat(): void {

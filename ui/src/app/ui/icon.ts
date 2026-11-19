@@ -12,6 +12,7 @@ const ICONS = {
   chat: 'M4.5 2.5h7a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2H7.5L4.5 13.5V11h0a2 2 0 0 1-2-2V4.5a2 2 0 0 1 2-2z',
   warn: 'M8 2.5l6 10.5H2zM8 6.5v3M8 11.3h.01',
   clock: 'M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM8 5v3.2l2 1.3',
+  pods: 'M3 3.5h10v3.5H3zM3 9h10v3.5H3zM5.5 5.25h.01M5.5 10.75h.01',
 };
 
 export type IconName = keyof typeof ICONS;

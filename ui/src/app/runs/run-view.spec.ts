@@ -6,6 +6,7 @@ import {
   answerUnbacked,
   applyEvent,
   formatMs,
+  savedStepCards,
   segments,
   shortPod,
   stepCards,
@@ -261,6 +262,31 @@ describe('stepCards with call records', () => {
   });
 });
 
+describe('savedStepCards', () => {
+  // As GET /runs/{id} answers a step: no run_id or expected_steps, which only the events carry.
+  const saved = ({ step, content, tool_calls, error }: RunStep) => ({ step, content, tool_calls, error });
+  const CALL: RunCall = {
+    step: 2,
+    ts_start: 1_793_600_000_000,
+    duration_ms: 290,
+    gap_before_ms: 0,
+    expected_steps: 3,
+    prompt_tokens: 1_534,
+    cached_tokens: 1_352,
+    pod: 'vllm-5c9565db76-6bq8s',
+  };
+
+  it('draws a saved step as the ended run draws the same step', () => {
+    const failed = step(2, [{ name: 'compare', arguments: {}, result: { error: 'not a group' } }]);
+    const steps = [STEP_1, failed, step(3, [], { content: '56' })];
+    expect(savedStepCards(steps.map(saved), [CALL])).toEqual(stepCards(view(steps, end(3)), [CALL]));
+  });
+
+  it('has no card for a step not yet taken, since a saved run has no estimate to fill', () => {
+    expect(savedStepCards([saved(STEP_1)]).map((card) => card.n)).toEqual([1]);
+  });
+});
+
 describe('answerUnbacked', () => {
   const failed: ToolCall = { name: 'compare', arguments: {}, result: { error: 'not a group' } };
   const answer = (n: number) => step(n, [], { content: 'The row Ci9D left the highest review.' });
@@ -287,6 +313,16 @@ describe('answerUnbacked', () => {
 
   it('is false for a reply that never tried a tool', () => {
     expect(answerUnbacked(view([answer(1)]))).toBe(false);
+  });
+
+  it('reads saved steps too, which carry no run_id or expected_steps', () => {
+    const steps = [step(1, [failed]), answer(2)].map(({ step, content, tool_calls, error }) => ({
+      step,
+      content,
+      tool_calls,
+      error,
+    }));
+    expect(answerUnbacked({ steps })).toBe(true);
   });
 
   it('is false for a final_answer call alone, which is how required mode replies', () => {
