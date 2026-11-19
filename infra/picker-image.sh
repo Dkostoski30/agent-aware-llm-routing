@@ -6,6 +6,8 @@
 #        picker-image.sh --values   prints the Helm values naming the tag, nothing else: no Docker and no sudo, so
 #                                   infra/set-routing.sh can call it hours into an experiment, after sudo has stopped
 #                                   remembering the password (P2.8)
+#        picker-image.sh --tag      prints the image's name with its tag, nothing else, for the vLLM and sim charts'
+#                                   drain waiter (P4.3), which the image carries beside the picker
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -20,9 +22,13 @@ case "${1:-}" in
     TAG=$tag yq -n '.router.epp.image.tag = strenv(TAG) | .router.epp.image.tag style="double"'
     exit 0
     ;;
+  --tag)
+    echo "$REPOSITORY:$tag"
+    exit 0
+    ;;
   "") ;;
   *)
-    echo "usage: $0 [--values]" >&2
+    echo "usage: $0 [--values | --tag]" >&2
     exit 2
     ;;
 esac

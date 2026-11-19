@@ -1,0 +1,25 @@
+replay: 1/20 run-1fa7dee57b81-1 csv: 2 calls, pods ['vllm-68bbf5957b-862z6']
+drain: scaling down, vllm-68bbf5957b-862z6 first, live pins {'vllm-68bbf5957b-862z6': 2, 'vllm-68bbf5957b-94zxm': 0}
+replay: run-212a1dcd6a4b-2 step 3: no full reply: ReplyError('the stream ended without the token counts')
+replay: run-20dac356bd80-3 step 1: no full reply: ReplyError('the stream ended without the token counts')
+replay: 2/20 run-212a1dcd6a4b-2 support: 3 calls, pods ['vllm-68bbf5957b-862z6']
+replay: 3/20 run-20dac356bd80-3 csv: 1 calls, pods []
+replay: 4/20 run-8fa813cb1044-4 arithmetic: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 5/20 run-c68641d35d8d-5 csv: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 6/20 run-eca6287d1fe6-6 csv: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 7/20 run-661af34b013d-7 arithmetic: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 8/20 run-2d462e4465dc-8 contracts: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 9/20 run-ae252b2ad42c-9 csv: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 10/20 run-03aabddbadc8-10 arithmetic: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 11/20 run-d7d748ac8769-11 support: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 12/20 run-e56abc321e96-12 contracts: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 13/20 run-b95a4f123362-13 contracts: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 14/20 run-2fb4e58128b9-14 csv: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 15/20 run-4c55b37fd1c4-15 support: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 16/20 run-a59a35f3afc1-16 arithmetic: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 17/20 run-96c8c058611b-17 csv: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 18/20 run-f0de196f72b3-18 contracts: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 19/20 run-69e8ccd25e37-19 arithmetic: 2 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 20/20 run-673e68719f59-20 support: 3 calls, pods ['vllm-68bbf5957b-94zxm']
+replay: 46 calls, 2 failed
+replay: wrote /home/kosto/thesis/experiments/results/drain-real-7aea5343e5d1-drain-off.jsonl

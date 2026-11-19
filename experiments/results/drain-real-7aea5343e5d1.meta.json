@@ -1,0 +1,85 @@
+{
+  "experiment": "drain-real",
+  "hash": "7aea5343e5d1",
+  "profile": "real",
+  "profile_sha256": "262100ef46aba01a16bb87ff139f9976e3bb2b8bd51ae0afc23f7e67dc8799a1",
+  "trace": "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl",
+  "pattern": "steady",
+  "seed": 1,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "scale_down_after_seconds": 45,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "drain": {
+    "enabled": true,
+    "timeout_seconds": 120,
+    "quiet_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "drain-off",
+      "drain": false,
+      "chosen_pod": "vllm-68bbf5957b-862z6",
+      "live_pins_at_scale_down": {
+        "vllm-68bbf5957b-862z6": 2,
+        "vllm-68bbf5957b-94zxm": 0
+      },
+      "picker_log_since": "2026-11-19T20:12:27.870609+00:00",
+      "scale_down_requested_ms": 1795119196786,
+      "pod_gone_ms": 1795119230257,
+      "picker_restarts": 0,
+      "removed_pod": "vllm-68bbf5957b-862z6",
+      "running_on_removed": 1,
+      "running_on_removed_failed": 1,
+      "window_failures": [
+        "run-212a1dcd6a4b-2 step 3: ReplyError('the stream ended without the token counts')",
+        "run-20dac356bd80-3 step 1: ReplyError('the stream ended without the token counts')"
+      ],
+      "interrupted_runs": [
+        "run-20dac356bd80-3",
+        "run-212a1dcd6a4b-2"
+      ],
+      "deadline_failures": 0,
+      "after_failures": [],
+      "answered_after_on_removed": 0,
+      "affected_runs": [
+        "run-212a1dcd6a4b-2"
+      ],
+      "remapped_runs": [],
+      "void": false,
+      "passed": false
+    },
+    {
+      "name": "drain-on",
+      "drain": true,
+      "chosen_pod": "vllm-6bdbdcb976-bfxcn",
+      "live_pins_at_scale_down": {
+        "vllm-6bdbdcb976-bfxcn": 1,
+        "vllm-6bdbdcb976-gdrj9": 1
+      },
+      "picker_log_since": "2026-11-19T20:25:35.343323+00:00",
+      "scale_down_requested_ms": 1795119982674,
+      "pod_gone_ms": 1795119998463,
+      "picker_restarts": 0,
+      "removed_pod": "vllm-6bdbdcb976-bfxcn",
+      "running_on_removed": 1,
+      "running_on_removed_failed": 0,
+      "window_failures": [],
+      "interrupted_runs": [],
+      "deadline_failures": 0,
+      "after_failures": [],
+      "answered_after_on_removed": 0,
+      "affected_runs": [
+        "run-20dac356bd80-3"
+      ],
+      "remapped_runs": [
+        "run-20dac356bd80-3"
+      ],
+      "void": false,
+      "passed": true
+    }
+  ]
+}

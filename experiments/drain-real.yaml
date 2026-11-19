@@ -1,0 +1,24 @@
+# P4.3 on real vLLM pods at 2 -> 1 (D5): experiments/drain.yaml's check where the control matters most, since vLLM
+# v0.31.0 aborts every call it holds on SIGTERM by default (docs/task-cards/59-P4.3-drain.md). Run with make
+# drain-check EXPERIMENT=experiments/drain-real.yaml after make down and make up (real). Results carry this file's hash
+# (D11).
+profile: real
+routing:
+  plugin: true
+  affinity: true
+# The recorded demo runs (P2.2b): short, ~22 s of calls each, so one pod can carry the rest of the replay within the
+# call deadline after the scale-down.
+trace: results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl
+pattern: steady
+seed: 1
+# At seed 1 runs start at 0, 22.0, 39.0 and 75.9 s (plan.start_times), and a recorded run lasts ~22 s, so at 45 s the
+# runs from 22 and 39 s are likely both under way.
+scale_down_after_seconds: 45
+# If neither is, the run starting at 75.9 s is within this.
+wait_for_calls_seconds: 60
+settle_seconds: 5
+variants:
+  - name: drain-off
+    drain: false
+  - name: drain-on
+    drain: true

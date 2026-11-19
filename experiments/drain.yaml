@@ -1,0 +1,28 @@
+# P4.3: a scale-down partway through a replay on simulated pods, with the drain off (the pods as before P4.3, the
+# control) and on (docs/task-cards/59-P4.3-drain.md). Run with make drain-check EXPERIMENT=experiments/drain.yaml after
+# make down and make up PROFILE=sim. The question: do the calls on the pod being removed end? Results carry this
+# file's hash (D11).
+profile: sim
+# The plugin with affinity, so the pod removed is the one most runs are pinned to, and the runs it held are counted.
+routing:
+  plugin: true
+  affinity: true
+# P3.9b's replay, as experiments/autoscale-remaining.yaml: the long runs, the burst pattern, the seed. The profile's 2
+# pods, no autoscaler: the scale-down is the script's, at a moment it chooses.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst
+seed: 6
+# 5 s into the first burst: at seed 6 runs start at 0, 52.5, 79.5 and 108.6 s, then 5 at 120 s and one at 121.5 s
+# (plan.start_times). Long runs on 2 pods that run 2 calls each (simulator.max_num_seqs), so the pod removed holds
+# running and waiting calls.
+scale_down_after_seconds: 125
+# How long the scale-down waits for a pod holding a live pin before the variant reports void: one burst's runs last
+# longer than this, so a pod with a pin is found unless the replay is idle.
+wait_for_calls_seconds: 60
+# P3.4's settle: the picker's informer plus the 2.5 s the VM's wall clock can step (P2.3).
+settle_seconds: 5
+variants:
+  - name: drain-off
+    drain: false
+  - name: drain-on
+    drain: true

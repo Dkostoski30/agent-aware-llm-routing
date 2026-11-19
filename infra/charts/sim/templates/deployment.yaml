@@ -1,5 +1,22 @@
 # Named and labelled like the vllm chart's Deployment, so the InferencePool, the PodMonitor, make experiment's restart and
 # make replay's /tokenize find these pods unchanged (P2.7).
+{{- /* The drain of P4.3 (docs/task-cards/59-P4.3-drain.md), from the profile's drain section. */}}
+{{- $drain := required "drain from the profile" .Values.drain }}
+{{- if not (kindIs "bool" $drain.enabled) }}
+{{- fail (printf "drain.enabled from the profile must be true or false, got %v" $drain.enabled) }}
+{{- end }}
+{{- $timeout := $drain.timeout_seconds }}
+{{- if not (and (or (kindIs "float64" $timeout) (kindIs "int64" $timeout)) (gt (float64 $timeout) 0.0) (eq (float64 $timeout) (floor $timeout))) }}
+{{- fail (printf "drain.timeout_seconds from the profile must be a whole number of seconds above 0, got %v" $timeout) }}
+{{- end }}
+{{- $quiet := $drain.quiet_seconds }}
+{{- if not (and (or (kindIs "float64" $quiet) (kindIs "int64" $quiet)) (ge (float64 $quiet) 0.0) (eq (float64 $quiet) (floor $quiet))) }}
+{{- fail (printf "drain.quiet_seconds from the profile must be a whole number of seconds, 0 or more, got %v" $quiet) }}
+{{- end }}
+{{- $image := "" }}
+{{- if $drain.enabled }}
+{{- $image = required "drainImage, the picker's image that carries the waiter, set by make vllm-deploy or make sim-deploy" .Values.drainImage }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,6 +36,20 @@ spec:
       labels:
         app.kubernetes.io/name: vllm
     spec:
+      {{- if $drain.enabled }}
+      # Kubernetes counts the preStop hook inside this, so the server's own exit gets the margin after the drain.
+      terminationGracePeriodSeconds: {{ add (int64 $timeout) .Values.drainExitMarginSeconds }}
+      # The waiter (gateway/cmd/drainwait), copied out of the picker's image, which k3s has from make up. The image has
+      # no shell and no cp, so the waiter copies itself.
+      initContainers:
+        - name: drainwait
+          image: {{ $image }}
+          imagePullPolicy: Never
+          command: ["/app/drainwait", "install", "/drain/drainwait"]
+          volumeMounts:
+            - name: drain
+              mountPath: /drain
+      {{- end }}
       containers:
         - name: sim
           image: {{ .Values.image }}
@@ -54,6 +85,19 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+          {{- if $drain.enabled }}
+          # Before SIGTERM: holds the pod until its running and waiting calls have been 0 for drain.quiet_seconds, or
+          # drain.timeout_seconds pass. The picker has dropped the pod from its pool by then, so nothing new comes.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /drain/drainwait
+                  - wait
+                  - --metrics=http://127.0.0.1:8000/metrics
+                  - --timeout={{ int64 $timeout }}s
+                  - --quiet={{ int64 $quiet }}s
+          {{- end }}
           ports:
             - name: http
               containerPort: 8000
@@ -64,3 +108,14 @@ spec:
               port: http
             # As in the vllm chart: a pod joins the Service within 5 s of finishing its start.
             periodSeconds: 5
+          {{- if $drain.enabled }}
+          volumeMounts:
+            - name: drain
+              mountPath: /drain
+              readOnly: true
+          {{- end }}
+      {{- if $drain.enabled }}
+      volumes:
+        - name: drain
+          emptyDir: {}
+      {{- end }}

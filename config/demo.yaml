@@ -90,6 +90,21 @@ routing:
   # scorers send it. A first guess, as overload_queue_threshold: 1 lets one call wait, so a burst can't pile onto a
   # cold pod.
   warmup_queue_threshold: 1
+# Drain (P4.3): a vLLM pod being removed (a scale-down, a restart) serves the calls it holds before it stops. The picker
+# drops a pod from its pool as soon as its removal starts, so no new call reaches it; runs pinned to it move at once
+# (docs/task-cards/59-P4.3-drain.md).
+drain:
+  # On in every profile: it changes no routing, it only stops a removed pod killing its calls (vLLM v0.31.0 aborts
+  # them on SIGTERM by default). Off only in an experiment's control variant.
+  enabled: true
+  # The longest a removed pod waits for its calls: the call deadline, agent.llm_timeout_seconds. A call on the pod at
+  # its removal has at most that long before its client gives up, so a longer drain saves nothing and a shorter one may
+  # cut a call still awaited. A test holds it at or above the deadline.
+  timeout_seconds: 120
+  # The pod counts as empty once its running and waiting calls have been 0 this long, so a call the picker sent just
+  # before the pod left its pool, still on its way, is not cut. A first guess, P3.4's settle: the picker's informer
+  # plus the 2.5 s the VM's wall clock can step.
+  quiet_seconds: 5
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

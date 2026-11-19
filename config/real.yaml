@@ -129,13 +129,28 @@ autoscaling:
   queue_target: 1
   # How long the HPA waits on lower readings before it removes the second pod. A first guess, the HPA's own default:
   # it outlasts the burst pattern's 120 s between bursts and a real pod's ~2 min cold start, so a pod added for one
-  # burst is still there for the next. A pod removed while it has calls can interrupt a run until P4.3's drain.
+  # burst is still there for the next. A pod removed serves its calls first (drain, P4.3).
   scale_down_stabilization_seconds: 300
   # The CPU baseline's target (P3.10), a percent of pod.cpu_request: the plain HPA wants ceil(pods x usage / 80%).
   # Decided 2026-11-15: a pod under load sits at ~100% of its request, so one loaded pod asks for the second, and it
   # is removed only once both pods idle (~12%) through the window above. CPU tells a busy pod from an idle one, not
   # how much work is waiting, which is the comparison P5.2 makes. Read only by the cpu autoscaler.
   cpu_target_percent: 80
+# Drain (P4.3): a vLLM pod being removed (a scale-down, a restart) serves the calls it holds before it stops. The picker
+# drops a pod from its pool as soon as its removal starts, so no new call reaches it; runs pinned to it move at once
+# (docs/task-cards/59-P4.3-drain.md).
+drain:
+  # On in every profile: it changes no routing, it only stops a removed pod killing its calls (vLLM v0.31.0 aborts
+  # them on SIGTERM by default). Off only in an experiment's control variant.
+  enabled: true
+  # The longest a removed pod waits for its calls: the call deadline, agent.llm_timeout_seconds. A call on the pod at
+  # its removal has at most that long before its client gives up, so a longer drain saves nothing and a shorter one may
+  # cut a call still awaited. A test holds it at or above the deadline.
+  timeout_seconds: 120
+  # The pod counts as empty once its running and waiting calls have been 0 this long, so a call the picker sent just
+  # before the pod left its pool, still on its way, is not cut. A first guess, P3.4's settle: the picker's informer
+  # plus the 2.5 s the VM's wall clock can step.
+  quiet_seconds: 5
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

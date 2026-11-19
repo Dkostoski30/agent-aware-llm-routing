@@ -14,11 +14,15 @@ COPY . .
 RUN CGO_ENABLED=0 go build \
     -ldflags="-s -w -X github.com/llm-d/llm-d-router/version.CommitSHA=a5cbe600ebade00cf3e9885beaf2bfacddeabce1 -X github.com/llm-d/llm-d-router/version.BuildRef=v0.11.0" \
     -o /out/epp ./cmd/picker
+# The drain waiter (P4.3), static as the picker: vLLM and simulated pods copy it from this image with an init container
+# and run it as their preStop hook (infra/charts/vllm, infra/charts/sim).
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/drainwait ./cmd/drainwait
 
 # Upstream's runtime image: CA certificates, no shell. Pinned by digest.
 FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329
 
 COPY --from=build /out/epp /app/epp
+COPY --from=build /out/drainwait /app/drainwait
 USER 65532:65532
 # As upstream: gRPC (ext-proc), health, metrics, and the KV-events socket.
 EXPOSE 9002 9003 9090 5557

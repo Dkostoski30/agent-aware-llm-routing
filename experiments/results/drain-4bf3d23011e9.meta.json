@@ -1,0 +1,91 @@
+{
+  "experiment": "drain",
+  "hash": "4bf3d23011e9",
+  "profile": "sim",
+  "profile_sha256": "9d638eaac7405f2aa74a0e838afdf9acdcc0dd3e3ed55e47b2113530d9f072cb",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "scale_down_after_seconds": 125,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "drain": {
+    "enabled": true,
+    "timeout_seconds": 120,
+    "quiet_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "drain-off",
+      "drain": false,
+      "chosen_pod": "vllm-d5d4bfd4c-cmddq",
+      "live_pins_at_scale_down": {
+        "vllm-d5d4bfd4c-cmddq": 4,
+        "vllm-d5d4bfd4c-lpmvt": 4
+      },
+      "picker_log_since": "2026-11-19T17:53:42.843268+00:00",
+      "scale_down_requested_ms": 1795110952349,
+      "pod_gone_ms": 1795110965938,
+      "picker_restarts": 0,
+      "removed_pod": "vllm-d5d4bfd4c-cmddq",
+      "running_on_removed": 4,
+      "running_on_removed_failed": 0,
+      "window_failures": [],
+      "interrupted_runs": [],
+      "deadline_failures": 0,
+      "after_failures": [],
+      "answered_after_on_removed": 0,
+      "affected_runs": [
+        "hotpotqa-124-4",
+        "hotpotqa-22-5",
+        "hotpotqa-83-9",
+        "tau2_telecom-963-2"
+      ],
+      "remapped_runs": [
+        "hotpotqa-124-4",
+        "hotpotqa-22-5",
+        "tau2_telecom-963-2"
+      ],
+      "void": false,
+      "passed": false
+    },
+    {
+      "name": "drain-on",
+      "drain": true,
+      "chosen_pod": "vllm-7d8695c699-c7hzp",
+      "live_pins_at_scale_down": {
+        "vllm-7d8695c699-c7hzp": 4,
+        "vllm-7d8695c699-tvgnt": 4
+      },
+      "picker_log_since": "2026-11-19T18:06:43.699826+00:00",
+      "scale_down_requested_ms": 1795111734255,
+      "pod_gone_ms": 1795111751612,
+      "picker_restarts": 0,
+      "removed_pod": "vllm-7d8695c699-c7hzp",
+      "running_on_removed": 4,
+      "running_on_removed_failed": 0,
+      "window_failures": [],
+      "interrupted_runs": [],
+      "deadline_failures": 0,
+      "after_failures": [],
+      "answered_after_on_removed": 0,
+      "affected_runs": [
+        "hotpotqa-124-4",
+        "hotpotqa-22-5",
+        "hotpotqa-83-9",
+        "tau2_telecom-963-2"
+      ],
+      "remapped_runs": [
+        "hotpotqa-124-4",
+        "hotpotqa-22-5",
+        "tau2_telecom-963-2"
+      ],
+      "void": false,
+      "passed": true
+    }
+  ]
+}

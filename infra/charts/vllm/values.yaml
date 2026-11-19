@@ -16,8 +16,18 @@ hfCacheHostPath: ""
 # model.lora.
 loraHostPath: ""
 
+# How long Kubernetes gives a pod to exit after its drain (P4.3), on top of drain.timeout_seconds: an infra wait, not a
+# tunable. After the drain vLLM v0.31.0 gets SIGTERM with nothing in flight, or with what the timeout left, which its
+# default --shutdown-timeout 0 aborts at once; then it stops its engine process, which its process manager allows 5 s
+# (vllm/v1/utils.py shutdown). 30 s is that with a wide margin, the default grace period a pod had before P4.3.
+drainExitMarginSeconds: 30
+
+# The picker's image, which carries the drain waiter (infra/picker-image.sh --tag); set by make vllm-deploy.
+drainImage: ""
+
 # Filled from config/<profile>.yaml by make vllm-deploy.
 replicas: 0
 model: {}
 pod: {}
 monitoring: {}
+drain: {}

@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pod-removed drain-check calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -117,9 +117,11 @@ vllm-deploy:
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
 	fi; \
-	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring}' config/$(PROFILE).yaml | \
+	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring, "drain": .drain}' \
+		config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - --force-conflicts \
-			--set hfCacheHostPath=$$HOME/.cache/huggingface --set-string loraHostPath=$$lora_path; \
+			--set hfCacheHostPath=$$HOME/.cache/huggingface --set-string loraHostPath=$$lora_path \
+			--set-string drainImage=$$(bash infra/picker-image.sh --tag); \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
 	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
@@ -127,11 +129,14 @@ vllm-deploy:
 # Simulated pods in place of the vLLM ones, values rendered from config/sim.yaml (P2.7). The release has the vllm chart's
 # name, so make down removes either, and a cluster on another profile needs make down first: the two charts own the same
 # objects. Each pod is Ready after simulator.startup_duration; VLLM_DEPLOY_TIMEOUT covers that and the first image pull.
-# --force-conflicts as in vllm-deploy: make experiment scales sim pods too (P2.12).
+# --force-conflicts as in vllm-deploy: make experiment scales sim pods too (P2.12). Both deploys take the drain's waiter
+# from the picker's image (P4.3), which must be in k3s: make up builds it first (make picker-image).
 sim-deploy:
 	@set -eu; \
-	yq -e '{"replicas": .replicas, "model": .model, "simulator": .simulator, "monitoring": .monitoring}' config/sim.yaml | \
-		helm upgrade --install vllm infra/charts/sim --values - --force-conflicts; \
+	yq -e '{"replicas": .replicas, "model": .model, "simulator": .simulator, "monitoring": .monitoring, "drain": .drain}' \
+		config/sim.yaml | \
+		helm upgrade --install vllm infra/charts/sim --values - --force-conflicts \
+			--set-string drainImage=$$(bash infra/picker-image.sh --tag); \
 	echo "sim-deploy: waiting for the simulated cold start"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \
 	kubectl get pods -l app.kubernetes.io/name=vllm -o wide
@@ -336,6 +341,14 @@ warmup-report:
 pod-removed:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make pod-removed EXPERIMENT=experiments/pod-removed.yaml"; exit 2; fi
 	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.pod_removed $(EXPERIMENT)
+
+# A replay with the Deployment scaled down by one partway, the pod most runs are pinned to removed first, per variant
+# with the pods' drain off or on (P4.3): whether the calls on the removed pod ended. The replay's lines, its printed
+# lines, the picker's log per variant and a .meta.json in experiments/results/, stamped with the file's hash. Needs make
+# up with the file's profile; it puts the profile's pods and routing back after.
+drain-check:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make drain-check EXPERIMENT=experiments/drain.yaml"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.drain $(EXPERIMENT)
 
 # Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
 # Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys

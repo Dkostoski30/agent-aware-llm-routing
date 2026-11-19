@@ -374,7 +374,7 @@ class AutoscaleSummary:
     finished_runs: int
     # A failed run has no completion time: read the times with this count.
     failed_runs: int
-    # Of failed_runs, those a scale-down may have caused (P4.3's drain is not built yet).
+    # Of failed_runs, those a scale-down may have caused, whether its pod drained (P4.3) or not.
     interrupted_runs: int
     # None with no finished run.
     completion_p50_ms: int | None

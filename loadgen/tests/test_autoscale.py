@@ -454,10 +454,11 @@ def real_pod_values(gpu_access: str) -> dict[str, Any]:
     """What make vllm-deploy hands the chart from config/real.yaml, with host paths of its own."""
     real = profile("real")
     return {
-        **{key: real[key] for key in ("replicas", "model", "pod", "monitoring")},
+        **{key: real[key] for key in ("replicas", "model", "pod", "monitoring", "drain")},
         "gpuAccess": gpu_access,
         "hfCacheHostPath": "/hf",
         "loraHostPath": "/lora",
+        "drainImage": "thesis/picker:0123456789ab",
     }
 
 
