@@ -15,7 +15,14 @@ from jsonschema import Draft202012Validator
 
 SCHEMAS_DIR = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = SCHEMAS_DIR / "examples"
-SCHEMA_NAMES = ["headers.v1", "trace.v1", "run-request.v1", "run-events.v1", "run-calls.v1"]
+SCHEMA_NAMES = [
+    "headers.v1",
+    "trace.v1",
+    "run-request.v1",
+    "run-events.v1",
+    "run-calls.v1",
+    "cluster.v1",
+]
 REMOVE = object()
 
 
@@ -330,3 +337,46 @@ def test_run_calls_call_rules(field: str, value: object, accepted: bool) -> None
     body = valid_example("run-calls.v1")
     body["calls"] = [with_change(body["calls"][0], field, value)]
     assert validator_for("run-calls.v1").is_valid(body) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("pods", [], True),
+        ("remaining_work", 0, True),
+        ("remaining_work", -1, False),
+        ("remaining_work", 1.5, False),
+        ("active_runs", REMOVE, False),
+        ("poll_seconds", 0, False),
+        ("poll_seconds", REMOVE, False),
+        ("pods", REMOVE, False),
+        ("kv_cache", 41, False),
+    ],
+)
+def test_cluster_rules(field: str, value: object, accepted: bool) -> None:
+    body = with_change(valid_example("cluster.v1"), field, value)
+    assert validator_for("cluster.v1").is_valid(body) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("state", "starting", True),
+        ("state", "draining", True),
+        ("state", "failed", True),
+        ("queue", None, True),
+        ("running", None, True),
+        ("state", "overloaded", False),
+        ("queue", -1, False),
+        ("running", 1.5, False),
+        ("name", "", False),
+        ("queue", REMOVE, False),
+        ("running", REMOVE, False),
+        ("state", REMOVE, False),
+        ("kv", 41, False),
+    ],
+)
+def test_cluster_pod_rules(field: str, value: object, accepted: bool) -> None:
+    body = valid_example("cluster.v1")
+    body["pods"] = [with_change(body["pods"][0], field, value)]
+    assert validator_for("cluster.v1").is_valid(body) is accepted

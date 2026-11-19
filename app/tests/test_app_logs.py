@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 from app_backend.app import create_app
+from app_backend.cluster import ClusterReader
 from app_backend.config import AppConfig, ScryptParams
 from app_backend.logs import JsonFormatter
 from app_backend.runtime import RuntimeClient
@@ -15,6 +16,17 @@ from fastapi.testclient import TestClient
 
 EMAIL = "ana@example.com"
 PASSWORD = "a long enough password"
+
+
+def no_prometheus() -> ClusterReader:
+    """Only GET /cluster asks Prometheus (test_cluster.py); a query here would fail the test."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"asked Prometheus: {request.url}")
+
+    return ClusterReader(
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://prometheus")
+    )
 
 
 def make_client(tmp_path: Path) -> TestClient:
@@ -25,6 +37,7 @@ def make_client(tmp_path: Path) -> TestClient:
         cookie_secure=True,
         max_files=5,
         runtime_timeout_seconds=5.0,
+        cluster_poll_seconds=5,
     )
 
     def refuse(request: httpx.Request) -> httpx.Response:
@@ -35,7 +48,7 @@ def make_client(tmp_path: Path) -> TestClient:
         httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://agent"),
         httpx.AsyncClient(transport=httpx.MockTransport(refuse), base_url="http://agent"),
     )
-    app = create_app(config, tmp_path / "app.db", runtime, lambda: 1000.0)
+    app = create_app(config, tmp_path / "app.db", runtime, no_prometheus(), lambda: 1000.0)
     return TestClient(app, base_url="https://testserver")
 
 

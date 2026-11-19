@@ -97,6 +97,36 @@
           "legendFormat": "{{pod}}"
         }
       ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Remaining work (steps of active runs)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(thesis_remaining_work)",
+          "legendFormat": "remaining work"
+        }
+      ]
     }
   ]
 }

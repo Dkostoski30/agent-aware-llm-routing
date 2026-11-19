@@ -13,6 +13,41 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-19 · P3.11 · green (the cluster panel's numbers match Grafana's during a real burst replay)
+Command: tests first (Claude: `make test` 2014 Python + Go + 22 training + 194 UI specs, `make lint`; 14 changes to rule lines, 12 failed a test and the 2 left were redundant code, removed) · the user: `make test`, `make lint`, `make down`, `make up`, `make app-forward`, `make ui PROFILE=real`, `make grafana`, `make replay TRACE=experiments/results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl PATTERN=burst PROFILE=real OUT=experiments/results/replays/p3-11-panel-burst.jsonl` (started ~01:53 local), the panel beside Grafana's "vLLM pods" dashboard while it ran
+Result:
+- The user: the panel's numbers matched Grafana's (each pod's waiting count against "Queue length", the remaining work against the new "Remaining work" panel) and the panel looked fine. No screenshot taken.
+- Replay: 154 calls, 7 failed, all step 2 of runs 2-8 and all within one minute (00:54 UTC); the runs after it went through on both pods. `make replay` exits 1 on any failed call.
+- Before building, Claude checked the seven instant queries on the live cluster (Prometheus API through the kubectl service proxy): phase, ready and `kube_pod_deletion_timestamp` per vLLM pod, the queue and running sums by pod, `sum(thesis_remaining_work)`, `sum(thesis_active_runs)`; all answered.
+Notes:
+- Decided while planning (the user, 2026-11-18): the panel fills app.ts's existing right column, shown only to a logged-in user (P3.13b had removed the card's first host, `run-screen.ts`); the UI polls at `monitoring.scrape_interval_seconds`, sent in the payload and in the 503, so there is no `app.cluster_poll_seconds`; the same number is the Prometheus timeout. Claude's choices: a pod being deleted is draining (until P4.3's drain), phase Failed or Unknown failed, Ready ready, anything else starting; a pod without a vLLM series yet has null queue and running, shown as a dash; no active runs is 0 (the replayer exports no series then, P3.8); the pod list comes from kube-state-metrics, `pod=~"vllm-[a-z0-9]+-[a-z0-9]+"`, which leaves out the picker's `vllm-pool-epp-*` pod; with no interval known (the app backend down from the first read) the panel stops and says to reload. The design's PodCard and RemainingWork kept to name, state, running · waiting and the number: no KV, hit rate, notes or sparkline.
+- `create_app` takes the Prometheus reader, so the existing app tests pass one that refuses any query; no test was weakened. httpx was already pinned (P3.12b), so `versions.md` is unchanged.
+- Finding, for P4.4 and P4.5 (not P3.11's code): the 7 failures were the picker's restart. Its 1 s gRPC readiness probe failed 11 times from its start during `make up` (vLLM loading), then liveness failed 3 times under the replay and the kubelet killed it; while it drained (NOT_SERVING) and restarted, agentgateway's ext_proc, set to fail closed, answered 500 ("no healthy backends"). The VM was at 90% memory, the node at 30% CPU, each vLLM pod ~1.2 cores. Like P3.9a's KEDA leader-lease loss: the host starves small control-plane pods while vLLM works.
+- Left untracked: `experiments/results/replays/convert-apb-ca5fc26bbb1d-cd81f326aece-burst-1.jsonl.partial`, from an earlier replay that stopped; not this task's.
+
+### 2026-11-18 · P3.13b · committed (d91af6f); the user's done-when output not recorded
+Command: tests first (Claude: 184 UI specs with `ui/vitest-base.config.mts`, `make lint`; 8 changes to rule lines each failed a spec) · the user: card 51's done-when (`make test`, `make lint`, `make down`, `make up`, `make app-forward`, `make ui PROFILE=real`, the browser check), then the commit
+Result:
+- Claude's side: 184/184 UI specs with the cluster up, plain `ng test` included, and a stale-cache check (a deliberately broken spec fails, then passes once reverted). `make lint` green.
+- Browser, the user, before the commit: runs went through the chat and the model's answers were correct. The full done-when output (make test, reload keeps history, second question still uses the CSV, the list toggle) was not handed to Claude; the commit was made on it.
+Notes:
+- Decided while planning (the user, 2026-11-18): the chat list is a left column inside the chat screens, toggled from the top bar and remembered per browser; a chat is created on its first send, titled with that message, and a refused first message (422) keeps the chat for the next send; the running answer shows RunScreen's header, step cards and waiting answer, replaced by the saved answer on end; the steps come back on expand in P3.13c; `make test` runs the UI specs.
+- Found while building: with the cluster up, the full UI run's 15 vitest workers were killed (about 1 GB free), and vitest's on-disk module cache ran specs against an earlier build, so a broken change passed and a clean one failed. `ui/vitest-base.config.mts` caps workers at 4 and turns that cache off (`angular.json` runnerConfig).
+- The chat list's width, 240px, has no token in `docs/design-system/tokens.json`; D14 not edited.
+- Runs are slow (~270 ms per generated token on the real profile: eager mode, LoRA, two pods sharing the GPU); a measuring-only CUDA-graphs spike is placed after P3.13c, before P4.7 (the user, 2026-11-18).
+- Stray files `404`, `run,`, `repeat` at the repo root came in with f8b8f62; reported, not touched.
+
+### 2026-11-17 · P3.13a · committed (87c045a); the user's done-when output not recorded
+Command: tests first (Claude: 153 UI specs, run per folder, `make lint`; 7 changes to rule lines each failed a spec) · the user: card 50's done-when, then the commit
+Result:
+- Claude's side: 22 new specs in `ui/src/app/auth/` (the guards' three cases, a wrong password's message, a 401 returning to /login, the backend's 422 detail shown as sent); 153 UI specs and `make lint` green.
+- The browser check's output (register, log in, log out) was not handed to Claude; the commit was made on it.
+Notes:
+- Decided while planning (the user, 2026-11-17): register logs in at once and opens /; the top bar shows Log out only; New task is hidden when logged out. `GET /auth/me` once on start; no token storage, the cookie is HttpOnly.
+- Password length (the user, 2026-11-18): first 15 (NIST SP 800-63B-4 for a single factor), then 8 so a password is quick to type during the demo; `app.min_password_length` 8 in all four profiles, no composition rules, the profile comment says it is below NIST's 15.
+- `make test` ran no UI specs then; card 50's done-when added `(cd ui && npx ng test --watch=false)`. P3.13b moved the UI specs into `make test`.
+- The browser devtools' `<illegal path>` message is the Angular dev server's `com.chrome.devtools.json` naming a WSL path; harmless.
+
 ### 2026-11-17 · P3.12b · green (a chat message through every layer; the app passes a run's detail, calls and events to its owner only)
 Command: tests first (Claude: the 105 app tests, ruff and mypy on `app/` passed as built; 11 changes to the rule lines each failed a test) · `make down`, `make up` (profile real) · `make smoke` · `make app-forward`, then card 49's curl block in a second terminal (register and log in ana, create a chat, send "What is 7 times 8?", read the chat, `curl -N` the run's events through the app; register and log in bob, read ana's chat and run)
 Result:

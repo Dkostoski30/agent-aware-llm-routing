@@ -1,6 +1,7 @@
 import { httpResource } from '@angular/common/http';
 import { Component, computed } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { ClusterPanel } from './cluster/cluster-panel';
 import { TopBar } from './ui/top-bar';
 
 /** The profile and model the top bar's chip names; make ui writes it from config/<profile>.yaml. */
@@ -9,17 +10,17 @@ interface ProfileFile {
   model: string;
 }
 
-/** The split view of every screen (README: Layout): the conversation on the left, the cluster panel's column on
- * the right, empty until P3.11 fills it. */
+/** The split view of every screen (README: Layout): the conversation on the left, the cluster panel on the right
+ * (P3.11), which stays empty until someone logs in; P3.13c adds its toggle. */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, TopBar],
+  imports: [ClusterPanel, RouterOutlet, TopBar],
   template: `
     <div class="ag-root ag-app">
       <app-top-bar [profile]="chip()?.profile" [model]="chip()?.model" />
       <div class="ag-split">
         <main class="ag-main"><router-outlet /></main>
-        <aside class="ag-panel" aria-label="Cluster"></aside>
+        <aside class="ag-panel" aria-label="Cluster"><app-cluster-panel /></aside>
       </div>
     </div>
   `,

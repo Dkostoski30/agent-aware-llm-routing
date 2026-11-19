@@ -28,6 +28,14 @@ def test_the_file_limit_is_the_agents(profile: str) -> None:
     assert load_config(path).max_files == yaml.safe_load(path.read_text())["agent"]["max_files"]
 
 
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_cluster_poll_is_the_scrape_interval(profile: str) -> None:
+    """The panel asks as often as Prometheus has something new (P3.11)."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    scrape = yaml.safe_load(path.read_text())["monitoring"]["scrape_interval_seconds"]
+    assert load_config(path).cluster_poll_seconds == scrape
+
+
 def test_a_missing_key_raises(tmp_path: Path) -> None:
     profile = yaml.safe_load((CONFIG_DIR / "sim.yaml").read_text())
     del profile["app"]["min_password_length"]

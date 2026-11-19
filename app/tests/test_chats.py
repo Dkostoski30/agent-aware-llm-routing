@@ -19,6 +19,7 @@ import pytest
 from app_backend import logs
 from app_backend.app import create_app
 from app_backend.chats import NO_RUN, RUN_EXPIRED, RUNTIME_DOWN, RUNTIME_UNREACHABLE, passed_on
+from app_backend.cluster import ClusterReader
 from app_backend.config import AppConfig, ScryptParams
 from app_backend.runtime import RuntimeClient
 from fastapi.testclient import TestClient
@@ -37,6 +38,17 @@ LAST_EVENT = b'event: end\ndata: {"run_id":"run-1","status":"done"}\n\n'
 SSE_TYPE = "text/event-stream; charset=utf-8"
 # Far above the microseconds an event already in the stream takes to pass through.
 EVENT_WAIT_SECONDS = 2
+
+
+def no_prometheus() -> ClusterReader:
+    """Only GET /cluster asks Prometheus (test_cluster.py); a query here would fail the test."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"asked Prometheus: {request.url}")
+
+    return ClusterReader(
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://prometheus")
+    )
 
 
 class FakeClock:
@@ -120,6 +132,7 @@ def make_config() -> AppConfig:
         cookie_secure=True,
         max_files=MAX_FILES,
         runtime_timeout_seconds=5.0,
+        cluster_poll_seconds=5,
     )
 
 
@@ -143,7 +156,9 @@ def runtime_client(runtime: FakeRuntime) -> RuntimeClient:
 
 @pytest.fixture
 def app_factory(tmp_path: Path, runtime: FakeRuntime, clock: FakeClock) -> Any:
-    return create_app(make_config(), tmp_path / "app.db", runtime_client(runtime), clock)
+    return create_app(
+        make_config(), tmp_path / "app.db", runtime_client(runtime), no_prometheus(), clock
+    )
 
 
 def logged_in(app: Any, email: str) -> TestClient:
