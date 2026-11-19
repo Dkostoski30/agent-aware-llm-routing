@@ -9,7 +9,8 @@
 // least work first on (P3.7b), a run's first call goes to the pod whose pinned runs have the least work left, unless
 // the pods are level within the slack; with least context first on instead, to the pod whose pinned runs' latest
 // calls are the smallest in bytes. With priority on (P4.1), every call's body carries a vLLM priority that serves runs
-// close to finishing first, within an aging bound.
+// close to finishing first, within an aging bound. With warm-up on (P4.2), a run's first call goes to the pods that
+// turned Ready within the warm-up window, while they have room, so pods just added take new runs at once.
 package runrouter
 
 import (
@@ -48,7 +49,8 @@ const (
 	// the threshold for the sustained time, so the pin moved (P3.5's card names these two); a call of a parallel group
 	// stayed on the pinned pod, or found no room there and went to another pod with room, the pin staying (P3.6); a
 	// run's first call went to the one pod with the least pinned work, the others being over the slack, or with the
-	// smallest pinned context (P3.7b).
+	// smallest pinned context (P3.7b); a run's first call went to a pod that just turned Ready, or warm-up found new pods
+	// but none with room, and the scorers chose among every candidate (P4.2).
 	reasonFirst         = "first"
 	reasonPinned        = "pinned"
 	reasonRemapped      = "remapped"
@@ -58,6 +60,8 @@ const (
 	reasonParallelSpill = "parallel-spill"
 	reasonLeastWork     = "least-work"
 	reasonLeastContext  = "least-context"
+	reasonWarmup        = "warmup"
+	reasonWarmupFull    = "warmup-full"
 	// The end of a run (D1): the agent runtime and the replayer send it once a run stops.
 	endOfRunPattern = "POST /runs/{id}/end"
 	// How long the end-of-run server waits for a request's headers. The callers send a bodiless POST within the
@@ -69,6 +73,8 @@ var (
 	_ scheduling.Filter                    = &RunRouter{}
 	_ requestcontrol.PreRequest            = &RunRouter{}
 	_ requestcontrol.ResponseBodyProcessor = &RunRouter{}
+	_ fwkdl.Registrant                     = &RunRouter{}
+	_ fwkdl.NotificationExtractor          = &podWatch{}
 )
 
 // moveKey holds the overload guard's verdict on the request, from Filter to PreRequest: the picker hands both the same
@@ -91,7 +97,7 @@ func Register() {
 }
 
 // RunRouter holds the routing flags, the runs' pins, the pods' overload timers, the parallel groups' calls in flight,
-// the first-call rule that is on, if any, and the priority rule's aging.
+// the first-call rule that is on, if any, the priority rule's aging, and warm-up's limits and the pods' Ready times.
 type RunRouter struct {
 	typedName fwkplugin.TypedName
 	flags     Flags
@@ -103,14 +109,19 @@ type RunRouter struct {
 	// The priority rule's aging, and the clock it reads a call's arrival from.
 	aging time.Duration
 	now   func() time.Time
+	// Which pods are new and when one has room, and when each Ready pod turned Ready, from the Pod watch.
+	warmup WarmupLimits
+	ready  *readiness
 	// The factory's logger, for the end-of-run server, whose requests carry none.
 	logger logr.Logger
 }
 
 func newRunRouter(typedName fwkplugin.TypedName, flags Flags, ttl time.Duration, limits Limits,
-	parallelThreshold, leastWorkSlack int, aging time.Duration, now func() time.Time, logger logr.Logger) *RunRouter {
+	parallelThreshold, leastWorkSlack int, aging time.Duration, warmup WarmupLimits, now func() time.Time,
+	logger logr.Logger) *RunRouter {
 	router := &RunRouter{typedName: typedName, flags: flags, pins: newPins(ttl, now), overload: newOverload(limits, now),
-		parallel: newParallel(parallelThreshold), aging: aging, now: now, logger: logger}
+		parallel: newParallel(parallelThreshold), aging: aging, now: now, warmup: warmup, ready: newReadiness(logger),
+		logger: logger}
 	switch {
 	case flags.LeastWork:
 		rule := leastWorkRule(leastWorkSlack)
@@ -137,7 +148,7 @@ func Factory(name string, parameters *json.Decoder, handle fwkplugin.Handle) (fw
 		return nil, fmt.Errorf("plugin %s: end-of-run port: %w", Type, err)
 	}
 	router := newRunRouter(fwkplugin.TypedName{Type: Type, Name: name}, params.Flags, params.RunTTL, params.Overload,
-		params.ParallelQueueThreshold, params.LeastWorkSlack, params.PriorityAging, time.Now, logger)
+		params.ParallelQueueThreshold, params.LeastWorkSlack, params.PriorityAging, params.WarmupLimits, time.Now, logger)
 	go router.serve(ctx, listener)
 	flags := params.Flags
 	logger.Info("Plugin loaded", "type", Type, "name", name,
@@ -148,7 +159,9 @@ func Factory(name string, parameters *json.Decoder, handle fwkplugin.Handle) (fw
 		"overloadQueueThreshold", params.Overload.QueueThreshold,
 		"overloadSustainedSeconds", int(params.Overload.Sustained/time.Second),
 		"parallelQueueThreshold", params.ParallelQueueThreshold, "leastWorkSlack", params.LeastWorkSlack,
-		"priorityAgingSeconds", int(params.PriorityAging/time.Second))
+		"priorityAgingSeconds", int(params.PriorityAging/time.Second),
+		"warmupSeconds", int(params.WarmupLimits.Window/time.Second),
+		"warmupQueueThreshold", params.WarmupLimits.QueueThreshold)
 	return router, nil
 }
 
@@ -198,7 +211,10 @@ func (r *RunRouter) TypedName() fwkplugin.TypedName {
 // gets no rule: the scorers place each of its calls, and calls that arrive together may land on two pods. With a
 // first-call rule on (least work or least context) as well as affinity, a call with no pinned candidate whose run has
 // no live pin, the run's first call, gets the pods the rule offers (pins' place), with its verdict left on the request
-// for PreRequest. The guard never judges such a call, as it has no pin.
+// for PreRequest. The guard never judges such a call, as it has no pin. With warm-up on, a call with x-step 1 and no
+// pinned candidate, a run's first call, is judged by warm-up first (readiness' judge): when some candidates are new and
+// some not, it gets the new pods with room, or every candidate when none has room, with the verdict left on the request
+// for PreRequest, and no first-call rule judges it; while pods are new, warm-up decides first calls.
 func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceRequest, endpoints []scheduling.Endpoint) []scheduling.Endpoint {
 	runID := request.Headers[headerRunID]
 	pinned := r.pinnedCandidate(runID, endpoints)
@@ -209,6 +225,15 @@ func (r *RunRouter) Filter(_ context.Context, request *scheduling.InferenceReque
 		}
 	}
 	if pinned == nil {
+		if r.flags.Warmup && runID != "" && request.Headers[headerStep] == "1" {
+			if verdict, judged := r.ready.judge(endpoints, r.warmup, r.now()); judged {
+				request.PutAttribute(warmupKey, verdict)
+				if len(verdict.to) == 0 {
+					return endpoints
+				}
+				return verdict.to
+			}
+		}
 		if r.flags.Affinity && r.firstCall != nil && runID != "" {
 			if verdict, first := r.pins.place(runID, endpoints, *r.firstCall, progressOf(request)); first {
 				request.PutAttribute(placementKey, verdict)
@@ -260,7 +285,9 @@ func (r *RunRouter) pinnedCandidate(runID string, endpoints []scheduling.Endpoin
 // the pinned pod; a spill names the pinned pod as from and renews its pin, as the guard's spill does. A first call a
 // first-call rule judged has every candidate's load in the line, under the rule's measure (work or context), and the
 // rule's reason when it left one pod, first when the scorers chose among level pods; the run is pinned to the pod
-// chosen. Every pin written or renewed holds the run's progress as of this call.
+// chosen. A first call warm-up judged has its verdict's reason, whatever affinity, with each new candidate's seconds
+// since Ready and its queue; with affinity on the run is pinned to the pod chosen. Every pin written or renewed holds
+// the run's progress as of this call.
 func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, result *scheduling.SchedulingResult) error {
 	var priority int64
 	written := false
@@ -280,7 +307,13 @@ func (r *RunRouter) PreRequest(ctx context.Context, request *scheduling.Inferenc
 	if written {
 		fields = append(fields, "priority", priority)
 	}
-	if r.flags.Affinity {
+	if verdict, judged := scheduling.ReadRequestAttribute[arrival](request, warmupKey); judged {
+		fields = append(fields, "newPodAge", verdict.age, "newPodQueue", verdict.queue, "reason", verdict.reason)
+		decisions.WithLabelValues(verdict.reason).Inc()
+		if r.flags.Affinity {
+			r.pins.record(runID, target, progressOf(request))
+		}
+	} else if r.flags.Affinity {
 		now := progressOf(request)
 		reason := ""
 		if verdict, moved := scheduling.ReadRequestAttribute[move](request, moveKey); moved {

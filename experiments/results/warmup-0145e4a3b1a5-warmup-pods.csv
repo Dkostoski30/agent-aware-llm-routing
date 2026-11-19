@@ -1,0 +1,6 @@
+variant,pod,ready_s,first_call_s,first_step1_s,first_calls_elsewhere_before,first_calls_in_window
+warmup-off,vllm-54f7d4b486-4d6kw,205.9,210.0,210.0,0,5
+warmup-off,vllm-54f7d4b486-nhq8v,284.9,301.6,301.6,0,1
+warmup-off,vllm-54f7d4b486-b78kn,286.9,304.0,304.0,1,2
+warmup-on,vllm-85c7b5f7b4-lx6fp,207.8,210.7,210.7,0,7
+warmup-on,vllm-85c7b5f7b4-kw2cx,284.8,301.2,301.2,0,7

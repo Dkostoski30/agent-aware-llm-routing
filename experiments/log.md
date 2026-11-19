@@ -13,6 +13,26 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-19 · P4.2 · green (with warm-up on, every run's first call while a pod was new went to a new pod; off, 6 of 14 went to the old one)
+Command: tests first (Claude: `make test`'s Python and Go parts, 2096 Python tests, `make lint`; 31 changes to rule lines in the plugin and the report, each failed a test, two only after a case was added: a Ready condition of Unknown, and calls at a window's two edges) · the user: `make down`, `make up PROFILE=sim`, `make picker-image`, `make experiment NAME=warmup` (warmup-0145e4a3b1a5, ~14:40-15:08 local), `make warmup-report RESULT=experiments/results/warmup-0145e4a3b1a5`
+Result:
+- **The done-when, from the report** (P3.9b's sim burst at seed 6, KEDA on remaining work, affinity on in both, warm-up the only difference; 252 calls each, 0 failed):
+  | variant | pods added | first calls while a pod was new | to a new pod | to the old one | of them with no new pod with room |
+  |---|---|---|---|---|---|
+  | warmup-off | 3 | 14 | 8 | 6 | (not judged) |
+  | warmup-on | 2 | 14 | 14 | 0 | 0 |
+- Each added pod got its first call 2.9-17.1 s after its Ready time. With warm-up off one pod (b78kn) saw a first call go elsewhere after it turned Ready, to nhq8v, another new pod; with it on, none did.
+- The pod watch works on the live picker: each variant's picker log has a `Pod ready` line for every vLLM pod with its Kubernetes Ready time, and the warmup-on log 14 `reason: warmup` lines, 0 `warmup-full`.
+- Run completion, one seed (autoscale summary): warmup-on p50 56.6 s against 41.8 s, p95 142.5 s against 140.0 s, total run time 1457.5 s against 1383.9 s (+5.3%); idle pod-minutes 6.0 against 8.9; time to capacity 140 s in both.
+Notes:
+- Decided while planning (the user, 2026-11-19, card 58): a pod is new by its Ready condition's lastTransitionTime from Kubernetes, read through llm-d-router v0.11.0's own Pod watch (the plugin is a datalayer Registrant on k8s-notification-source; the picker's Role already lists and watches pods, and k8s.io/apimachinery was already required); every pod in its window, not only the newest, as KEDA adds several at once; a window (`routing.warmup_seconds` 120, one gap between bursts) and a room cap (`routing.warmup_queue_threshold` 1); affinity on in both variants.
+- Claude's choices: a first call is one with `x-step` 1 and no pinned candidate, so warm-up needs no affinity; all pods new (right after `make up`) or none new changes nothing; a pod with no Ready time known counts as old; while pods are new warm-up decides first calls, the least-work and least-context rules only when none is; the Ready times are logged whatever the flag, so the warm-up-off variant has them for the report.
+- **Finding: each burst went whole to one new pod.** With warm-up on, the 5 runs of the burst at 249 s all went to lx6fp, and those at 373 s all to kw2cx, while the old pod kcfmm took no first call from 211 s to 454 s. The room cap reads each pod's waiting queue as the picker last read it (every 50 ms), and a burst's calls arrive within one read, so it never fired (card 58 states this limit). That is the likely cause of the worse p50, not shown: one seed, and warm-up-on ended with 3 pods where warm-up-off had 4 (KEDA's later steps differed; both first scaled at 70 s). Counting the calls warm-up sent and not yet seen in the metrics, as P3.6 counts a group's calls in flight, would spread a burst; not built. P4.5 and P5.2 measure warm-up's effect on completion.
+- Not shown: real pods, whose first call is slow (14.3 s median TTFT, folded into the simulator's 140 s startup) and where P4.1 saw a fresh pod take ~50 s to count its calls; warm-up sends new runs into exactly that. P4.5 runs real 1<->2.
+- `make warmup-report` first had only `loadgen` on its path and failed on import (it reuses `pod_removed.picker_lines`, which pulls in the replayer); fixed to `agent:loadgen` before the run. The tests had both paths.
+- Spec changes to existing tests: the plugin's config gained two required keys, so `plugin_test.go`'s parameter helpers and `test_routing_values.py`'s profile fixture and expected parameters carry them. No assertion was weakened.
+- Size: ~1,450 changed lines with tests, over PLAN rule 1's rough 200, as P4.1.
+
 ### 2026-11-19 · P4.1 · green (a last step went ahead of six waiting first steps with priority on, of none with it off)
 Command: tests first (Claude: `make test`'s Python and Go parts, 2066 Python tests, `make lint`; 23 changes to rule lines over three rounds: 2 survivors were redundant code (a step-0 guard, a fallback for a pod name vLLM never sends late), removed; 2 showed missing cases (a stray call in an engine, a preempted filler), added; all caught after) · the user: `make lint`, `make down`, `make up`, then `make priority-check PROFILE=real` four times (the last 13:06-13:16 local), each through the gateway and the picker built from `gateway/`
 Result:

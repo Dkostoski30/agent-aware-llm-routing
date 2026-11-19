@@ -34,7 +34,8 @@ RULES_OFF = {
     "warmup": False,
 }
 # A profile's routing section: the rules, the pin TTL (P3.3), the overload limits (P3.5), the
-# parallel threshold (P3.6), the least-work slack (P3.7b) and the priority aging (P4.1).
+# parallel threshold (P3.6), the least-work slack (P3.7b), the priority aging (P4.1) and the
+# warm-up limits (P4.2).
 ROUTING_OFF = {
     **RULES_OFF,
     "run_ttl_seconds": 300,
@@ -43,6 +44,8 @@ ROUTING_OFF = {
     "parallel_queue_threshold": 2,
     "least_work_slack": 2,
     "priority_aging_seconds": 30,
+    "warmup_seconds": 120,
+    "warmup_queue_threshold": 1,
 }
 # A profile whose pods run vLLM's priority scheduling (P4.1), which the priority rule needs.
 PRIORITY_MODEL = {"name": "m", "scheduling_policy": "priority"}
@@ -116,6 +119,8 @@ def test_plugin_on_puts_the_run_router_before_the_defaults_scorers(tmp_path: Pat
         "parallelQueueThreshold": 2,
         "leastWorkSlack": 2,
         "priorityAgingSeconds": 30,
+        "warmupSeconds": 120,
+        "warmupQueueThreshold": 1,
         "endOfRunPort": 9010,
     }
     assert plugins["metrics-data-source"] == {
@@ -284,6 +289,25 @@ def test_an_aging_of_zero_is_accepted(tmp_path: Path) -> None:
     assert done.returncode == 0, done.stderr
 
 
+def test_warmup_and_its_limits_reach_the_plugin_as_integers(tmp_path: Path) -> None:
+    """As the least-work slack: 90.0 must reach the plugin as 90. Warm-up needs no affinity: it
+    judges a run's first call by its x-step (P4.2)."""
+    root = repo(tmp_path, {**ROUTING_OFF, "warmup_seconds": 90.0, "warmup_queue_threshold": 0.0})
+    rules = rules_file(tmp_path, {"routing": {"plugin": True, "warmup": True}})
+    done = routing_values(root, "p", str(rules))
+    assert done.returncode == 0, done.stderr
+    (router,) = [
+        plugin
+        for plugin in picker_config(done.stdout)["plugins"]
+        if plugin["type"] == "thesis-run-router"
+    ]
+    parameters = router["parameters"]
+    assert parameters["warmup"] is True
+    assert type(parameters["warmupSeconds"]) is int
+    assert type(parameters["warmupQueueThreshold"]) is int
+    assert (parameters["warmupSeconds"], parameters["warmupQueueThreshold"]) == (90, 0)
+
+
 @pytest.mark.parametrize(
     ("profile", "accepted"), [("real", True), ("real-plain", True), ("demo", True), ("sim", False)]
 )
@@ -425,6 +449,29 @@ def test_every_profile_has_every_rule_and_the_plugin_off(profile: str) -> None:
         ({**ROUTING_OFF, "priority_aging_seconds": 1.5}, None, "priority_aging_seconds"),
         ({**ROUTING_OFF, "priority_aging_seconds": "30"}, None, "priority_aging_seconds"),
         ({**ROUTING_OFF, "priority_aging_seconds": True}, None, "priority_aging_seconds"),
+        # The warm-up limits are the profile's too (P4.2), and the plugin refuses bad ones only at
+        # start.
+        (None, {"routing": {"plugin": True, "warmup_seconds": 60}}, "the profile's"),
+        (None, {"routing": {"plugin": True, "warmup_queue_threshold": 2}}, "the profile's"),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "warmup_seconds"},
+            None,
+            "routing.warmup_seconds",
+        ),
+        (
+            {k: v for k, v in ROUTING_OFF.items() if k != "warmup_queue_threshold"},
+            None,
+            "routing.warmup_queue_threshold",
+        ),
+        ({**ROUTING_OFF, "warmup_seconds": 0}, None, "warmup_seconds"),
+        ({**ROUTING_OFF, "warmup_seconds": -5}, None, "warmup_seconds"),
+        ({**ROUTING_OFF, "warmup_seconds": 1.5}, None, "warmup_seconds"),
+        ({**ROUTING_OFF, "warmup_seconds": "120"}, None, "warmup_seconds"),
+        ({**ROUTING_OFF, "warmup_seconds": True}, None, "warmup_seconds"),
+        ({**ROUTING_OFF, "warmup_queue_threshold": -1}, None, "warmup_queue_threshold"),
+        ({**ROUTING_OFF, "warmup_queue_threshold": 1.5}, None, "warmup_queue_threshold"),
+        ({**ROUTING_OFF, "warmup_queue_threshold": "1"}, None, "warmup_queue_threshold"),
+        ({**ROUTING_OFF, "warmup_queue_threshold": True}, None, "warmup_queue_threshold"),
         # vLLM answers 400 to a priority other than 0 unless its pods run priority scheduling, and
         # the rule writes one on every call; a profile without the key says nothing of its pods.
         (None, {"routing": {"plugin": True, "priority": True}}, "model.scheduling_policy"),

@@ -51,7 +51,7 @@ routing:
   least_context_first: false
   # Serves runs close to finishing first (P4.1).
   priority: false
-  # Sends new runs to the newest pod right after scale-up (P4.2).
+  # Sends a run's first call to the pods that just turned Ready, while they have room (P4.2).
   warmup: false
   # How long a run's pin outlives its last call when its end of run never arrives (P3.3, D1): the safety net for a
   # lost signal, not the way a pin normally goes. A first guess, longer than the longest call (agent.llm_timeout_seconds
@@ -83,6 +83,13 @@ routing:
   # measures: about one median real run (27-29 s at Gate 2), so a run's first step can be overtaken only by calls that
   # arrive within one typical run after it.
   priority_aging_seconds: 30
+  # Warm-up (P4.2): a pod is new this long after its Ready condition turned True. A first guess: one gap between the
+  # bursts of replay.patterns.burst (every_seconds 120), so a pod added during one burst is still new at the next.
+  warmup_seconds: 120
+  # Warm-up (P4.2): a new pod with more calls waiting than this has no room, and a run's first call goes where the
+  # scorers send it. A first guess, as overload_queue_threshold: 1 lets one call wait, so a burst can't pile onto a
+  # cold pod.
+  warmup_queue_threshold: 1
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads

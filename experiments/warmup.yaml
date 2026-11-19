@@ -1,0 +1,37 @@
+# P4.2: warm-up routing on simulated pods KEDA adds during a burst (docs/task-cards/58-P4.2-warm-up-routing.md). Run
+# with make experiment NAME=warmup after make down and make up PROFILE=sim, then make warmup-report
+# RESULT=experiments/results/warmup-<hash>. The question: while a pod KEDA added is new (routing.warmup_seconds after it
+# turned Ready), do runs' first calls go to it? In P3.9b's replay (3fb2040041ef) on the default picker about 4 of the
+# 10 after the scale-up went to the old pod. Results carry this file's hash (D11).
+profile: sim
+# P3.9b's replay, as experiments/autoscale-remaining.yaml: the long runs, the burst pattern, the seed.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst
+seed: 6
+# The simulated pod's cache, simulator.kv_cache_blocks 512 x block_size 16 (config/sim.yaml).
+kv_capacity_tokens_per_pod: 8192
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6, as autoscale-remaining.yaml.
+  runs_discarded: 4
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# The plugin with affinity in both, so the old runs stay pinned to the old pod, the case warm-up is for (decided
+# 2026-11-19); warm-up off first, then on. Both start at autoscaling.min_replicas and scale on remaining work.
+variants:
+  - name: warmup-off
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      warmup: false
+    epp_config: thesis-plugins.yaml
+    autoscaler: remaining
+  - name: warmup-on
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      warmup: true
+    epp_config: thesis-plugins.yaml
+    autoscaler: remaining

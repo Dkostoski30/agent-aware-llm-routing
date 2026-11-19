@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pod-removed calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -323,6 +323,12 @@ experiment-graph:
 experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
+
+# Where runs' first calls went while a pod KEDA added was new, per variant of an experiment whose variants all run the
+# plugin (P4.2): <RESULT>-warmup.csv and <RESULT>-warmup-pods.csv beside its files, from the files alone (no cluster).
+warmup-report:
+	@if [ -z "$(RESULT)" ]; then echo "usage: make warmup-report RESULT=experiments/results/warmup-<hash>"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.warmup $(RESULT)
 
 # A replay with one vLLM pod deleted partway, and where the runs pinned to it went (P3.4): the replay's lines, its printed
 # lines, the picker's log and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the

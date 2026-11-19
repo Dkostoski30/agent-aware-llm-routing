@@ -183,8 +183,9 @@ TOKENS_QUERY = (
     "+ increase(vllm:generation_tokens_total[{window}s]))"
 )
 # The profile's routing keys that are no rules but its own numbers, the pin TTL (P3.3), the
-# overload limits (P3.5), the parallel threshold (P3.6), the least-work slack (P3.7b) and the
-# priority aging (P4.1): a variant sets rules only (infra/routing-values.sh).
+# overload limits (P3.5), the parallel threshold (P3.6), the least-work slack (P3.7b), the
+# priority aging (P4.1) and the warm-up limits (P4.2): a variant sets rules only
+# (infra/routing-values.sh).
 PROFILE_ONLY_KEYS = frozenset(
     {
         "run_ttl_seconds",
@@ -193,6 +194,8 @@ PROFILE_ONLY_KEYS = frozenset(
         "parallel_queue_threshold",
         "least_work_slack",
         "priority_aging_seconds",
+        "warmup_seconds",
+        "warmup_queue_threshold",
     }
 )
 # A later step that stayed on its pod finds its run's previous prompt cached, less up to this many

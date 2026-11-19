@@ -2170,6 +2170,24 @@ def test_a_variant_may_not_set_the_profiles_priority_aging(tmp_path: Path) -> No
         check_routing(experiment, {"real": real})
 
 
+@pytest.mark.parametrize("key", ["warmup_seconds", "warmup_queue_threshold"])
+def test_a_variant_may_not_set_the_profiles_warmup_limits(tmp_path: Path, key: str) -> None:
+    """The warm-up limits are the profile's, as the priority aging is (P4.2)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, key: True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    with pytest.raises(ExperimentError, match=f"variant run-router: {key}: the profile's"):
+        check_routing(experiment, {"real": real})
+
+
+def test_warmup_needs_no_affinity(tmp_path: Path) -> None:
+    """Warm-up judges a run's first call by its x-step, with or without pins (P4.2)."""
+    variant = {**ROUTER_VARIANT, "routing": {"plugin": True, "warmup": True}}
+    experiment = loaded(tmp_path, variants=[DEFAULT_VARIANT, variant])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    check_routing(experiment, {"real": real})
+
+
 def test_priority_on_a_profile_whose_pods_run_priority_scheduling_is_accepted(
     tmp_path: Path,
 ) -> None:
@@ -3077,3 +3095,43 @@ def test_the_real_autoscale_file_runs_cpu_on_real_pods_through_the_burst() -> No
     assert burst is not None
     starts = start_times(experiment.pattern, experiment.seed)
     assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+WARMUP = REPO_ROOT / "experiments" / "warmup.yaml"
+
+
+def test_the_warmup_file_replays_p3_9bs_burst_with_warmup_off_then_on() -> None:
+    """P4.2 (card 58): P3.9b's sim replay under KEDA on remaining work, the plugin with affinity
+    in both variants, warm-up the only difference; every variant runs the plugin, whose log has the
+    pods' Ready times the report reads."""
+    experiment = committed(WARMUP)
+    remaining = committed(AUTOSCALE_REMAINING)
+    sim = profile_file("sim")
+    check_routing(experiment, {"sim": sim})
+    check_autoscaling(experiment, {"sim": sim})
+    assert experiment.profile == "sim"
+    assert (experiment.trace, experiment.pattern_name, experiment.seed) == (
+        remaining.trace,
+        remaining.pattern_name,
+        remaining.seed,
+    )
+    assert experiment.warmup == remaining.warmup
+    assert experiment.kv_capacity_tokens_per_pod == remaining.kv_capacity_tokens_per_pod
+    assert [
+        (v.name, v.routing, v.epp_config, v.autoscaler, v.values) for v in experiment.variants
+    ] == [
+        (
+            "warmup-off",
+            {"plugin": True, "affinity": True, "warmup": False},
+            "thesis-plugins.yaml",
+            "remaining",
+            None,
+        ),
+        (
+            "warmup-on",
+            {"plugin": True, "affinity": True, "warmup": True},
+            "thesis-plugins.yaml",
+            "remaining",
+            None,
+        ),
+    ]

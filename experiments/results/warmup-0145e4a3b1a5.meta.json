@@ -1,0 +1,154 @@
+{
+  "experiment": "warmup",
+  "hash": "0145e4a3b1a5",
+  "profile": "sim",
+  "profile_sha256": "3979e023a0abcf42d77e448978d102096fb3fca1a61a0c651568609f0dcea1a4",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "variants": {
+    "warmup-off": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "warmup": false
+      },
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "3979e023a0abcf42d77e448978d102096fb3fca1a61a0c651568609f0dcea1a4",
+      "warmup_ttft_ms": {
+        "vllm-54f7d4b486-glhgn": [
+          379,
+          331,
+          332,
+          330,
+          331
+        ]
+      },
+      "started": 1795096010.053837,
+      "ended": 1795096524.1166904,
+      "clock_jumps": 14,
+      "calls": 252,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-54f7d4b486-glhgn": 93,
+        "vllm-54f7d4b486-4d6kw": 116,
+        "vllm-54f7d4b486-nhq8v": 10,
+        "vllm-54f7d4b486-b78kn": 33
+      },
+      "pod_switch_share": 0.38247011952191234,
+      "max_gap_deviation_ms": 1,
+      "picker_log": "warmup-0145e4a3b1a5-warmup-off-picker.log",
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "warmup-0145e4a3b1a5-warmup-off-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 60.0,
+          "scale_up_seconds": 70.0,
+          "queue_seconds": 130.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 26,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 41799,
+        "completion_p95_ms": 140012,
+        "completion_total_ms": 1383883,
+        "makespan_ms": 376053,
+        "runs_per_minute": 4.148351429186843,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 140.0,
+        "idle_pod_minutes": 8.916666666666666
+      },
+      "cpu_hpa": null
+    },
+    "warmup-on": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "warmup": true
+      },
+      "profile": "sim",
+      "replicas": null,
+      "profile_sha256": "3979e023a0abcf42d77e448978d102096fb3fca1a61a0c651568609f0dcea1a4",
+      "warmup_ttft_ms": {
+        "vllm-85c7b5f7b4-kcfmm": [
+          331,
+          330,
+          330,
+          330,
+          330
+        ]
+      },
+      "started": 1795096768.236845,
+      "ended": 1795097281.8179755,
+      "clock_jumps": 15,
+      "calls": 252,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-85c7b5f7b4-kcfmm": 91,
+        "vllm-85c7b5f7b4-lx6fp": 74,
+        "vllm-85c7b5f7b4-kw2cx": 87
+      },
+      "pod_switch_share": 0.23904382470119523,
+      "max_gap_deviation_ms": 1,
+      "picker_log": "warmup-0145e4a3b1a5-warmup-on-picker.log",
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "warmup-0145e4a3b1a5-warmup-on-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 60.0,
+          "scale_up_seconds": 70.0,
+          "queue_seconds": 130.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 26,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 56641,
+        "completion_p95_ms": 142488,
+        "completion_total_ms": 1457538,
+        "makespan_ms": 376082,
+        "runs_per_minute": 4.148031546311708,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 140.0,
+        "idle_pod_minutes": 6.0
+      },
+      "cpu_hpa": null
+    }
+  }
+}

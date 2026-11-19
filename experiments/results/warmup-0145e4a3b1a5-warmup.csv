@@ -1,0 +1,3 @@
+variant,warmup,window_seconds,new_pods,first_calls_while_new,to_new,to_old,to_old_no_room,failed
+warmup-off,False,120,3,14,8,6,0,0
+warmup-on,True,120,2,14,14,0,0,0

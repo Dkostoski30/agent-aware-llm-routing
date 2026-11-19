@@ -36,7 +36,7 @@ type Flags struct {
 	LeastContext bool
 	// Serves runs close to finishing first (P4.1).
 	Priority bool
-	// Sends new runs to the newest pod right after scale-up (P4.2).
+	// Sends a run's first call to the pods that just turned Ready, while they have room (P4.2).
 	Warmup bool
 }
 
@@ -56,6 +56,8 @@ type Parameters struct {
 	// How far ahead of later arrivals a run close to finishing may go; a call is never overtaken by one arriving more
 	// than this after it (routing.priority_aging_seconds, P4.1).
 	PriorityAging time.Duration
+	// Which pods are new, and when a new pod has room, for warm-up (P4.2).
+	WarmupLimits WarmupLimits
 	// The port POST /runs/{id}/end is served on (infra/routing-values.sh, which opens it on the picker's Service).
 	EndOfRunPort int
 }
@@ -66,6 +68,14 @@ type Limits struct {
 	QueueThreshold int
 	// How long a pod stays over the threshold before a run pinned to it moves (routing.overload_sustained_seconds).
 	Sustained time.Duration
+}
+
+// WarmupLimits say which pods warm-up sends a run's first call to (P4.2).
+type WarmupLimits struct {
+	// A pod is new this long after it turned Ready (routing.warmup_seconds).
+	Window time.Duration
+	// A new pod with more calls waiting than this has no room (routing.warmup_queue_threshold).
+	QueueThreshold int
 }
 
 // raw is the JSON the picker's config holds. Pointers, so a missing key and null are told apart from false or 0.
@@ -88,13 +98,18 @@ type raw struct {
 	LeastWorkSlack *int `json:"leastWorkSlack"`
 	// The priority rule's aging.
 	PriorityAgingSeconds *int `json:"priorityAgingSeconds"`
+	// The warm-up limits.
+	WarmupSeconds        *int `json:"warmupSeconds"`
+	WarmupQueueThreshold *int `json:"warmupQueueThreshold"`
 }
 
 // parseParameters reads every parameter from the decoder the framework hands the factory. It refuses unknown keys
 // (the decoder is strict), missing or null ones, a TTL that is not a positive whole number of seconds, a port outside
 // 1-65535, a queue threshold or a parallel threshold that is not a whole number of calls, 0 or more, a sustained time
 // that is not a positive whole number of seconds, a least-work slack that is not a whole number, 0 or more, a priority
-// aging that is not a whole number of seconds, 0 or more, both first-call rules on, and no parameters at all.
+// aging that is not a whole number of seconds, 0 or more, a warm-up window that is not a positive whole number of
+// seconds, a warm-up threshold that is not a whole number of calls, 0 or more, both first-call rules on, and no
+// parameters at all.
 func parseParameters(decoder *json.Decoder) (Parameters, error) {
 	if decoder == nil {
 		return Parameters{}, errors.New("no parameters: every routing flag must be set")
@@ -146,6 +161,13 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 			"parameters: priorityAgingSeconds must be a whole number of seconds, 0 or more, at most %d",
 			maxDurationSeconds)
 	}
+	if in.WarmupSeconds == nil || *in.WarmupSeconds <= 0 || *in.WarmupSeconds > maxDurationSeconds {
+		return Parameters{}, fmt.Errorf("parameters: warmupSeconds must be a positive number of seconds, at most %d",
+			maxDurationSeconds)
+	}
+	if in.WarmupQueueThreshold == nil || *in.WarmupQueueThreshold < 0 {
+		return Parameters{}, errors.New("parameters: warmupQueueThreshold must be a number of calls, 0 or more")
+	}
 	if *in.LeastWork && *in.LeastContext {
 		return Parameters{}, errors.New("parameters: leastWorkFirst and leastContextFirst are both on: each places a " +
 			"run's first call, by another measure")
@@ -168,6 +190,10 @@ func parseParameters(decoder *json.Decoder) (Parameters, error) {
 		ParallelQueueThreshold: *in.ParallelQueueThreshold,
 		LeastWorkSlack:         *in.LeastWorkSlack,
 		PriorityAging:          time.Duration(*in.PriorityAgingSeconds) * time.Second,
-		EndOfRunPort:           *in.EndOfRunPort,
+		WarmupLimits: WarmupLimits{
+			Window:         time.Duration(*in.WarmupSeconds) * time.Second,
+			QueueThreshold: *in.WarmupQueueThreshold,
+		},
+		EndOfRunPort: *in.EndOfRunPort,
 	}, nil
 }
