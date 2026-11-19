@@ -13,6 +13,28 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-19 · Gate 3 · green with stated limits (closed from the existing results, no rerun)
+Command: none new. The gate is read from the Phase 3 entries below (decided by the user, 2026-11-19); `make test` and `make lint` are the user's run before the `gate-3` tag
+Result:
+- **Every routing rule except priority passes its tests and a replay** (PLAN.md's Gate 3 line):
+  | rule | task | tests | replay |
+  |---|---|---|---|
+  | the self-built picker picks as upstream's | P3.1 | `go build`, `go test`, image diffed against upstream's | sim, three variants: hit rate 0.892 inside upstream's 0.891-0.892, moved steps 2 of 243 in all three, pod switches 0.282 inside 0.279-0.295 |
+  | plugin skeleton, one flag per rule | P3.2 | `gateway/runrouter` tests, `test_routing_values.py` | sim: the picker loads `thesis-run-router`, 15 of 15 calls through it, the switch works both ways |
+  | task affinity | P3.3 | table-driven `plugin_test.go` | real, one order (247bb2ccf91c): 0 of 243 later steps moved (default 44), 0 failed; hit rate is the limit below |
+  | pod removed, runs remapped | P3.4 | the removed-pod cases | sim (346f89bc516e): the pod with the most live pins deleted, its 2 runs remapped, 0 of 126 calls after the settle failed |
+  | overload guard | P3.5 | `overload_test.go`, spike vs sustained | sim: 12 spills on burst, every one over the threshold, 0 remaps on short spikes; a sustained remap shown by the tests only |
+  | parallel calls | P3.6 | the parallel-group cases | sim: 28 spills on burst-fan-out and 1 on steady-fan-out, every one over the threshold, each run's next call back on its pin |
+  | burst replay against default | P3.7 | (the rules above) | real, both orders, GPU log: 4 × 357 calls, 0 failed; first-token p95 not worse; run-completion p95 is the limit below |
+- **KEDA scales on remaining work** (P3.9b, sim burst, 3fb2040041ef): 1 → 4 → 5 pods, 252 calls, 0 failed. Remaining work passed its target at 125 s, the queue at 130 s, spec replicas rose at 140 s, one 15 s HPA sync later: card 45's second branch, the numbers and the cause. P3.10 repeated it beside KEDA on the queue: alike within noise on completion, remaining work asking for fewer pods (4-7 against 8) at 31-56% fewer idle pod-minutes, one seed each.
+- **Stated limits, both for chapter 6 and P5.1:**
+  - P3.3: affinity's hit rate 0.807 against default's 0.821, both inside default's four-run range 0.794-0.836, so no gain shows overall. Run by run, affinity was higher in 12 of the 15 runs default moved a step in; the overall rate lost on one collision of two long runs pinned to one pod over its KV limit.
+  - P3.7: the plugin's run-completion p95 426.48 s against default's 405.77 s, 5.1% over against a 5% tolerance, worse in both orders (+7.3%, +2.6%), while the host swung 11-21% between files. Its first-token p95 was lower (47.88 s against 49.54 s).
+Notes:
+- P3.7b, a rule that would make the plugin finish runs faster, closed red (neither least_work_first nor least_context_first faster in both orders); every rule is off in the profiles since then. Its findings (KV admission, GPU starvation between the pods, 20% spread of default alone across files) go to P4.9-P4.12 and P5.1.
+- P3.10, P3.11 and P3.13 slipped past 15.11 as PLAN.md allowed and closed between 2026-11-17 and 2026-11-19; none is on Gate 3. P3.12 closed on 2026-11-17.
+- Not covered by this gate: priority (P4.1), and every claim at more than one seed. P5.1 repeats the routing comparisons in both orders with a GPU log.
+
 ### 2026-11-19 · P3.13c · green (steps under each answer, the cluster panel beside the chat behind a toggle)
 Command: tests first (Claude: 218 UI specs, `make lint`; 15 changes to rule lines, each failed a spec; headless Chrome screenshots against a throwaway mock app backend, not kept in the repo) · the user: card 52's done-when (`make test`, `make lint`, `make down`, `make up`, `make app-forward`, `make ui PROFILE=real`, the browser check of PLAN.md's P3.13 row)
 Result:

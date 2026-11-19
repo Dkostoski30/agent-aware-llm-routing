@@ -186,7 +186,7 @@ Order (2026-11-01): P2.1a-1 → P2.1a-2 → P2.1a-3 → P2.1b → P2.11 (added 2
 
 Order (2026-11-09): routing P3.1 → P3.2 → P3.3 → P3.4 → P3.5 → P3.6 → P3.7; autoscaling P3.8 → P3.9a → P3.9b → P3.10; app and UI P3.12a → P3.12b → P3.13a → P3.13b → P3.11 → P3.13c. The tracks are independent until P3.11 and P3.13c. P3.8, P3.12a and P3.13a need no cluster, so they can be written while a simulated replay runs; nothing else runs during a real-pod replay (P2.5). If the week runs over, these slip into Phase 4's week, in this order: P3.13, P3.11, P3.10. None is on Gate 3. P3.12 stays, since P4.8 needs the chat path; the freeze on 22.11 does not move.
 
-**Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work.
+**Gate 3:** all routing rules except priority pass their tests and replays; KEDA scales on remaining work. Green with stated limits 2026-11-19, from the existing results, no rerun (the user's choice; `experiments/log.md`): P3.1, P3.2, P3.4, P3.5 and P3.6 passed their tests and replays, P3.9b scaled 1 → 4 → 5 pods on remaining work. Limits, for chapter 6 and P5.1: P3.3's hit rate 0.807 against default's 0.821, both inside default's range 0.794-0.836; P3.7's run-completion p95 5.1% over default's against a 5% tolerance, first-token p95 not worse.
 
 ### Phase 4: Priority, drain, failover. Feature freeze (16–22.11)
 
