@@ -4,15 +4,21 @@ Three panels, one per question: how long runs took, how much of the prompts the 
 how long a first token took with a pod under and over its KV limit (P2.4). Each variant keeps its
 colour and line style in every panel, so it reads in greyscale too.
 
+make pressure (P4.9) draws its own graph here too, render_pressure: two panels over the buckets
+of cache pressure, from the numbers it prints.
+
 Usage: python -m load_generator.graph CSV [--out PNG]
 """
 
 import argparse
+import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from matplotlib.ticker import FormatStrFormatter
 
 from load_generator.record import REPO_ROOT
 from load_generator.report_config import load_report_config
@@ -29,6 +35,8 @@ MUTED = "#52514e"
 GRID = "#e4e3df"
 # Thesis pages are about 16 cm wide, and this keeps the text readable at that width.
 FIGURE_INCHES = (13.0, 4.2)
+# make pressure's two panels at the same height and text size, narrower for one panel fewer.
+PRESSURE_FIGURE_INCHES = (10.0, 4.2)
 DPI = 200
 # A first token at 0 ms cannot sit on a log axis, so the axis starts at one millisecond.
 SMALLEST_SECONDS = 0.001
@@ -175,6 +183,67 @@ def render(csv: Path, out: Path) -> None:
     figure.legend(
         loc="outside upper center", ncols=len(data), frameon=False, labelcolor=TEXT, fontsize=10
     )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(out, dpi=DPI)
+
+
+def _or_nan(values: Sequence[float | None]) -> list[float]:
+    """A bucket with no calls leaves a gap in its line, not a point at 0."""
+    return [math.nan if value is None else value for value in values]
+
+
+def render_pressure(
+    labels: Sequence[str],
+    calls: Sequence[int],
+    ttft_p50_ms: Sequence[int | None],
+    ttft_p90_ms: Sequence[int | None],
+    cached_share: Sequence[float | None],
+    out: Path,
+) -> None:
+    """make pressure's graph (P4.9): per bucket of cache pressure, the pooled calls' first-token
+    median and p90, and their cached share. Two panels, as the two have different units."""
+    figure = Figure(figsize=PRESSURE_FIGURE_INCHES, layout="constrained", facecolor=SURFACE)
+    ttft, share = figure.subplots(1, 2)
+    positions = list(range(len(labels)))
+    ticks = [f"{label}\n{count} calls" for label, count in zip(labels, calls, strict=True)]
+    medians = _or_nan([None if ms is None else _seconds(ms) for ms in ttft_p50_ms])
+    p90s = _or_nan([None if ms is None else _seconds(ms) for ms in ttft_p90_ms])
+    for axes in (ttft, share):
+        _style(axes)
+        axes.set_xticks(positions, ticks, color=TEXT, fontsize=8)
+        # Half a bucket past each end, so an empty end bucket keeps its tick and call count.
+        axes.set_xlim(-0.5, len(labels) - 0.5)
+        axes.set_xlabel("Cache pressure: context of live runs / the pods' KV cache", color=MUTED)
+    ttft.plot(positions, p90s, color=COLOURS[0], linestyle="--", linewidth=1.2, marker="o")
+    ttft.plot(positions, medians, color=COLOURS[0], linewidth=2, marker="o")
+    last = max((index for index, value in enumerate(medians) if not math.isnan(value)), default=0)
+    ttft.annotate(
+        "median",
+        (last, medians[last]),
+        xytext=(6, 0),
+        textcoords="offset points",
+        color=TEXT,
+        fontsize=9,
+        va="center",
+    )
+    ttft.annotate(
+        "p90",
+        (last, p90s[last]),
+        xytext=(6, 0),
+        textcoords="offset points",
+        color=TEXT,
+        fontsize=9,
+        va="center",
+    )
+    ttft.set_yscale("log")
+    # Seconds as numbers (0.5, 1, 10), not powers of ten, so a value reads at a glance.
+    ttft.yaxis.set_major_formatter(FormatStrFormatter("%g"))
+    ttft.set_ylabel("Time to first token (s)", color=MUTED, fontsize=10)
+    ttft.set_title("First token of later steps", color=TEXT, fontsize=11, loc="left")
+    share.plot(positions, _or_nan(list(cached_share)), color=COLOURS[0], linewidth=2, marker="o")
+    share.set_ylim(0, 1.02)
+    share.set_ylabel("Cached share of the prompt, mean", color=MUTED, fontsize=10)
+    share.set_title("Prompt served from the cache", color=TEXT, fontsize=11, loc="left")
     out.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(out, dpi=DPI)
 

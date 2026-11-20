@@ -1,0 +1,35 @@
+# P4.9: cache pressure at each later-step call's start, on the real-pod replays in experiments/results/
+# (docs/task-cards/53-P4.9-cache-pressure-curve.md). Run with make pressure; no cluster. Results carry this file's hash
+# (D11). The files named here are read, never edited.
+# Decided with the user (2026-11-20): every real-pod variant with a fixed pod count, a rule rather than a pick: the
+# simulated variants of validate-sim are left out (the simulator does not model KV admission, P3.7b), and so is
+# autoscale-real's cpu variant, whose pods went from 1 to 2 during its replay.
+sources:
+  - experiment: affinity-247bb2ccf91c
+    variants: [default, affinity]
+  - experiment: baseline-2069d38644d6
+    variants: [round-robin, default]
+  - experiment: baseline-b0cd8658ff58
+    variants: [round-robin, default]
+  - experiment: baseline-reversed-694f06470e98
+    variants: [default, round-robin]
+  - experiment: baseline-reversed-899a3bf28f10
+    variants: [default, round-robin]
+  - experiment: routing-burst-b36ab68af75c
+    variants: [default, plugin]
+  - experiment: routing-burst-e7ba766de6cd
+    variants: [default, plugin]
+  - experiment: routing-burst-reversed-e19c9624b221
+    variants: [plugin, default]
+  - experiment: routing-context-3930f5a0c2f4
+    variants: [default, plugin]
+  - experiment: routing-context-reversed-5b00a10b5b0c
+    variants: [plugin, default]
+  - experiment: routing-faster-d7acfd33b019
+    variants: [default, plugin]
+  - experiment: routing-faster-reversed-9a6c4680fec5
+    variants: [plugin, default]
+  - experiment: validate-sim-128acd3c5a3b
+    variants: [real-1pod, real-2pods]
+  - experiment: validate-sim-5593507542a4
+    variants: [real-1pod, real-2pods]

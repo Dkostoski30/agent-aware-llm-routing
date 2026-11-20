@@ -13,6 +13,32 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-20 · P4.9 · green (first tokens slow and the cached share falls as the live runs' context passes the pods' KV cache; the median bends between 1 and 1.5, the p90 already at 0.75-1)
+Command: tests first (Claude: `make test` exit 0, `make lint`; 34 tests in `loadgen/tests/test_pressure.py`; 13 changes to rule lines in `pressure.py`, all failed a test, 3 only after a test was added) · the user: `make pressure` twice and `cmp` of the two CSVs (no output: the same file). Hash 23bc873caac9: `experiments/results/pressure-23bc873caac9.csv`, `experiments/graphs/pressure-23bc873caac9.png`
+Result:
+- **Pooled**, 7,412 later-step calls of kept runs from 28 real-pod variants in 14 files (every real-pod variant with a fixed pod count; per-variant tables in the command's output, reproduced by `make pressure`):
+
+  | pressure | calls | first token p50 | p90 | cached share (mean) |
+  |---|---|---|---|---|
+  | under 0.75 | 3,174 | 0.4 s | 0.7 s | 0.86 |
+  | 0.75-1 | 579 | 0.6 s | 4.9 s | 0.75 |
+  | 1-1.25 | 289 | 1.7 s | 15.8 s | 0.74 |
+  | 1.25-1.5 | 317 | 4.9 s | 22.6 s | 0.57 |
+  | 1.5-2 | 529 | 7.1 s | 27.9 s | 0.45 |
+  | 2-3 | 1,870 | 13.2 s | 30.5 s | 0.35 |
+  | 3 and over | 654 | 23.1 s | 41.7 s | 0.34 |
+
+  Highest pressure 4.31. One run ended by a failed call (validate-sim-5593507542a4 real-2pods).
+- **Calls at pressure 1 or over, by load:** burst-fan-out files (routing-burst, -context, -faster, 2 pods) 89% on the default picker (1,798 of 2,009) and 86% on the plugin (1,727 of 2,009); the baseline pattern on 2 pods (affinity, baseline, validate-sim real-2pods) 11 of 2,908; the same pattern on 1 pod (validate-sim real-1pod) 123 of 486.
+- **Against the spike** (card 53, wall-clock times, warm-up runs' calls included, 9 replays): the same shape. Medians per bucket 0.4-0.5 / 0.8 / 0.8 / 6.2 / 9.0 / 14.0 / 26.6 s then, 0.4 / 0.6 / 1.7 / 4.9 / 7.1 / 13.2 / 23.1 s on rebuilt times; cached shares within 0.06 of the spike's in every bucket.
+Notes:
+- **Where it bends.** The median stays under 1 s up to 1, is 1.7 s at 1-1.25 and 4.9 s at 1.25-1.5; the cached share holds at 0.74-0.75 from 0.75 to 1.25 and drops to 0.57 past 1.25. The p90 bends earlier, 0.7 s under 0.75 to 4.9 s at 0.75-1. So the card's 1.0 for P4.12's `pressure_target` is where the median starts to rise, not where the tail does; this table does not move it, and P4.12 states which it targets.
+- **Pressure does not hold the queue apart.** At the same pressure the one-pod steady replays were faster than the two-pod bursts: 1.5-2 gave a median of 2.6 and 3.2 s on one pod, 3.8-16.5 s across the burst files, whose bursts also put more calls in flight at once. Per file the medians in one bucket spread widely (1.5-2: 2.6-16.5 s), so the curve is the pooled shape, not a law per replay. The card stated this limit: pressure and the queue rise together.
+- **The pickers give the same curve**, as the spike found: default and plugin are both mostly over 1 on the bursts (89% and 86%), and their per-bucket medians cross each other from file to file.
+- **The steady load seldom passes 1 on 2 pods** (11 of 2,908 calls), so the baseline and affinity files add points under 1 only; the curve past 1 comes from the bursts and the 1-pod runs.
+- Decided while planning (the user, 2026-11-20, card 53): every real-pod variant with a fixed pod count, listed in `experiments/pressure.yaml` (the plan's "32 in 16 files" was a miscount, corrected before the run); discarded warm-up runs are live but give no row; a run whose call failed stops being live when that call was sent. Claude's choices are on card 53: a fanned-out step counts once, a call counts itself, the cached share per bucket is the calls' mean, the start times come from today's pattern at the file's seed (unchanged since the first of these files). `config/report.yaml` gained `pressure_bucket_edges`, fixed at the spike's edges before this run; `test_report_config.py`'s settings fixture gained the key.
+- Size: ~820 changed lines with tests, over PLAN rule 1's rough 200, as P4.1-P4.4.
+
 ### 2026-11-20 · P4.4 · green (a pod killed mid-replay: 30 of 30 runs completed with the retry, 27 of 30 without; live agent runs survived a vLLM kill and an agent-runtime kill)
 Command: tests first (Claude: `make test`'s Python and Go parts, 2337 Python tests, `make lint`; 50 changes to rule lines in the retry rule, the loop, the replayer, the resume, the report and the live check: all failed a test but one equivalent, some only after a test was added, below) · the user: `make test`, `make lint`, `make down`, `make up`, `make failover-live EXPERIMENT=experiments/failover-live.yaml` (failover-live-b8c31f99f2fb, ~01:55-02:01 local), `make down`, `make up PROFILE=sim`, `make failover-check EXPERIMENT=experiments/failover.yaml` three times: stopped at the start (a check of mine, below), failover-576b813b6b4c (02:26-02:48, red, kept), failover-aa3c44493359 (03:11-03:34, green)
 Result:

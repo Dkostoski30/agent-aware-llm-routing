@@ -10,6 +10,11 @@ fewest_tokens_for_speed: 5
 # test nothing.
 runs_left_out: [2, 5]
 
+# make pressure's buckets of cache pressure (P4.9): the context live runs hold over the pods' KV cache. The spike's edges
+# (docs/task-cards/53-P4.9-cache-pressure-curve.md), fixed before the first run on rebuilt times; no edge moves to make
+# a bend the rebuilt times do not show. A bucket holds its lower edge: under 0.75, 0.75-1, ..., 3 and over.
+pressure_bucket_edges: [0.75, 1.0, 1.25, 1.5, 2, 3]
+
 # make experiment-graph's layout, in each axis's own units, as tried on P2.5's graph at the figure's size.
 graph:
   # Hit-rate bars, on an axis with one unit between variants: leaves a gap between bars.

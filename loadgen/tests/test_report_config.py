@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SETTINGS = {
     "fewest_tokens_for_speed": 5,
     "runs_left_out": [2, 5],
+    "pressure_bucket_edges": [0.75, 1.0, 1.25],
     "graph": {
         "bar_height": 0.3,
         "value_gap": 0.02,
@@ -32,6 +33,7 @@ def test_the_file_gives_the_settings(tmp_path: Path) -> None:
     config = load_report_config(written(tmp_path))
     assert config.fewest_tokens_for_speed == 5
     assert config.runs_left_out == (2, 5)
+    assert config.pressure_bucket_edges == (0.75, 1.0, 1.25)
     assert config.graph == GraphLayout(
         bar_height=0.3,
         value_gap=0.02,
@@ -63,6 +65,12 @@ def test_a_speed_needs_two_tokens_at_least(tmp_path: Path, fewest: object) -> No
 def test_runs_left_out_are_whole_counts(tmp_path: Path, left_out: object) -> None:
     with pytest.raises(ReportConfigError, match="runs_left_out"):
         load_report_config(written(tmp_path, runs_left_out=left_out))
+
+
+@pytest.mark.parametrize("edges", [[], [1.0, 0.75], [0.75, 0.75], [0, 1.0], ["1"], 1.0])
+def test_pressure_buckets_need_rising_edges_over_zero(tmp_path: Path, edges: object) -> None:
+    with pytest.raises(ReportConfigError, match="pressure_bucket_edges"):
+        load_report_config(written(tmp_path, pressure_bucket_edges=edges))
 
 
 def call(completion_tokens: int, duration_ms: int) -> CallRow:
