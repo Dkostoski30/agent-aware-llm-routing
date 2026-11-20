@@ -1,0 +1,2 @@
+variant,autoscaler,runs,finished_runs,failed_runs,interrupted_runs,completion_p50_ms,completion_p95_ms,completion_total_ms,makespan_ms,runs_per_minute,scaled_before_replay,time_to_capacity_seconds,idle_pod_minutes
+pressure,pressure,26,16,10,0,213362,491243,3647344,594950,1.6135809731910244,False,165.0,2.3333333333333335

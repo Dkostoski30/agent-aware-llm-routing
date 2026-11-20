@@ -23,8 +23,12 @@ from load_generator.autoscale import (
     AutoscaleSummary,
     CpuRow,
     Crossings,
+    ScaleUpWindows,
+    Window,
     crossing_text,
     helm_values,
+    scale_up_text,
+    scale_up_windows,
     summary_text,
 )
 from load_generator.experiment import (
@@ -70,20 +74,24 @@ from load_generator.results import CallRow
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # What the fake cluster's autoscaler applies, and the series it then reads from Prometheus:
 # remaining work passes 10 per pod at 5 s, spec replicas rise at 10 s, the queue passes 1 per pod
-# at 15 s.
+# at 15 s; the context passes real's 4384 per pod at 5 s, and KEDA's operator restarts at 10 s
+# (P4.12: the last two columns, a spec change). The second pod is never Ready.
 AUTOSCALING = {
     "min_replicas": 1,
     "max_replicas": 8,
     "remaining_work_target": 10,
     "queue_target": 1,
+    "pressure_target": 1.0,
     "scale_down_stabilization_seconds": 300,
 }
 AUTOSCALE_ROWS = [
-    AutoscaleRow(0.0, 1, 1, 0, 5),
-    AutoscaleRow(5.0, 1, 1, 0, 11),
-    AutoscaleRow(10.0, 2, 1, 2, 20),
-    AutoscaleRow(15.0, 2, 1, 3, 20),
+    AutoscaleRow(0.0, 1, 1, 0, 5, 1000, 4),
+    AutoscaleRow(5.0, 1, 1, 0, 11, 4500, 4),
+    AutoscaleRow(10.0, 2, 1, 2, 20, 9000, 5),
+    AutoscaleRow(15.0, 2, 1, 3, 20, 9000, 5),
 ]
+# real's model.kv_cache_tokens at pressure_target 1.0, the threshold the fake's variants run at.
+REAL_CONTEXT_THRESHOLD = 4384
 # The plain HPA's reading of the pods' CPU over the same replay (P3.10).
 CPU_ROWS = [CpuRow(0.0, 12), CpuRow(5.0, 97.5)]
 ROUND_ROBIN_VALUES = REPO_ROOT / "infra" / "helm" / "router-round-robin-values.yaml"
@@ -2584,6 +2592,11 @@ def test_an_autoscaled_variant_writes_its_series_and_the_meta_holds_the_crossing
             "scaled_before_replay": False,
         },
         "scale_up_before_queue": True,
+        # P4.12 (a spec change): the threshold from the profile, and the windows of its calls.
+        "context_threshold": REAL_CONTEXT_THRESHOLD,
+        "scale_up_windows": scale_up_windows(
+            AUTOSCALE_ROWS, replay_lines(), 101.0, 1, AUTOSCALING, REAL_CONTEXT_THRESHOLD
+        ).as_meta(),
     }
     assert meta["variants"]["default"]["autoscale"] is None
     assert not out.autoscale("default").exists()
@@ -2597,6 +2610,53 @@ def test_the_report_gives_an_autoscaled_variants_crossings(tmp_path: Path) -> No
     assert crossing_text("remaining", AUTOSCALING, Crossings(5.0, 10.0, 15.0)) in report_lines(
         rows, meta
     )
+
+
+def later_step(run: str, step: int, wall_ms: int, ttft_ms: int) -> dict[str, Any]:
+    """A call ts_start'ed wall_ms after the replay's start, 101 s on the ticking clock."""
+    return {
+        **replay_lines()[0],
+        "run_id": run,
+        "step": step,
+        "ts_start": 101_000 + wall_ms,
+        "ttft_ms": ttft_ms,
+    }
+
+
+def test_every_autoscaled_variant_reports_its_windows_from_the_kept_runs_by_the_wall(
+    tmp_path: Path,
+) -> None:
+    """P4.12, for every kind so that P4.5 compares all four alike: run 1 is discarded; the
+    windows count from the replay's start; the fake's spec rises at 10 s, and its second pod is
+    never Ready. The last call is sent at the rise, so a window counted from another clock would
+    move it."""
+    experiment = loaded(tmp_path, variants=[AUTOSCALED_VARIANT])
+    lines = [
+        later_step("a-1", 1, 0, 50),
+        later_step("a-1", 2, 1_000, 50),
+        later_step("a-2", 1, 500, 50),
+        later_step("a-2", 2, 2_000, 300),
+        later_step("a-2", 3, 9_000, 400),
+        later_step("a-2", 4, 10_000, 900),
+    ]
+    cluster = FakeCluster(replays={"remaining": lines})
+    rows, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    windows = ScaleUpWindows.from_meta(
+        meta["variants"]["remaining"]["autoscale"]["scale_up_windows"]
+    )
+    assert windows == ScaleUpWindows(
+        context_seconds=5.0,
+        scale_up_seconds=10.0,
+        ready_seconds=None,
+        scale_down_seconds=None,
+        scaled_before_replay=False,
+        before=Window(2, 300),
+        rising=Window(1, 900),
+        after=Window(0, None),
+        restarts_during_load=0,
+        restarts=1,
+    )
+    assert scale_up_text(REAL_CONTEXT_THRESHOLD, windows) in report_lines(rows, meta)
 
 
 def test_the_live_cluster_asks_prometheus_for_the_four_series_at_the_scrape_step(
@@ -2616,12 +2676,15 @@ def test_the_live_cluster_asks_prometheus_for_the_four_series_at_the_scrape_step
 
     monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
     rows = LiveCluster(experiment, {"real": real}).autoscale_series(100.0, 110.0)
-    assert rows == [AutoscaleRow(0.0, 1, 1, 1, 1), AutoscaleRow(5.0, 2, 2, 2, 2)]
+    assert rows == [AutoscaleRow(0.0, 1, 1, 1, 1, 1, 1), AutoscaleRow(5.0, 2, 2, 2, 2, 2, 2)]
+    # P4.12 added the last two (spec change).
     assert asked == [
         'max(kube_deployment_spec_replicas{namespace="default",deployment="vllm"})',
         'max(kube_deployment_status_replicas_ready{namespace="default",deployment="vllm"})',
         "sum(vllm:num_requests_waiting)",
         "sum(thesis_remaining_work)",
+        "sum(thesis_context_tokens)",
+        'sum(kube_pod_container_status_restarts_total{namespace="keda",container="keda-operator"})',
     ]
 
 
@@ -2650,6 +2713,28 @@ def test_the_live_cluster_scales_to_the_floor_then_installs_the_profiles_object(
     assert values["query"] == "sum(thesis_remaining_work)"
     assert values["threshold"] == real["autoscaling"]["remaining_work_target"]
     assert steps[2][:3] == ("wait", "scaledobject/vllm", "--for=condition=Ready")
+
+
+def test_the_live_cluster_installs_the_pressure_object_at_one_pods_kv_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path, variants=[PRESSURE_VARIANT])
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    real["autoscaling"]["pressure_target"] = 0.75
+    installed: list[Any] = []
+
+    def run(args: list[str], input: str, text: bool, check: bool) -> None:
+        installed.append(yaml.safe_load(input))
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    monkeypatch.setattr("load_generator.experiment.kubectl", lambda *args: "")
+    cluster = LiveCluster(experiment, {"real": real})
+    monkeypatch.setattr(cluster, "scale", lambda replicas: None)
+    cluster.floor_autoscaler("pressure")
+    cluster.start_autoscaler()
+    [values] = installed
+    assert values["query"] == "sum(thesis_context_tokens)"
+    assert values["threshold"] == round(real["model"]["kv_cache_tokens"] * 0.75)
 
 
 def test_the_live_cluster_starts_no_autoscaler_before_its_floor(
@@ -2769,6 +2854,7 @@ CPU_QUERY = (
 AUTOSCALE_SIM = REPO_ROOT / "experiments" / "autoscale-sim.yaml"
 AUTOSCALE_SIM_FAN_OUT = REPO_ROOT / "experiments" / "autoscale-sim-fan-out.yaml"
 AUTOSCALE_REAL = REPO_ROOT / "experiments" / "autoscale-real.yaml"
+AUTOSCALE_PRESSURE = REPO_ROOT / "experiments" / "autoscale-pressure.yaml"
 
 
 def profile_file(name: str) -> dict[str, Any]:
@@ -2782,6 +2868,41 @@ def test_a_variant_may_be_scaled_by_a_plain_hpa_on_cpu(tmp_path: Path) -> None:
     experiment = loaded(tmp_path, variants=[CPU_VARIANT])
     check_autoscaling(experiment, {"real": profile_file("real")})
     assert [variant.autoscaler for variant in experiment.variants] == ["cpu"]
+
+
+PRESSURE_VARIANT = {
+    "name": "pressure",
+    "values": None,
+    "epp_config": "default-plugins.yaml",
+    "autoscaler": "pressure",
+}
+
+
+def test_a_variant_may_be_scaled_on_the_context_its_runs_hold(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[PRESSURE_VARIANT])
+    check_autoscaling(experiment, {"real": profile_file("real")})
+    assert [variant.autoscaler for variant in experiment.variants] == ["pressure"]
+
+
+def test_pressure_on_simulated_pods_is_refused(tmp_path: Path) -> None:
+    """The simulator admits by max_num_seqs, not by KV blocks (P3.7b)."""
+    experiment = loaded(tmp_path, profile="sim", variants=[PRESSURE_VARIANT])
+    with pytest.raises(ExperimentError, match=r"P3\.7b"):
+        check_autoscaling(experiment, {"sim": profile_file("sim")})
+
+
+@pytest.mark.parametrize(
+    "variant", [AUTOSCALED_VARIANT, PRESSURE_VARIANT], ids=["remaining", "pressure"]
+)
+def test_an_autoscaler_on_a_profile_with_no_kv_cache_size_is_refused(
+    tmp_path: Path, variant: dict[str, Any]
+) -> None:
+    """Every autoscaled variant reports the context crossing, so each needs the threshold."""
+    experiment = loaded(tmp_path, variants=[variant])
+    real = profile_file("real")
+    del real["model"]["kv_cache_tokens"]
+    with pytest.raises(ExperimentError, match="kv_cache_tokens"):
+        check_autoscaling(experiment, {"real": real})
 
 
 def test_cpu_on_simulated_pods_is_refused(tmp_path: Path) -> None:
@@ -2908,7 +3029,7 @@ def test_the_live_cluster_installs_a_plain_hpa_for_cpu_and_waits_until_it_reads_
     assert steps[1][:2] == ("get", "--raw")
     args, values = steps[2]
     assert args[:4] == ["helm", "upgrade", "--install", "autoscaling"]
-    assert values == helm_values(real["autoscaling"], "cpu")
+    assert values == helm_values(real["autoscaling"], "cpu", REAL_CONTEXT_THRESHOLD)
     assert steps[3][:3] == ("wait", "hpa/vllm", "--for=condition=ScalingActive")
 
 
@@ -3095,6 +3216,28 @@ def test_the_real_autoscale_file_runs_cpu_on_real_pods_through_the_burst() -> No
     assert burst is not None
     starts = start_times(experiment.pattern, experiment.seed)
     assert experiment.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+
+
+def test_the_pressure_file_runs_as_the_cpu_one_with_the_pressure_autoscaler() -> None:
+    """P4.12: the same replay as autoscale-real.yaml, so P4.5 can set the two side by side."""
+    experiment = committed(AUTOSCALE_PRESSURE)
+    cpu = committed(AUTOSCALE_REAL)
+    real = profile_file("real")
+    check_routing(experiment, {"real": real})
+    check_autoscaling(experiment, {"real": real})
+    check_stall_window(experiment, {"real": real})
+    assert experiment.profile == "real"
+    assert (experiment.trace, experiment.pattern_name, experiment.seed) == (
+        cpu.trace,
+        cpu.pattern_name,
+        cpu.seed,
+    )
+    assert experiment.warmup == cpu.warmup
+    assert experiment.pod_stall_seconds == cpu.pod_stall_seconds
+    assert experiment.kv_capacity_tokens_per_pod == real["model"]["kv_cache_tokens"]
+    [variant] = experiment.variants
+    assert (variant.name, variant.autoscaler, variant.default) == ("pressure", "pressure", True)
+    assert variant.epp_config == "default-plugins.yaml"
 
 
 WARMUP = REPO_ROOT / "experiments" / "warmup.yaml"

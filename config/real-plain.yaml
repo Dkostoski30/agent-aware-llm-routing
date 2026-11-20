@@ -118,6 +118,11 @@ autoscaling:
   # the queue autoscaler's threshold. A first guess, the overload guard's (routing.overload_queue_threshold): one call
   # may wait, a second is a queue.
   queue_target: 1
+  # The pressure autoscaler's target (P4.12): the share of one pod's KV cache (model.kv_cache_tokens) its runs' context
+  # may fill, so KEDA wants ceil(sum(thesis_context_tokens) / (kv_cache_tokens x this)) pods. 1.0: the cache full on
+  # paper, where P4.9's first-token median bent (0.6 s at 0.75-1, 1.7 s at 1-1.25, 4.9 s at 1.25-1.5 on 7,412 real
+  # later steps); the p90 bent earlier, at 0.75-1, so this targets the median, not the tail.
+  pressure_target: 1.0
   # How long the HPA waits on lower readings before it removes the second pod. A first guess, the HPA's own default:
   # it outlasts the burst pattern's 120 s between bursts and a real pod's ~2 min cold start, so a pod added for one
   # burst is still there for the next. A pod removed serves its calls first (drain, P4.3).

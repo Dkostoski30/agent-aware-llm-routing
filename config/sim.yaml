@@ -137,6 +137,9 @@ autoscaling:
   # report holds remaining work to. A first guess, the overload guard's (routing.overload_queue_threshold): one call
   # may wait for a slot, a second is a queue.
   queue_target: 1
+  # As real.yaml's (P4.12, P4.9's median bend), read here only for the report's context crossing: the pressure
+  # autoscaler is refused on the simulator, which admits calls by max_num_seqs, not by KV blocks (P3.7b).
+  pressure_target: 1.0
   # How long the HPA waits on lower readings before it removes pods. A first guess, the HPA's own default: it outlasts
   # the burst pattern's 120 s between bursts, so pods added for one are still there for the next. A pod removed
   # serves its calls first (drain, P4.3).

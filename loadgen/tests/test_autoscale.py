@@ -22,8 +22,11 @@ from load_generator.autoscale import (
     CallSpan,
     CpuRow,
     Crossings,
+    ScaleUpWindows,
+    Window,
     check_cpu_target,
     check_section,
+    context_threshold,
     cpu_cores,
     cpu_quiet,
     cpu_rows_from,
@@ -36,6 +39,8 @@ from load_generator.autoscale import (
     interrupted_runs,
     rows_from,
     scale_up_before_queue,
+    scale_up_text,
+    scale_up_windows,
     scaled_before_replay,
     summarise_autoscale,
     summary_text,
@@ -53,8 +58,11 @@ SECTION = {
     "max_replicas": 8,
     "remaining_work_target": 10,
     "queue_target": 1,
+    "pressure_target": 1.0,
     "scale_down_stabilization_seconds": 300,
 }
+# One pod's KV cache at pressure_target 1.0 on the real profile: 4384 tokens (P4.12).
+CONTEXT_THRESHOLD = 4384
 
 
 def profile(name: str) -> dict[str, Any]:
@@ -77,7 +85,7 @@ def rendered(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_remaining_work_scales_on_the_trackers_sum_at_the_profiles_target() -> None:
-    assert helm_values(SECTION, "remaining") == {
+    assert helm_values(SECTION, "remaining", CONTEXT_THRESHOLD) == {
         "minReplicas": 1,
         "maxReplicas": 8,
         "query": "sum(thesis_remaining_work)",
@@ -87,7 +95,7 @@ def test_remaining_work_scales_on_the_trackers_sum_at_the_profiles_target() -> N
 
 
 def test_queue_scales_on_the_pods_waiting_calls_at_the_queue_target() -> None:
-    values = helm_values(SECTION, "queue")
+    values = helm_values(SECTION, "queue", CONTEXT_THRESHOLD)
     assert values["query"] == "sum(vllm:num_requests_waiting)"
     assert values["threshold"] == 1
 
@@ -95,11 +103,11 @@ def test_queue_scales_on_the_pods_waiting_calls_at_the_queue_target() -> None:
 def test_an_autoscaler_with_no_query_is_refused() -> None:
     """P3.10 made cpu a kind, so an unknown name is now memory (spec change, experiments/log.md)."""
     with pytest.raises(AutoscaleError, match="memory"):
-        helm_values(SECTION, "memory")
+        helm_values(SECTION, "memory", CONTEXT_THRESHOLD)
 
 
 def test_the_chart_renders_the_sim_profiles_object_on_remaining_work() -> None:
-    document = rendered(helm_values(profile("sim")["autoscaling"], "remaining"))
+    document = rendered(helm_values(profile("sim")["autoscaling"], "remaining", CONTEXT_THRESHOLD))
     assert document["apiVersion"] == "keda.sh/v1alpha1"
     assert document["kind"] == "ScaledObject"
     spec = document["spec"]
@@ -119,7 +127,7 @@ def test_the_chart_renders_the_sim_profiles_object_on_remaining_work() -> None:
 
 
 def test_the_chart_renders_the_queue_object_with_the_queue_target() -> None:
-    document = rendered(helm_values(profile("sim")["autoscaling"], "queue"))
+    document = rendered(helm_values(profile("sim")["autoscaling"], "queue", CONTEXT_THRESHOLD))
     [trigger] = document["spec"]["triggers"]
     assert trigger["metadata"]["query"] == "sum(vllm:num_requests_waiting)"
     assert trigger["metadata"]["threshold"] == "1"
@@ -159,6 +167,8 @@ def test_demo_has_no_autoscaling() -> None:
         ({"max_replicas": 1}, "max_replicas"),
         ({"remaining_work_target": 0}, "remaining_work_target"),
         ({"queue_target": -1}, "queue_target"),
+        ({"pressure_target": 0}, "pressure_target"),
+        ({"pressure_target": True}, "pressure_target"),
         ({"scale_down_stabilization_seconds": -5}, "scale_down_stabilization_seconds"),
         ({"min_replicas": True}, "min_replicas"),
     ],
@@ -179,17 +189,20 @@ def answer(points: dict[float, float]) -> list[dict[str, Any]]:
     return [{"metric": {}, "values": [[time, str(value)] for time, value in points.items()]}]
 
 
-def test_the_rows_line_up_the_four_series_by_time_from_the_replays_start() -> None:
+def test_the_rows_line_up_the_six_series_by_time_from_the_replays_start() -> None:
+    """P4.12 added the context the runs hold and the KEDA operator's restarts (spec change)."""
     answers = {
         "spec_replicas": answer({100.0: 1, 105.0: 1, 110.0: 2}),
         "ready_replicas": answer({100.0: 1, 105.0: 1, 110.0: 1}),
         "waiting": answer({100.0: 0, 105.0: 3, 110.0: 2}),
         "remaining_work": answer({105.0: 12, 110.0: 20}),
+        "context_tokens": answer({100.0: 0, 105.0: 3900, 110.0: 5100}),
+        "keda_restarts": answer({100.0: 4, 105.0: 4, 110.0: 5}),
     }
     assert rows_from(answers, 100.0, 110.0) == [
-        AutoscaleRow(0.0, 1, 1, 0, None),
-        AutoscaleRow(5.0, 1, 1, 3, 12),
-        AutoscaleRow(10.0, 2, 1, 2, 20),
+        AutoscaleRow(0.0, 1, 1, 0, None, 0, 4),
+        AutoscaleRow(5.0, 1, 1, 3, 12, 3900, 4),
+        AutoscaleRow(10.0, 2, 1, 2, 20, 5100, 5),
     ]
 
 
@@ -203,7 +216,7 @@ def test_a_series_with_no_samples_is_blank_not_zero() -> None:
     """No remaining-work series is no replayer serving it (P3.8), which is not a reading of 0."""
     answers = {name: answer({100.0: 1}) for name in SERIES_QUERIES}
     answers["remaining_work"] = []
-    assert rows_from(answers, 100.0, 110.0) == [AutoscaleRow(0.0, 1, 1, 1, None)]
+    assert rows_from(answers, 100.0, 110.0) == [AutoscaleRow(0.0, 1, 1, 1, None, 1, 1)]
 
 
 def test_an_answer_with_two_series_is_refused() -> None:
@@ -215,7 +228,7 @@ def test_an_answer_with_two_series_is_refused() -> None:
 
 
 def row(seconds: float, spec: float | None, waiting: float | None, remaining: float | None) -> Any:
-    return AutoscaleRow(seconds, spec, spec, waiting, remaining)
+    return AutoscaleRow(seconds, spec, spec, waiting, remaining, None, None)
 
 
 def test_the_first_crossings_are_per_pod_of_the_spec_replicas() -> None:
@@ -326,7 +339,13 @@ def test_the_text_says_when_the_pods_were_scaled_before_the_replay() -> None:
 
 def test_the_csv_has_a_column_per_series_and_blanks_for_gaps(tmp_path: Path) -> None:
     path = tmp_path / "x-autoscale.csv"
-    write_autoscale_csv(path, [AutoscaleRow(0.0, 1, 1, 0, None), AutoscaleRow(5.0, 2, 1, 3, 12)])
+    write_autoscale_csv(
+        path,
+        [
+            AutoscaleRow(0.0, 1, 1, 0, None, 0, 4),
+            AutoscaleRow(5.0, 2, 1, 3, 12, 5100, None),
+        ],
+    )
     with path.open() as file:
         rows = list(csv.DictReader(file))
     assert rows == [
@@ -336,6 +355,8 @@ def test_the_csv_has_a_column_per_series_and_blanks_for_gaps(tmp_path: Path) -> 
             "ready_replicas": "1",
             "waiting": "0",
             "remaining_work": "",
+            "context_tokens": "0",
+            "keda_restarts": "4",
         },
         {
             "seconds": "5.0",
@@ -343,6 +364,8 @@ def test_the_csv_has_a_column_per_series_and_blanks_for_gaps(tmp_path: Path) -> 
             "ready_replicas": "1",
             "waiting": "3",
             "remaining_work": "12",
+            "context_tokens": "5100",
+            "keda_restarts": "",
         },
     ]
 
@@ -379,7 +402,7 @@ CPU_SECTION = {**SECTION, "max_replicas": 2, "cpu_target_percent": 80}
 
 
 def test_cpu_scales_on_the_pods_cpu_at_the_profiles_target_percent() -> None:
-    assert helm_values(CPU_SECTION, "cpu") == {
+    assert helm_values(CPU_SECTION, "cpu", CONTEXT_THRESHOLD) == {
         "minReplicas": 1,
         "maxReplicas": 2,
         "cpuTargetPercent": 80,
@@ -390,7 +413,7 @@ def test_cpu_scales_on_the_pods_cpu_at_the_profiles_target_percent() -> None:
 def test_the_chart_renders_a_plain_hpa_on_the_real_profiles_cpu_target() -> None:
     """One object, not KEDA's: rendered() holds the count to one."""
     section = profile("real")["autoscaling"]
-    document = rendered(helm_values(section, "cpu"))
+    document = rendered(helm_values(section, "cpu", CONTEXT_THRESHOLD))
     assert document["apiVersion"] == "autoscaling/v2"
     assert document["kind"] == "HorizontalPodAutoscaler"
     assert document["metadata"]["name"] == "vllm"
@@ -602,7 +625,7 @@ def test_the_cpu_is_quiet_when_every_pods_sample_is_wholly_after_the_warm_up_and
 
 
 def ready_row(seconds: float, spec: float | None, ready: float | None) -> AutoscaleRow:
-    return AutoscaleRow(seconds, spec, ready, None, None)
+    return AutoscaleRow(seconds, spec, ready, None, None, None, None)
 
 
 def test_time_to_capacity_runs_from_the_first_scale_up_to_its_pods_ready() -> None:
@@ -837,3 +860,259 @@ def test_the_summary_text_gives_each_number() -> None:
 def test_the_summary_text_says_capacity_was_not_timed_when_scaled_before_the_replay() -> None:
     summary = AutoscaleSummary(**{**SUMMARY.as_meta(), "scaled_before_replay": True})
     assert "capacity not timed, the pods were scaled up before the replay;" in summary_text(summary)
+
+
+# P4.12: KEDA on the context the active runs hold, its target per pod one pod's KV cache.
+
+
+def test_pressure_scales_on_the_context_the_runs_hold_at_the_threshold_given() -> None:
+    assert helm_values(SECTION, "pressure", CONTEXT_THRESHOLD) == {
+        "minReplicas": 1,
+        "maxReplicas": 8,
+        "query": "sum(thesis_context_tokens)",
+        "threshold": CONTEXT_THRESHOLD,
+        "scaleDownStabilizationSeconds": 300,
+    }
+
+
+def test_the_chart_renders_the_real_profiles_object_on_context_tokens() -> None:
+    real = profile("real")
+    document = rendered(helm_values(real["autoscaling"], "pressure", context_threshold(real)))
+    [trigger] = document["spec"]["triggers"]
+    assert trigger["metricType"] == "AverageValue"
+    assert trigger["metadata"]["query"] == "sum(thesis_context_tokens)"
+    assert trigger["metadata"]["threshold"] == "4384"
+    assert (document["spec"]["minReplicaCount"], document["spec"]["maxReplicaCount"]) == (1, 2)
+
+
+def test_the_real_threshold_is_one_pods_kv_cache_at_the_profiles_target() -> None:
+    """vLLM's "GPU KV cache size: 4,384 tokens" (P4.11's model.kv_cache_tokens) at 1.0."""
+    assert context_threshold(profile("real")) == 4384
+
+
+@pytest.mark.parametrize(
+    ("target", "tokens"), [(0.75, 3288), (0.8, 3507), (0.9, 3946), (1.25, 5480)]
+)
+def test_the_threshold_is_the_kv_cache_times_the_target_in_whole_tokens(
+    target: float, tokens: int
+) -> None:
+    real = profile("real")
+    real["autoscaling"]["pressure_target"] = target
+    assert context_threshold(real) == tokens
+
+
+@pytest.mark.parametrize("name", ["real", "real-plain", "sim"])
+def test_every_scaling_profile_targets_p4_9s_bend(name: str) -> None:
+    """The median first token bent past 1.0 in P4.9; sim's is read for the report only, the same
+    so that the report reads alike on both."""
+    assert profile(name)["autoscaling"]["pressure_target"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "model",
+    [{}, {"kv_cache_tokens": 0}, {"kv_cache_tokens": 4384.5}, {"kv_cache_tokens": True}],
+    ids=["missing", "zero", "not whole", "bool"],
+)
+def test_a_profile_without_a_whole_kv_cache_has_no_threshold(model: dict[str, Any]) -> None:
+    with pytest.raises(AutoscaleError, match="kv_cache_tokens"):
+        context_threshold({"model": model, "autoscaling": SECTION})
+
+
+def scaling_row(
+    seconds: float,
+    spec: float | None,
+    ready: float | None,
+    context: float | None = None,
+    restarts: float | None = None,
+) -> AutoscaleRow:
+    return AutoscaleRow(seconds, spec, ready, None, None, context, restarts)
+
+
+def later(run: str, step: int, wall_ms: int, ttft_ms: int | None = 500) -> dict[str, Any]:
+    """A replay line sent wall_ms after the replay's start at 1000 s; no ttft_ms is a failed
+    call."""
+    line: dict[str, Any] = {"run_id": run, "step": step, "ts_start": 1_000_000 + wall_ms}
+    if ttft_ms is not None:
+        line["ttft_ms"] = ttft_ms
+        line["duration_ms"] = ttft_ms + 100
+    return line
+
+
+# One pod until spec 2 at 10 s, its second pod Ready at 25 s, back to 1 at 40 s; the context per
+# pod passes 4384 at 5 s; the operator restarts once at 15 s and once at 45 s.
+SCALING_ROWS = [
+    scaling_row(0, 1, 1, 1000, 4),
+    scaling_row(5, 1, 1, 4500, 4),
+    scaling_row(10, 2, 1, 9000, 4),
+    scaling_row(15, 2, 1, 9000, 5),
+    scaling_row(20, 2, 1, 9000, 5),
+    scaling_row(25, 2, 2, 8000, 5),
+    scaling_row(30, 2, 2, 8000, 5),
+    scaling_row(40, 1, 2, 2000, 5),
+    scaling_row(45, 1, 1, 2000, 6),
+]
+
+
+def test_the_windows_place_each_later_step_by_when_it_was_sent() -> None:
+    """Run 1 is discarded. Step 1s and a failed call are left out; a call at 10 s, the rise, is in
+    the rise-to-Ready window, one at 25 s, Ready, after it, and one sent at the scale-down's 40 s or
+    later in none."""
+    lines = [
+        later("a-1", 2, 1_000, 100),
+        later("a-2", 1, 1_000, 100),
+        later("a-2", 2, 2_000, 300),
+        later("a-2", 3, 9_999, 500),
+        later("a-3", 2, 10_000, 9_000),
+        later("a-3", 3, 20_000, 7_000),
+        later("a-3", 4, 22_000, None),
+        later("a-2", 4, 25_000, 800),
+        later("a-4", 2, 30_000, 600),
+        later("a-4", 3, 39_999, 2_000),
+        later("a-4", 4, 40_000, 50),
+    ]
+    windows = scale_up_windows(SCALING_ROWS, lines, 1000.0, 1, SECTION, CONTEXT_THRESHOLD)
+    assert windows == ScaleUpWindows(
+        context_seconds=5,
+        scale_up_seconds=10,
+        ready_seconds=25,
+        scale_down_seconds=40,
+        scaled_before_replay=False,
+        before=Window(calls=2, ttft_p50_ms=300),
+        rising=Window(calls=2, ttft_p50_ms=7_000),
+        after=Window(calls=3, ttft_p50_ms=800),
+        restarts_during_load=1,
+        restarts=2,
+    )
+
+
+def test_the_context_crossing_is_per_pod_of_the_spec_replicas_and_past_the_threshold() -> None:
+    rows = [
+        scaling_row(0, 1, 1, 4384),
+        scaling_row(5, 2, 1, 8768),
+        scaling_row(10, 2, 1, 8770),
+    ]
+    assert scale_up_windows(rows, [], 1000.0, 0, SECTION, CONTEXT_THRESHOLD).context_seconds == 10
+
+
+def test_with_no_scale_up_every_later_step_is_before_and_restarts_have_no_load() -> None:
+    rows = [scaling_row(0, 1, 1, 100, 4), scaling_row(5, 1, 1, 100, 4)]
+    lines = [later("a-1", 2, 1_000, 400), later("a-1", 3, 6_000, 600)]
+    windows = scale_up_windows(rows, lines, 1000.0, 0, SECTION, CONTEXT_THRESHOLD)
+    assert windows == ScaleUpWindows(
+        context_seconds=None,
+        scale_up_seconds=None,
+        ready_seconds=None,
+        scale_down_seconds=None,
+        scaled_before_replay=False,
+        before=Window(2, 400),
+        rising=Window(0, None),
+        after=Window(0, None),
+        restarts_during_load=None,
+        restarts=0,
+    )
+
+
+def test_a_pod_never_ready_keeps_the_rest_rising_and_its_load_to_the_replays_end() -> None:
+    rows = [
+        scaling_row(0, 1, 1, None, 4),
+        scaling_row(5, 2, 1, None, 4),
+        scaling_row(10, 2, 1, None, 7),
+    ]
+    lines = [later("a-1", 2, 6_000, 900), later("a-1", 3, 11_000, 950)]
+    windows = scale_up_windows(rows, lines, 1000.0, 0, SECTION, CONTEXT_THRESHOLD)
+    assert (windows.ready_seconds, windows.rising, windows.after) == (
+        None,
+        Window(2, 900),
+        Window(0, None),
+    )
+    assert (windows.restarts_during_load, windows.restarts) == (3, 3)
+
+
+def test_pods_scaled_before_the_replay_have_no_windows() -> None:
+    """As the summary's capacity: the series cannot say when they were asked for."""
+    rows = [scaling_row(0, 2, 1, 9000, 4), scaling_row(5, 2, 2, 9000, 4)]
+    windows = scale_up_windows(
+        rows, [later("a-1", 2, 1_000)], 1000.0, 0, SECTION, CONTEXT_THRESHOLD
+    )
+    assert windows.scaled_before_replay is True
+    assert (windows.scale_up_seconds, windows.ready_seconds) == (None, None)
+    assert (windows.before, windows.rising, windows.after) == (None, None, None)
+    assert windows.context_seconds == 0
+
+
+def test_restarts_count_each_rise_and_not_a_new_pods_fresh_count() -> None:
+    """A replaced operator pod starts its count again at 0: a fall, which is no restart."""
+    rows = [
+        scaling_row(0, 1, 1, None, 4),
+        scaling_row(5, 1, 1, None, None),
+        scaling_row(10, 1, 1, None, 5),
+        scaling_row(15, 1, 1, None, 0),
+        scaling_row(20, 1, 1, None, 1),
+    ]
+    assert scale_up_windows(rows, [], 1000.0, 0, SECTION, CONTEXT_THRESHOLD).restarts == 2
+
+
+def test_no_restart_sample_is_no_count() -> None:
+    rows = [scaling_row(0, 1, 1)]
+    assert scale_up_windows(rows, [], 1000.0, 0, SECTION, CONTEXT_THRESHOLD).restarts is None
+
+
+def test_the_restarts_during_the_load_run_from_the_rise_to_ready_inclusive() -> None:
+    """A restart between the sample before the rise and the rise came before the load."""
+    rows = [
+        scaling_row(0, 1, 1, None, 4),
+        scaling_row(5, 2, 1, None, 5),
+        scaling_row(10, 2, 1, None, 6),
+        scaling_row(15, 2, 2, None, 7),
+        scaling_row(20, 2, 2, None, 8),
+    ]
+    windows = scale_up_windows(rows, [], 1000.0, 0, SECTION, CONTEXT_THRESHOLD)
+    assert (windows.restarts_during_load, windows.restarts) == (2, 4)
+
+
+def test_the_windows_go_into_json_and_back() -> None:
+    windows = scale_up_windows(
+        SCALING_ROWS, [later("a-1", 2, 1_000)], 1000.0, 0, SECTION, CONTEXT_THRESHOLD
+    )
+    assert ScaleUpWindows.from_meta(json.loads(json.dumps(windows.as_meta()))) == windows
+    before = ScaleUpWindows(None, None, None, None, True, None, None, None, None, None)
+    assert ScaleUpWindows.from_meta(json.loads(json.dumps(before.as_meta()))) == before
+
+
+def test_the_windows_text_gives_each_moment_median_count_and_restart() -> None:
+    windows = ScaleUpWindows(
+        context_seconds=5.0,
+        scale_up_seconds=10.0,
+        ready_seconds=25.0,
+        scale_down_seconds=None,
+        scaled_before_replay=False,
+        before=Window(2, 300),
+        rising=Window(12, 7_000),
+        after=Window(30, 800),
+        restarts_during_load=1,
+        restarts=2,
+    )
+    assert scale_up_text(CONTEXT_THRESHOLD, windows) == (
+        "  context tokens passed 4384 per pod at 5.0 s, spec replicas rose at 10.0 s, the pods "
+        "asked for were Ready at 25.0 s, the first scale-down never; later steps' first token "
+        "p50 before the rise 0.3 s (2 calls), from the rise to Ready 7.0 s (12 calls), after Ready "
+        "0.8 s (30 calls); KEDA operator restarts 1 from the rise to Ready, 2 in the replay"
+    )
+
+
+def test_the_windows_text_says_what_is_missing() -> None:
+    windows = ScaleUpWindows(
+        None, None, None, None, False, Window(0, None), Window(0, None), Window(0, None), None, None
+    )
+    text = scale_up_text(CONTEXT_THRESHOLD, windows)
+    assert "context tokens passed 4384 per pod never, spec replicas rose never" in text
+    assert "before the rise - (0 calls)" in text
+    assert text.endswith("KEDA operator restarts - from the rise to Ready, - in the replay")
+
+
+def test_the_windows_text_says_when_the_pods_were_scaled_before_the_replay() -> None:
+    windows = ScaleUpWindows(0.0, None, None, None, True, None, None, None, None, 0)
+    assert scale_up_text(CONTEXT_THRESHOLD, windows) == (
+        "  context tokens passed 4384 per pod at 0.0 s; the pods were scaled before the replay, "
+        "so the scale-up and its windows are not timed; KEDA operator restarts 0 in the replay"
+    )

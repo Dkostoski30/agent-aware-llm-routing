@@ -1,7 +1,9 @@
 """KEDA on the vLLM Deployment (P3.9b, D2): the ScaledObject a profile's autoscaling section gives,
 the series a replay leaves in Prometheus, and the moments the report reads from them. And the
 baselines (P3.10): KEDA on the queue, and a plain HPA on the pods' CPU, real pods only (D5), with
-the numbers P5.2 compares them by.
+the numbers P5.2 compares them by. And KEDA on the context the active runs hold (P4.12), its
+threshold per pod one pod's KV cache in tokens times the profile's pressure_target: a figure of the
+hardware where remaining work's target is a guess.
 
 At the floor of 1 pod the HPA KEDA makes does all the scaling: it reads the metric every 15 s
 (k3s's --horizontal-pod-autoscaler-sync-period, a flag of the whole machine) and wants
@@ -23,13 +25,20 @@ its samples with: on real pods the plan's times drifted from it by up to 34 s wi
 call in flight at a sample, each sample one scrape step; a starting pod is not Ready, so not idle.
 An interrupted run failed a call that began after the first scale-down less the call deadline:
 one begun earlier had failed by then, whatever ended it (decided 2026-11-15).
+
+Every autoscaled variant also gets the scale-up's windows (P4.12, for all kinds so that P4.5
+compares them alike): the first-token median of the kept runs' later steps sent before spec
+replicas rose, from the rise until the pods asked for were Ready, and from then until the first
+scale-down, each call placed by its ts_start as the spans are; and the KEDA operator's restarts,
+which a model load knocked it into in P3.9a (decided 2026-11-20, card 56).
 """
 
 import csv
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import astuple, dataclass, fields
+from dataclasses import asdict, astuple, dataclass, fields
 from datetime import datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -40,11 +49,15 @@ from load_generator.results import percentile, timed_calls
 CHART = REPO_ROOT / "infra" / "charts" / "autoscaling"
 # Each autoscaler's trigger: one number for the whole Deployment, which KEDA divides by its
 # threshold. Remaining work is the run tracker's (P3.8), from the agent runtime and the replayer.
+# Context tokens are the run tracker's too (P4.10): each active run's latest prompt.
 TRIGGER_QUERIES = {
     "remaining": "sum(thesis_remaining_work)",
     "queue": "sum(vllm:num_requests_waiting)",
+    "pressure": "sum(thesis_context_tokens)",
 }
-# Each autoscaler's threshold, a key of the profile's autoscaling section.
+# Each autoscaler's threshold, a key of the profile's autoscaling section; pressure's is
+# context_threshold's, from two keys.
+PRESSURE = "pressure"
 TARGET_KEYS = {"remaining": "remaining_work_target", "queue": "queue_target"}
 # A plain HPA on the pods' CPU, as a share of their request (pod.cpu_request): the baseline the
 # approved topic names (P3.10). Only it reads CPU_TARGET_KEY, so the simulator's section has none.
@@ -59,7 +72,9 @@ CPU_QUERY = (
     'horizontalpodautoscaler="vllm",metric_name="cpu",metric_target_type="utilization"})'
 )
 # What a replay leaves, each as one series: kube-state-metrics' spec and Ready counts of the vLLM
-# Deployment (max() drops the labels; there is one Deployment), and the two triggers.
+# Deployment (max() drops the labels; there is one Deployment), the three triggers, and the KEDA
+# operator's restart count (install-keda.sh's namespace; the container its chart names), summed
+# over its pods, of which one runs.
 SERIES_QUERIES = {
     "spec_replicas": 'max(kube_deployment_spec_replicas{namespace="default",deployment="vllm"})',
     "ready_replicas": (
@@ -67,9 +82,13 @@ SERIES_QUERIES = {
     ),
     "waiting": TRIGGER_QUERIES["queue"],
     "remaining_work": TRIGGER_QUERIES["remaining"],
+    "context_tokens": TRIGGER_QUERIES[PRESSURE],
+    "keda_restarts": (
+        'sum(kube_pod_container_status_restarts_total{namespace="keda",container="keda-operator"})'
+    ),
 }
 COUNT_KEYS = ("min_replicas", "max_replicas")
-NUMBER_KEYS = ("remaining_work_target", "queue_target")
+NUMBER_KEYS = ("remaining_work_target", "queue_target", "pressure_target")
 SECONDS_KEY = "scale_down_stabilization_seconds"
 
 
@@ -86,6 +105,8 @@ class AutoscaleRow:
     ready_replicas: float | None
     waiting: float | None
     remaining_work: float | None
+    context_tokens: float | None
+    keda_restarts: float | None
 
 
 @dataclass(frozen=True)
@@ -137,9 +158,21 @@ def check_cpu_target(section: Mapping[str, Any]) -> None:
         raise AutoscaleError(f"autoscaling.{CPU_TARGET_KEY} must be a whole percent from 1 up")
 
 
-def helm_values(section: Mapping[str, Any], kind: str) -> dict[str, Any]:
-    """infra/charts/autoscaling's values for an autoscaler on a profile's section. cpuTargetPercent
-    is what makes the chart render the plain HPA in place of KEDA's object."""
+def context_threshold(profile: Mapping[str, Any]) -> int:
+    """The context per pod past which the pressure autoscaler adds one: one pod's KV cache in
+    tokens (model.kv_cache_tokens, P4.11) times autoscaling.pressure_target, in whole tokens, as a
+    prompt is counted. check_section holds the target."""
+    tokens: object = profile["model"].get("kv_cache_tokens")
+    if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1:
+        raise AutoscaleError("model.kv_cache_tokens must be a whole number of tokens from 1 up")
+    target: float = profile["autoscaling"]["pressure_target"]
+    return round(tokens * target)
+
+
+def helm_values(section: Mapping[str, Any], kind: str, context_tokens: int) -> dict[str, Any]:
+    """infra/charts/autoscaling's values for an autoscaler on a profile's section; context_tokens
+    is context_threshold's. cpuTargetPercent is what makes the chart render the plain HPA in place
+    of KEDA's object."""
     if kind not in KINDS:
         raise AutoscaleError(f"no autoscaler {kind}, there are {', '.join(KINDS)}")
     if kind == CPU:
@@ -153,7 +186,7 @@ def helm_values(section: Mapping[str, Any], kind: str) -> dict[str, Any]:
         "minReplicas": section["min_replicas"],
         "maxReplicas": section["max_replicas"],
         "query": TRIGGER_QUERIES[kind],
-        "threshold": section[TARGET_KEYS[kind]],
+        "threshold": context_tokens if kind == PRESSURE else section[TARGET_KEYS[kind]],
         "scaleDownStabilizationSeconds": section[SECONDS_KEY],
     }
 
@@ -465,6 +498,149 @@ def interrupted_runs(
         return 0
     since_ms = (down - deadline_seconds) * 1000
     return len({span.run for span in spans if span.ended_ms is None and span.begun_ms > since_ms})
+
+
+@dataclass(frozen=True)
+class Window:
+    """The later steps sent within one window: how many have a first token, and its median."""
+
+    calls: int
+    ttft_p50_ms: int | None
+
+
+@dataclass(frozen=True)
+class ScaleUpWindows:
+    """Seconds since the replay's start; None if it never happened."""
+
+    context_seconds: float | None
+    # Also None, as the windows, if the pods were scaled before the replay.
+    scale_up_seconds: float | None
+    ready_seconds: float | None
+    scale_down_seconds: float | None
+    scaled_before_replay: bool
+    before: Window | None
+    rising: Window | None
+    after: Window | None
+    # From the rise to Ready, or to the replay's end if never Ready; None with no rise.
+    restarts_during_load: int | None
+    # None with no sample of the count.
+    restarts: int | None
+
+    def as_meta(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_meta(cls, meta: Mapping[str, Any]) -> "ScaleUpWindows":
+        windows = {
+            name: None if meta[name] is None else Window(**meta[name])
+            for name in ("before", "rising", "after")
+        }
+        return cls(**{**meta, **windows})
+
+
+def _restart_rises(rows: Sequence[AutoscaleRow]) -> int | None:
+    """Each rise of the count from one sample to the next. A fall is a new operator pod counting
+    from 0, which is no restart."""
+    counts = [row.keda_restarts for row in rows if row.keda_restarts is not None]
+    if not counts:
+        return None
+    return round(sum(max(now - before, 0) for before, now in pairwise(counts)))
+
+
+def _window(times: Sequence[int]) -> Window:
+    return Window(len(times), percentile(times, 0.5) if times else None)
+
+
+def scale_up_windows(
+    rows: Sequence[AutoscaleRow],
+    lines: Sequence[Mapping[str, Any]],
+    started: float,
+    runs_discarded: int,
+    section: Mapping[str, Any],
+    context_tokens: int,
+) -> ScaleUpWindows:
+    """lines are the replay's, started the clock reading the series count from (as wall_spans).
+    A call sent at the rise is in the rise's window, one sent at Ready in the after's, and one
+    sent at or after the first scale-down, when the pods fall back, in none."""
+
+    def passed(row: AutoscaleRow) -> bool:
+        per_pod = _per_pod(row.context_tokens, row.spec_replicas)
+        return per_pod is not None and per_pod > context_tokens
+
+    context = _first(rows, passed)
+    down = first_scale_down(rows)
+    restarts = _restart_rises(rows)
+    if scaled_before_replay(rows, section):
+        return ScaleUpWindows(context, None, None, down, True, None, None, None, None, restarts)
+    scale_up = first_crossings(rows, section).scale_up_seconds
+    capacity = time_to_capacity(rows, section)
+    ready = None if scale_up is None or capacity is None else scale_up + capacity
+    zero = round(started * 1000)
+    windows: dict[str, list[int]] = {"before": [], "rising": [], "after": []}
+    for line in lines:
+        if run_position(line["run_id"]) <= runs_discarded or line["step"] < 2:
+            continue
+        if "ttft_ms" not in line:
+            continue
+        sent = (line["ts_start"] - zero) / 1000
+        if down is not None and sent >= down:
+            continue
+        if scale_up is None or sent < scale_up:
+            windows["before"].append(line["ttft_ms"])
+        elif ready is None or sent < ready:
+            windows["rising"].append(line["ttft_ms"])
+        else:
+            windows["after"].append(line["ttft_ms"])
+    during_load = None
+    if scale_up is not None:
+        during_load = _restart_rises(
+            [
+                row
+                for row in rows
+                if row.seconds >= scale_up and (ready is None or row.seconds <= ready)
+            ]
+        )
+    return ScaleUpWindows(
+        context_seconds=context,
+        scale_up_seconds=scale_up,
+        ready_seconds=ready,
+        scale_down_seconds=down,
+        scaled_before_replay=False,
+        before=_window(windows["before"]),
+        rising=_window(windows["rising"]),
+        after=_window(windows["after"]),
+        restarts_during_load=during_load,
+        restarts=restarts,
+    )
+
+
+def _count_text(count: int | None) -> str:
+    return "-" if count is None else str(count)
+
+
+def _window_text(window: Window) -> str:
+    median = "-" if window.ttft_p50_ms is None else f"{window.ttft_p50_ms / 1000:.1f} s"
+    return f"{median} ({window.calls} calls)"
+
+
+def scale_up_text(context_tokens: int, windows: ScaleUpWindows) -> str:
+    crossed = f"  context tokens passed {context_tokens} per pod {_when(windows.context_seconds)}"
+    restarts = f"KEDA operator restarts {_count_text(windows.restarts)} in the replay"
+    # The windows are None exactly when the pods were scaled before the replay.
+    if windows.before is None or windows.rising is None or windows.after is None:
+        return (
+            f"{crossed}; the pods were scaled before the replay, so the scale-up and its windows "
+            f"are not timed; {restarts}"
+        )
+    return (
+        f"{crossed}, spec replicas rose {_when(windows.scale_up_seconds)}, the pods asked for were "
+        f"Ready {_when(windows.ready_seconds)}, the first scale-down "
+        f"{_when(windows.scale_down_seconds)}; later steps' first token p50 before the rise "
+        f"{_window_text(windows.before)}, from the rise to Ready {_window_text(windows.rising)}, "
+        f"after Ready {_window_text(windows.after)}; KEDA operator restarts "
+        f"{_count_text(windows.restarts_during_load)} from the rise to Ready, "
+        f"{_count_text(windows.restarts)} in the replay"
+    )
 
 
 def summarise_autoscale(

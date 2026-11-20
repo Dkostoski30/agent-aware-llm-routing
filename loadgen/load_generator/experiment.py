@@ -41,6 +41,12 @@ Each autoscaled variant gets P5.2's numbers from its series and calls
 (autoscale.summarise_autoscale): in its .meta.json, in the report, and as a row of
 <stem>-autoscale-summary.csv.
 
+An autoscaler may also be pressure (P4.12): KEDA on the context the active runs hold, its
+threshold one pod's KV cache (autoscale.context_threshold), real pods only: the simulator admits
+calls by max_num_seqs, not by KV blocks (P3.7b). Every autoscaled variant's series hold the context
+and the KEDA operator's restarts, and its report the scale-up's first-token windows
+(autoscale.scale_up_windows).
+
 Usage: python -m load_generator.experiment EXPERIMENT
 """
 
@@ -66,14 +72,17 @@ from load_generator.autoscale import (
     CPU_QUERY,
     CPU_TARGET_KEY,
     KINDS,
+    PRESSURE,
     SERIES_QUERIES,
     AutoscaleError,
     AutoscaleRow,
     AutoscaleSummary,
     CpuRow,
     Crossings,
+    ScaleUpWindows,
     check_cpu_target,
     check_section,
+    context_threshold,
     cpu_cores,
     cpu_quiet,
     cpu_rows_from,
@@ -82,6 +91,8 @@ from load_generator.autoscale import (
     helm_values,
     rows_from,
     scale_up_before_queue,
+    scale_up_text,
+    scale_up_windows,
     summarise_autoscale,
     summary_text,
     write_autoscale_csv,
@@ -503,8 +514,16 @@ def check_autoscaling(experiment: Experiment, profiles: Mapping[str, Mapping[str
                 f"variant {variant.name}: cpu on simulated pods, whose CPU says nothing of their "
                 "load (D5); the simulator compares remaining and queue"
             )
+        if variant.autoscaler == PRESSURE and variant.profile == SIM_PROFILE:
+            raise ExperimentError(
+                f"variant {variant.name}: pressure on simulated pods, which admit calls by "
+                "max_num_seqs, not by KV blocks (P3.7b), so their context says nothing of their "
+                "load"
+            )
         try:
             check_section(profile["autoscaling"])
+            # Every kind's report has the context crossing, so every kind needs the threshold.
+            context_threshold(profile)
             if variant.autoscaler == CPU:
                 check_cpu_target(profile["autoscaling"])
         except AutoscaleError as error:
@@ -722,17 +741,24 @@ def _variant_meta(
 
 
 def _autoscale_meta(
-    variant: Variant, section: Mapping[str, Any], rows: Sequence[AutoscaleRow], out: Outputs
+    variant: Variant,
+    autoscaling: "Autoscaling",
+    rows: Sequence[AutoscaleRow],
+    out: Outputs,
+    windows: ScaleUpWindows,
 ) -> dict[str, Any]:
-    """The series beside the results, and when each crossing came (P3.9b)."""
+    """The series beside the results, when each crossing came (P3.9b), and the scale-up's windows
+    against the context threshold (P4.12)."""
     write_autoscale_csv(out.autoscale(variant.name), rows)
-    crossings = first_crossings(rows, section)
+    crossings = first_crossings(rows, autoscaling.section)
     return {
         "autoscaler": variant.autoscaler,
-        "section": dict(section),
+        "section": dict(autoscaling.section),
         "csv": out.autoscale(variant.name).name,
         "crossings": crossings.as_meta(),
         "scale_up_before_queue": scale_up_before_queue(crossings),
+        "context_threshold": autoscaling.context_threshold,
+        "scale_up_windows": windows.as_meta(),
     }
 
 
@@ -749,21 +775,26 @@ def stall_text(variant: str, stalls: Sequence[PodStall], started: float) -> str:
     )
 
 
-def _summary_timing(profile: str) -> tuple[int, float]:
-    """The profile's scrape step, one sample of the series, and its call deadline, which the
-    replay holds each call to (agent.llm_timeout_seconds)."""
+def _summary_inputs(profile: str) -> tuple[int, float, int]:
+    """The profile's scrape step, one sample of the series; its call deadline, which the replay
+    holds each call to (agent.llm_timeout_seconds); and its context threshold (P4.12)."""
     loaded: dict[str, Any] = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())
-    return loaded["monitoring"]["scrape_interval_seconds"], loaded["agent"]["llm_timeout_seconds"]
+    return (
+        loaded["monitoring"]["scrape_interval_seconds"],
+        loaded["agent"]["llm_timeout_seconds"],
+        context_threshold(loaded),
+    )
 
 
 @dataclass(frozen=True)
 class Autoscaling:
-    """An autoscaled variant's: the section its autoscaler applies, and the profile's scrape step
-    and call deadline, which its summary reads."""
+    """An autoscaled variant's: the section its autoscaler applies, and the profile's scrape step,
+    call deadline and context threshold, which its summary and windows read."""
 
     section: Mapping[str, Any]
     step_seconds: int
     deadline_seconds: float
+    context_threshold: int
 
 
 def _run_variant(
@@ -795,7 +826,15 @@ def _run_variant(
     autoscale = summary = cpu_hpa = None
     if autoscaling is not None:
         rows = cluster.autoscale_series(started, ended)
-        autoscale = _autoscale_meta(variant, autoscaling.section, rows, out)
+        windows = scale_up_windows(
+            rows,
+            lines,
+            started,
+            experiment.warmup.runs_discarded,
+            autoscaling.section,
+            autoscaling.context_threshold,
+        )
+        autoscale = _autoscale_meta(variant, autoscaling, rows, out, windows)
         summary = summarise_autoscale(
             rows,
             lines,
@@ -864,7 +903,7 @@ def run_experiment(
     }
     # Also now, and only for the profiles an autoscaler runs on, the only ones it is read for.
     timing = {
-        variant.profile: _summary_timing(variant.profile)
+        variant.profile: _summary_inputs(variant.profile)
         for variant in experiment.variants
         if variant.autoscaler is not None
     }
@@ -1328,7 +1367,9 @@ class LiveCluster:
             self._wait_for_quiet_cpu()
         subprocess.run(
             ["helm", "upgrade", "--install", AUTOSCALING_RELEASE, str(CHART), "--values", "-"],
-            input=yaml.safe_dump(helm_values(self.profile["autoscaling"], kind)),
+            input=yaml.safe_dump(
+                helm_values(self.profile["autoscaling"], kind, context_threshold(self.profile))
+            ),
             text=True,
             check=True,
         )
@@ -1487,6 +1528,12 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
                     autoscale["autoscaler"],
                     autoscale["section"],
                     Crossings(**autoscale["crossings"]),
+                )
+            )
+            report.append(
+                scale_up_text(
+                    autoscale["context_threshold"],
+                    ScaleUpWindows.from_meta(autoscale["scale_up_windows"]),
                 )
             )
             report.append(summary_text(AutoscaleSummary(**extra["autoscale_summary"])))
