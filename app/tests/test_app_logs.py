@@ -38,6 +38,8 @@ def make_client(tmp_path: Path) -> TestClient:
         max_files=5,
         runtime_timeout_seconds=5.0,
         cluster_poll_seconds=5,
+        kv_cache_tokens=4384,
+        pressure_warn=1.0,
     )
 
     def refuse(request: httpx.Request) -> httpx.Response:

@@ -1,5 +1,5 @@
 """GET /cluster (P3.11): Prometheus's answers mapped to schemas/cluster.v1.json, and what the
-panel gets when Prometheus cannot answer.
+panel gets when Prometheus cannot answer. Cache pressure since P4.11.
 
 A fake Prometheus answers each instant query the endpoint sends with the vector a test gives it;
 a query it has no answer for fails the test, so the queries themselves are pinned here.
@@ -14,6 +14,7 @@ import pytest
 from app_backend.app import create_app
 from app_backend.cluster import (
     ACTIVE_QUERY,
+    CONTEXT_QUERY,
     DELETING_QUERY,
     PHASE_QUERY,
     READY_QUERY,
@@ -28,8 +29,16 @@ from app_backend.runtime import RuntimeClient
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 
-CLUSTER_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "cluster.v1.json"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CLUSTER_SCHEMA = REPO_ROOT / "schemas" / "cluster.v1.json"
+DASHBOARDS = [
+    REPO_ROOT / "infra" / "charts" / chart / "dashboards" / "vllm.json" for chart in ("vllm", "sim")
+]
 POLL_SECONDS = 5
+# One pod's KV cache in tokens and the warning value; round numbers so the pressures below read
+# at a glance.
+KV_CACHE_TOKENS = 1000
+PRESSURE_WARN = 1.25
 PASSWORD = "a long enough password"
 POD_A = "vllm-568fc4b669-c9kb2"
 POD_B = "vllm-568fc4b669-fgdgm"
@@ -77,6 +86,8 @@ def make_config() -> AppConfig:
         max_files=5,
         runtime_timeout_seconds=5.0,
         cluster_poll_seconds=POLL_SECONDS,
+        kv_cache_tokens=KV_CACHE_TOKENS,
+        pressure_warn=PRESSURE_WARN,
     )
 
 
@@ -113,7 +124,8 @@ def log_in(client: TestClient) -> None:
 
 
 def answer_two_pods(prometheus: FakePrometheus) -> None:
-    """POD_A ready with calls, POD_B started but not ready yet and without vLLM metrics."""
+    """POD_A ready with calls, POD_B started but not ready yet and without vLLM metrics; the
+    active runs hold 1500 tokens of context."""
     prometheus.answers = {
         PHASE_QUERY: [
             ({"pod": POD_A, "phase": "Running"}, 1),
@@ -125,6 +137,7 @@ def answer_two_pods(prometheus: FakePrometheus) -> None:
         RUNNING_QUERY: [({"pod": POD_A}, 2)],
         REMAINING_QUERY: [({}, 7)],
         ACTIVE_QUERY: [({}, 4)],
+        CONTEXT_QUERY: [({}, 1500)],
     }
 
 
@@ -138,6 +151,8 @@ def test_the_cluster_is_mapped_from_prometheus(
     assert response.json() == {
         "remaining_work": 7,
         "active_runs": 4,
+        "cache_pressure": 1.5,
+        "pressure_warn": PRESSURE_WARN,
         "poll_seconds": POLL_SECONDS,
         "pods": [
             {"name": POD_A, "state": "ready", "queue": 3, "running": 2},
@@ -225,6 +240,76 @@ def test_logged_out_is_401_and_asks_prometheus_nothing(
 ) -> None:
     assert client.get("/cluster").status_code == 401
     assert prometheus.queries == []
+
+
+def pressure(client: TestClient) -> float | None:
+    value: float | None = client.get("/cluster").json()["cache_pressure"]
+    return value
+
+
+def test_two_ready_pods_hold_twice_the_cache(
+    client: TestClient, prometheus: FakePrometheus
+) -> None:
+    log_in(client)
+    answer_two_pods(prometheus)
+    prometheus.answers[READY_QUERY] = [({"pod": POD_A}, 1), ({"pod": POD_B}, 1)]
+    assert pressure(client) == 0.75
+
+
+def test_no_ready_pod_is_no_pressure_not_a_division_by_zero(
+    client: TestClient, prometheus: FakePrometheus
+) -> None:
+    log_in(client)
+    answer_two_pods(prometheus)
+    prometheus.answers[READY_QUERY] = []
+    assert pressure(client) is None
+
+
+def test_no_context_series_is_no_pressure_not_zero(
+    client: TestClient, prometheus: FakePrometheus
+) -> None:
+    """Neither the agent runtime nor a replayer is scraped: nothing says how much context there
+    is, so the panel must not read 0."""
+    log_in(client)
+    answer_two_pods(prometheus)
+    prometheus.answers[CONTEXT_QUERY] = []
+    assert pressure(client) is None
+
+
+def test_no_context_held_is_zero_pressure(client: TestClient, prometheus: FakePrometheus) -> None:
+    """The agent runtime exports 0 while no run is active (P4.10): a known 0, not a missing one."""
+    log_in(client)
+    answer_two_pods(prometheus)
+    prometheus.answers[CONTEXT_QUERY] = [({}, 0)]
+    assert pressure(client) == 0.0
+
+
+def test_a_draining_pod_holds_no_share_of_the_cache(
+    client: TestClient, prometheus: FakePrometheus
+) -> None:
+    """Kubernetes still marks a pod being deleted Ready, but the picker sends it nothing new, so
+    only the pods the panel shows as ready count (decided 2026-11-20)."""
+    log_in(client)
+    answer_two_pods(prometheus)
+    prometheus.answers[READY_QUERY] = [({"pod": POD_A}, 1), ({"pod": POD_B}, 1)]
+    prometheus.answers[DELETING_QUERY] = [({"pod": POD_A}, 1795006600)]
+    assert pressure(client) == 1.5
+
+
+@pytest.mark.parametrize("dashboard", DASHBOARDS, ids=lambda path: path.parts[-3])
+def test_grafanas_pressure_panel_holds_the_same_rule(dashboard: Path) -> None:
+    """The panel and Grafana agree within one scrape only if Grafana divides the same sum by the
+    same pods: Ready and not being deleted, each holding the profile's KV cache, which the chart
+    sets as the hidden dashboard variable kv_cache_tokens."""
+    board = json.loads(dashboard.read_text())
+    [panel] = [panel for panel in board["panels"] if panel["title"].startswith("Cache pressure")]
+    [target] = panel["targets"]
+    assert target["expr"] == (
+        f"{CONTEXT_QUERY} / (count({READY_QUERY} unless on (pod) {DELETING_QUERY})"
+        " * $kv_cache_tokens)"
+    )
+    [variable] = [v for v in board["templating"]["list"] if v["name"] == "kv_cache_tokens"]
+    assert (variable["type"], variable["hide"]) == ("constant", 2)
 
 
 @pytest.mark.parametrize(

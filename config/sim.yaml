@@ -8,6 +8,9 @@ model:
   gpu_memory_utilization: 0.42
   # Same as "real". The sim chart does not read it: a simulated pod's cache is simulator.kv_cache_blocks.
   kv_cache_memory_bytes: 503316480
+  # Not "real"'s 4,384: a simulated pod holds simulator.kv_cache_blocks of block_size tokens, 512 x 16, which a test
+  # holds this to. The cluster panel's cache pressure divides by it (P4.11).
+  kv_cache_tokens: 8192
   # Same as "real", so the same traces fit within the context limit.
   max_model_len: 4096
   # Same as "real". The sim chart does not read it: no agent runs on this profile, and the simulator's replies
@@ -369,3 +372,7 @@ app:
   # without waiting on the model, so httpx's default of 5 s, which the agent's call to the picker also uses, is far
   # above them; past it the message gets a failed reply (502) or a read leaves the reply running.
   runtime_timeout_seconds: 5
+  # The cluster panel shows the cache pressure in the warning colour from here up (P4.11): at 1 the active runs' context
+  # fills the ready pods' KV cache on paper, and P4.9's median first token bent there (0.4 s under 0.75, 1.7 s at
+  # 1-1.25 on the real-pod replays).
+  pressure_warn: 1.0

@@ -36,6 +36,31 @@ def test_the_cluster_poll_is_the_scrape_interval(profile: str) -> None:
     assert load_config(path).cluster_poll_seconds == scrape
 
 
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_kv_cache_is_the_models(profile: str) -> None:
+    """The panel's cache pressure divides by the pods' KV cache the profile states (P4.11)."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    kv_tokens = yaml.safe_load(path.read_text())["model"]["kv_cache_tokens"]
+    assert load_config(path).kv_cache_tokens == kv_tokens
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_pressure_warning_is_positive(profile: str) -> None:
+    assert load_config(CONFIG_DIR / f"{profile}.yaml").pressure_warn > 0
+
+
+@pytest.mark.parametrize(
+    ("section", "key"), [("app", "pressure_warn"), ("model", "kv_cache_tokens")]
+)
+def test_a_missing_pressure_key_raises(tmp_path: Path, section: str, key: str) -> None:
+    profile = yaml.safe_load((CONFIG_DIR / "sim.yaml").read_text())
+    del profile[section][key]
+    path = tmp_path / "broken.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(KeyError, match=key):
+        load_config(path)
+
+
 def test_a_missing_key_raises(tmp_path: Path) -> None:
     profile = yaml.safe_load((CONFIG_DIR / "sim.yaml").read_text())
     del profile["app"]["min_password_length"]
