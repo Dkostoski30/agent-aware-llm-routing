@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -328,6 +328,12 @@ experiment-graph:
 experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
+
+# The autoscalers across files of one real 1<->2 replay, from their .meta.json files alone (P4.5, card 61): per variant
+# per file, mean and min-max per variant, per position, and the verdict card 61 fixed before the runs. OUT is the CSV.
+autoscale-compare:
+	@if [ -z "$(META)" ]; then echo "usage: make autoscale-compare META=\"<a.meta.json> <b.meta.json> ...\" [OUT=experiments/results/autoscale-real-1to2-compare.csv]"; exit 2; fi
+	PYTHONPATH=loadgen uv run --locked python -m load_generator.autoscale_compare $(META) --out $(or $(OUT),experiments/results/autoscale-real-1to2-compare.csv)
 
 # Where runs' first calls went while a pod KEDA added was new, per variant of an experiment whose variants all run the
 # plugin (P4.2): <RESULT>-warmup.csv and <RESULT>-warmup-pods.csv beside its files, from the files alone (no cluster).

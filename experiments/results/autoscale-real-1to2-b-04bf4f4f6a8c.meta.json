@@ -1,0 +1,375 @@
+{
+  "experiment": "autoscale-real-1to2-b",
+  "hash": "04bf4f4f6a8c",
+  "profile": "real",
+  "profile_sha256": "97f59a29484a348c458653a456f89493b43988b7916b9bf81fd2fb80b000f76d",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "autoscale-real-1to2-b-04bf4f4f6a8c-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "variants": {
+    "pressure": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "97f59a29484a348c458653a456f89493b43988b7916b9bf81fd2fb80b000f76d",
+      "warmup_ttft_ms": {
+        "vllm-84b88d8978-fpgzf": [
+          3297,
+          363,
+          278,
+          377,
+          279
+        ]
+      },
+      "started": 1795198688.256174,
+      "ended": 1795199462.6545453,
+      "clock_jumps": 23,
+      "calls": 230,
+      "failed_calls": 4,
+      "calls_per_pod": {
+        "vllm-84b88d8978-fpgzf": 132,
+        "vllm-84b88d8978-872gw": 94
+      },
+      "pod_switch_share": 0.3111111111111111,
+      "max_gap_deviation_ms": 62,
+      "picker_log": null,
+      "vllm_logs": [
+        "autoscale-real-1to2-b-04bf4f4f6a8c-pressure-vllm-vllm-84b88d8978-872gw.log",
+        "autoscale-real-1to2-b-04bf4f4f6a8c-pressure-vllm-vllm-84b88d8978-fpgzf.log"
+      ],
+      "autoscale": {
+        "autoscaler": "pressure",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "autoscale-real-1to2-b-04bf4f4f6a8c-pressure-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 65.0,
+          "scale_up_seconds": 85.0,
+          "queue_seconds": 130.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 65.0,
+          "scale_up_seconds": 85.0,
+          "ready_seconds": 210.0,
+          "scale_down_seconds": null,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "rising": {
+            "calls": 10,
+            "ttft_p50_ms": 21092
+          },
+          "after": {
+            "calls": 162,
+            "ttft_p50_ms": 19797
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 22,
+        "failed_runs": 4,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 220879,
+        "completion_p95_ms": 438418,
+        "completion_total_ms": 5325899,
+        "makespan_ms": 625506,
+        "runs_per_minute": 2.110291507995127,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 125.0,
+        "idle_pod_minutes": 0.6666666666666666
+      },
+      "cpu_hpa": null
+    },
+    "queue": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "97f59a29484a348c458653a456f89493b43988b7916b9bf81fd2fb80b000f76d",
+      "warmup_ttft_ms": {
+        "vllm-f6cc4b87c-c4hhn": [
+          3231,
+          337,
+          277,
+          262,
+          304
+        ]
+      },
+      "started": 1795199688.2193203,
+      "ended": 1795200556.5020437,
+      "clock_jumps": 26,
+      "calls": 247,
+      "failed_calls": 2,
+      "calls_per_pod": {
+        "vllm-f6cc4b87c-c4hhn": 163,
+        "vllm-f6cc4b87c-6zfz2": 82
+      },
+      "pod_switch_share": 0.3442622950819672,
+      "max_gap_deviation_ms": 71,
+      "picker_log": null,
+      "vllm_logs": [
+        "autoscale-real-1to2-b-04bf4f4f6a8c-queue-vllm-vllm-f6cc4b87c-6zfz2.log",
+        "autoscale-real-1to2-b-04bf4f4f6a8c-queue-vllm-vllm-f6cc4b87c-c4hhn.log"
+      ],
+      "autoscale": {
+        "autoscaler": "queue",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "autoscale-real-1to2-b-04bf4f4f6a8c-queue-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 60.0,
+          "scale_up_seconds": 95.0,
+          "queue_seconds": 135.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 60.0,
+          "scale_up_seconds": 95.0,
+          "ready_seconds": 230.0,
+          "scale_down_seconds": null,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "rising": {
+            "calls": 11,
+            "ttft_p50_ms": 31008
+          },
+          "after": {
+            "calls": 179,
+            "ttft_p50_ms": 23023
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 24,
+        "failed_runs": 2,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 242441,
+        "completion_p95_ms": 541089,
+        "completion_total_ms": 6749537,
+        "makespan_ms": 715759,
+        "runs_per_minute": 2.011850357452718,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 135.0,
+        "idle_pod_minutes": 0.6666666666666666
+      },
+      "cpu_hpa": null
+    },
+    "cpu": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "97f59a29484a348c458653a456f89493b43988b7916b9bf81fd2fb80b000f76d",
+      "warmup_ttft_ms": {
+        "vllm-c7d5cd6dd-6bnn2": [
+          3328,
+          290,
+          326,
+          322,
+          320
+        ]
+      },
+      "started": 1795200831.072547,
+      "ended": 1795201745.453752,
+      "clock_jumps": 28,
+      "calls": 248,
+      "failed_calls": 2,
+      "calls_per_pod": {
+        "vllm-c7d5cd6dd-6bnn2": 142,
+        "vllm-c7d5cd6dd-dxhfk": 104
+      },
+      "pod_switch_share": 0.3306122448979592,
+      "max_gap_deviation_ms": 32,
+      "picker_log": null,
+      "vllm_logs": [
+        "autoscale-real-1to2-b-04bf4f4f6a8c-cpu-vllm-vllm-c7d5cd6dd-6bnn2.log",
+        "autoscale-real-1to2-b-04bf4f4f6a8c-cpu-vllm-vllm-c7d5cd6dd-dxhfk.log"
+      ],
+      "autoscale": {
+        "autoscaler": "cpu",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "autoscale-real-1to2-b-04bf4f4f6a8c-cpu-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 130.0,
+          "scale_up_seconds": 40.0,
+          "queue_seconds": 120.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 130.0,
+          "scale_up_seconds": 40.0,
+          "ready_seconds": 170.0,
+          "scale_down_seconds": null,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "rising": {
+            "calls": 1,
+            "ttft_p50_ms": 35236
+          },
+          "after": {
+            "calls": 191,
+            "ttft_p50_ms": 26356
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 24,
+        "failed_runs": 2,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 280685,
+        "completion_p95_ms": 592751,
+        "completion_total_ms": 7619222,
+        "makespan_ms": 758924,
+        "runs_per_minute": 1.8974231938902975,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 130.0,
+        "idle_pod_minutes": 0.3333333333333333
+      },
+      "cpu_hpa": "autoscale-real-1to2-b-04bf4f4f6a8c-cpu-cpu-hpa.csv"
+    },
+    "remaining": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "profile_sha256": "97f59a29484a348c458653a456f89493b43988b7916b9bf81fd2fb80b000f76d",
+      "warmup_ttft_ms": {
+        "vllm-7c7b5698bc-fpbs8": [
+          3304,
+          337,
+          277,
+          298,
+          235
+        ]
+      },
+      "started": 1795201971.0043337,
+      "ended": 1795202851.7555723,
+      "clock_jumps": 26,
+      "calls": 252,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7c7b5698bc-fpbs8": 150,
+        "vllm-7c7b5698bc-gvjz5": 102
+      },
+      "pod_switch_share": 0.3346613545816733,
+      "max_gap_deviation_ms": 674,
+      "picker_log": null,
+      "vllm_logs": [
+        "autoscale-real-1to2-b-04bf4f4f6a8c-remaining-vllm-vllm-7c7b5698bc-fpbs8.log",
+        "autoscale-real-1to2-b-04bf4f4f6a8c-remaining-vllm-vllm-7c7b5698bc-gvjz5.log"
+      ],
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "autoscale-real-1to2-b-04bf4f4f6a8c-remaining-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 60.0,
+          "scale_up_seconds": 70.0,
+          "queue_seconds": 135.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 60.0,
+          "scale_up_seconds": 70.0,
+          "ready_seconds": 215.0,
+          "scale_down_seconds": null,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "rising": {
+            "calls": 12,
+            "ttft_p50_ms": 33282
+          },
+          "after": {
+            "calls": 185,
+            "ttft_p50_ms": 24297
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 26,
+        "finished_runs": 26,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 263223,
+        "completion_p95_ms": 550024,
+        "completion_total_ms": 7398999,
+        "makespan_ms": 727557,
+        "runs_per_minute": 2.1441619007170574,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 145.0,
+        "idle_pod_minutes": 0.5833333333333334
+      },
+      "cpu_hpa": null
+    }
+  }
+}

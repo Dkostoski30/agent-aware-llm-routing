@@ -1,0 +1,17 @@
+experiment,position,variant,autoscaler,remaining_seconds,queue_seconds,context_seconds,scale_up_seconds,scaled_before_replay,ready_seconds,runs,finished_runs,failed_runs,completion_p50_ms,makespan_ms,idle_pod_minutes,keda_restarts
+autoscale-real-1to2-a-123818af027f,1,cpu,cpu,130.0,120.0,130.0,50.0,False,185.0,26,24,2,270200,711462,0.25,0
+autoscale-real-1to2-a-123818af027f,2,pressure,pressure,65.0,130.0,65.0,85.0,False,210.0,26,26,0,273633,703054,0.4166666666666667,0
+autoscale-real-1to2-a-123818af027f,3,remaining,remaining,60.0,135.0,60.0,65.0,False,195.0,26,26,0,214314,670014,0.5,0
+autoscale-real-1to2-a-123818af027f,4,queue,queue,60.0,90.0,60.0,95.0,False,220.0,26,24,2,319673,746880,1.0,0
+autoscale-real-1to2-b-04bf4f4f6a8c,1,pressure,pressure,65.0,130.0,65.0,85.0,False,210.0,26,22,4,220879,625506,0.6666666666666666,0
+autoscale-real-1to2-b-04bf4f4f6a8c,2,queue,queue,60.0,135.0,60.0,95.0,False,230.0,26,24,2,242441,715759,0.6666666666666666,0
+autoscale-real-1to2-b-04bf4f4f6a8c,3,cpu,cpu,130.0,120.0,130.0,40.0,False,170.0,26,24,2,280685,758924,0.3333333333333333,0
+autoscale-real-1to2-b-04bf4f4f6a8c,4,remaining,remaining,60.0,135.0,60.0,70.0,False,215.0,26,26,0,263223,727557,0.5833333333333334,0
+autoscale-real-1to2-c-8b08972749ea,1,queue,queue,65.0,90.0,65.0,95.0,False,225.0,26,26,0,343146,789809,0.5833333333333334,0
+autoscale-real-1to2-c-8b08972749ea,2,remaining,remaining,65.0,90.0,65.0,140.0,False,300.0,26,25,1,382547,782489,0.4166666666666667,0
+autoscale-real-1to2-c-8b08972749ea,3,pressure,pressure,65.0,135.0,65.0,80.0,False,210.0,26,25,1,332339,700272,0.4166666666666667,0
+autoscale-real-1to2-c-8b08972749ea,4,cpu,cpu,130.0,125.0,135.0,40.0,False,170.0,26,26,0,264531,709294,0.5833333333333334,0
+autoscale-real-1to2-d-af8cf634cc21,1,remaining,remaining,60.0,135.0,60.0,65.0,False,195.0,26,26,0,265512,712927,0.5,0
+autoscale-real-1to2-d-af8cf634cc21,2,cpu,cpu,130.0,120.0,135.0,55.0,False,185.0,26,24,2,256057,708609,0.3333333333333333,0
+autoscale-real-1to2-d-af8cf634cc21,3,queue,queue,65.0,90.0,65.0,95.0,False,245.0,26,20,6,207718,694303,1.0,0
+autoscale-real-1to2-d-af8cf634cc21,4,pressure,pressure,65.0,135.0,65.0,80.0,False,225.0,26,25,1,357489,730497,0.5,0

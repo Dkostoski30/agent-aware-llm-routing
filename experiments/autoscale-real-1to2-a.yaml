@@ -1,0 +1,43 @@
+# P4.5: the four autoscalers on real vLLM pods at 1<->2, file a of four (D5,
+# docs/task-cards/61-P4.5-real-autoscaling.md). The four files differ only in the order of their variants, a balanced
+# Latin square (Williams; A cpu, B pressure, C queue, D remaining): each variant once in each position, each right after
+# every other once; this file is autoscale-real-1to2-c.yaml reversed. A test holds the orders. Run with
+# make experiment NAME=autoscale-real-1to2-a after make down and make up, the laptop idle and Windows' AC standby
+# off; make autoscale-compare reads the four .meta.json files into the verdict card 61 fixed before the runs. P5.2
+# reuses these runs as its real 1<->2 data (decided 2026-11-20). Results carry this file's hash (D11).
+profile: real
+# The same replay as experiments/autoscale-real.yaml (P3.10's CPU run) and autoscale-pressure.yaml (P4.12).
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6, as autoscale-real.yaml; a test holds it there.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As experiments/autoscale-real.yaml: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused,
+# since the GPU-sharing stalls of 2026-11-12 (P3.7) would read as the autoscaler's result. The second pod shares the GPU.
+pod_stall_seconds: 30
+# All on the default picker: autoscaling does not depend on the plugin (D2), so warm-up routing and priority are off.
+# Each starts at autoscaling.min_replicas after a restart, so the next finds nothing the last left.
+variants:
+  - name: cpu
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: cpu
+  - name: pressure
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: pressure
+  - name: remaining
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: remaining
+  - name: queue
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: queue

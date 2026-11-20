@@ -8,6 +8,7 @@ done-when proves.
 import asyncio
 import csv
 import hashlib
+import itertools
 import json
 import subprocess
 import urllib.parse
@@ -3238,6 +3239,64 @@ def test_the_pressure_file_runs_as_the_cpu_one_with_the_pressure_autoscaler() ->
     [variant] = experiment.variants
     assert (variant.name, variant.autoscaler, variant.default) == ("pressure", "pressure", True)
     assert variant.epp_config == "default-plugins.yaml"
+
+
+# P4.5 (card 61): the four autoscalers in a balanced Latin square (Williams), A cpu, B pressure,
+# C queue, D remaining.
+REAL_1TO2 = {
+    letter: REPO_ROOT / "experiments" / f"autoscale-real-1to2-{letter}.yaml" for letter in "abcd"
+}
+REAL_1TO2_ORDERS = {
+    "a": ["cpu", "pressure", "remaining", "queue"],
+    "b": ["pressure", "queue", "cpu", "remaining"],
+    "c": ["queue", "remaining", "pressure", "cpu"],
+    "d": ["remaining", "cpu", "queue", "pressure"],
+}
+
+
+def test_the_real_1to2_files_run_their_orders_on_the_cpu_files_replay() -> None:
+    cpu = committed(AUTOSCALE_REAL)
+    real = profile_file("real")
+    for letter, path in REAL_1TO2.items():
+        experiment = committed(path)
+        check_routing(experiment, {"real": real})
+        check_autoscaling(experiment, {"real": real})
+        check_stall_window(experiment, {"real": real})
+        assert experiment.profile == "real"
+        assert (experiment.trace, experiment.pattern_name, experiment.seed) == (
+            cpu.trace,
+            cpu.pattern_name,
+            cpu.seed,
+        )
+        assert experiment.warmup == cpu.warmup
+        assert experiment.pod_stall_seconds == cpu.pod_stall_seconds
+        assert experiment.kv_capacity_tokens_per_pod == cpu.kv_capacity_tokens_per_pod
+        assert [variant.name for variant in experiment.variants] == REAL_1TO2_ORDERS[letter]
+        for variant in experiment.variants:
+            assert (variant.autoscaler, variant.default) == (variant.name, True)
+            assert variant.epp_config == "default-plugins.yaml"
+
+
+def test_the_real_1to2_files_differ_only_in_their_order() -> None:
+    first, *others = [yaml.safe_load(path.read_text()) for path in REAL_1TO2.values()]
+    for other in others:
+        by_name = {variant["name"]: variant for variant in other["variants"]}
+        assert {**other, "variants": [by_name[v["name"]] for v in first["variants"]]} == first
+
+
+def test_the_real_1to2_orders_are_a_williams_square() -> None:
+    """Each variant once in each position, each right after every other once; a/c and b/d are
+    reverse pairs, so every sitting runs both orders."""
+    orders = list(REAL_1TO2_ORDERS.values())
+    names = set(orders[0])
+    for position in range(len(names)):
+        assert {order[position] for order in orders} == names
+    followed = [pair for order in orders for pair in itertools.pairwise(order)]
+    assert sorted(followed) == sorted(
+        (first, second) for first in names for second in names if first != second
+    )
+    assert REAL_1TO2_ORDERS["c"] == REAL_1TO2_ORDERS["a"][::-1]
+    assert REAL_1TO2_ORDERS["d"] == REAL_1TO2_ORDERS["b"][::-1]
 
 
 WARMUP = REPO_ROOT / "experiments" / "warmup.yaml"
