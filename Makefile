@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pressure pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -340,6 +340,12 @@ warmup-report:
 # printed. No cluster.
 pressure:
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.pressure experiments/pressure.yaml
+
+# After a replay, the cluster still up: Prometheus's sum(thesis_context_tokens) over the replay against the sum its file
+# gives at the same moments (P4.10). It waits a few scrapes past the replay's last call first. PROFILE is the replay's.
+context-check:
+	@if [ -z "$(REPLAY)" ]; then echo "usage: make context-check REPLAY=<replay.jsonl> [PROFILE=real]"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.context_check $(REPLAY) --profile $(or $(PROFILE),real)
 
 # A replay with one vLLM pod deleted partway, and where the runs pinned to it went (P3.4): the replay's lines, its printed
 # lines, the picker's log and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the

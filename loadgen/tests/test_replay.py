@@ -881,13 +881,15 @@ def expected_run(run_id: str, expected: tuple[int, ...]) -> TraceRun:
 @dataclass
 class TrackedGateway:
     """FakeGateway that notes, as each call arrives, its run and x-step with what the tracker
-    reads then: (run, step, remaining work, active runs)."""
+    reads then: (run, step, remaining work, active runs), and the context tokens (P4.10)."""
 
     tracker: RunTracker
     gateway: FakeGateway = field(default_factory=FakeGateway)
     tracked: list[tuple[str, int, int, int]] = field(default_factory=list)
+    context_seen: list[int] = field(default_factory=list)
 
     async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.context_seen.append(self.tracker.context_tokens())
         self.tracked.append(
             (
                 request.headers["x-run-id"],
@@ -899,11 +901,19 @@ class TrackedGateway:
         return await self.gateway(request)
 
 
-def replay_tracked(plan: list[PlannedRun], gateway: TrackedGateway) -> list[dict[str, Any]]:
+def replay_tracked(
+    plan: list[PlannedRun], gateway: TrackedGateway, retry: RetryPolicy = NO_RETRY
+) -> list[dict[str, Any]]:
     async def go() -> list[dict[str, Any]]:
         async with client_of(gateway) as client:
             return await replay_runs(
-                client, MODEL, plan, DEADLINE_SECONDS, ignore_run, tracker=gateway.tracker
+                client,
+                MODEL,
+                plan,
+                DEADLINE_SECONDS,
+                ignore_run,
+                tracker=gateway.tracker,
+                retry=retry,
             )
 
     return run_virtual(go())
@@ -972,6 +982,44 @@ def test_a_run_that_stopped_on_a_failed_call_leaves_the_tracker() -> None:
     assert failed_calls(lines) == 1
     assert [(step, work, active) for _, step, work, active in gateway.tracked] == [(1, 2, 1)]
     assert gateway.tracker.active_runs() == 0
+
+
+def test_the_tracker_holds_each_step_s_planned_prompt_from_its_send() -> None:
+    """P4.10: a call counts itself, with the plan's count, which the replayer checks against the
+    server's."""
+    plan = plan_of(runs=[trace_run(prompts=(60, 80))])
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    prompts = [step.prompt_tokens for step in plan[0].steps]
+    assert prompts[0] < prompts[1]
+    assert gateway.context_seen == prompts
+    assert gateway.tracker.context_tokens() == 0
+
+
+def test_a_fanned_out_step_s_calls_count_their_prompt_once() -> None:
+    """They share one prompt, so one context (P4.9's rule)."""
+    plan = plan_of(runs=[trace_run(prompts=(60, 80))], fan_out=FanOut(share=1.0, k=2))
+    gateway = TrackedGateway(RunTracker())
+    replay_tracked(plan, gateway)
+    first, second = (step.prompt_tokens for step in plan[0].steps)
+    assert gateway.context_seen == [first, second, second]
+
+
+def test_runs_that_overlap_add_their_contexts() -> None:
+    runs = [trace_run("run-a", (60, 80)), trace_run("run-b", (90, 120))]
+    plan = plan_of(runs=runs, count=2, rate=1000.0)
+    gateway = TrackedGateway(RunTracker())
+    gateway.gateway.ttft = 50.0
+    replay_tracked(plan, gateway)
+    assert gateway.context_seen[1] == sum(run.steps[0].prompt_tokens for run in plan)
+
+
+def test_a_retried_call_leaves_the_run_s_context() -> None:
+    plan = plan_of(runs=[trace_run(prompts=(60, 80))])
+    gateway = TrackedGateway(RunTracker(), FakeGateway(fail=fails_first(httpx.Response(503))))
+    replay_tracked(plan, gateway, RETRY)
+    first, second = (step.prompt_tokens for step in plan[0].steps)
+    assert gateway.context_seen == [first, first, second]
 
 
 def get(port: int, path: str) -> tuple[int, str, str]:

@@ -20,6 +20,7 @@ from agent_runtime.documents import Document, parse_document, read_document
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import REPEATED_CALL, RunResult, SavedRun, StepCallback, run_task
 from agent_runtime.retry import NO_RETRY, RetryPolicy
+from agent_runtime.run_tracker import RunTracker
 from agent_runtime.store import CallRecord
 from jsonschema import Draft202012Validator
 
@@ -1180,3 +1181,83 @@ async def test_a_resumed_calls_gap_runs_from_the_last_saved_call(mode: ToolChoic
     saved = replace(saved_after_step_1(), step=2, calls=[earlier, later])
     result = await resume(mode, TimedLLM([final(mode, "56")], clock), saved, clock)
     assert result.calls[2].gap_before_ms == WALL_START_MS - (later.ts_start + later.duration_ms)
+
+
+# The context the run holds in the tracker (P4.10): its latest reply's usage.prompt_tokens.
+TRACKED_MODE: ToolChoice = "required"
+
+
+class CountingLLM(ScriptedLLM):
+    """A ScriptedLLM whose nth answer carries usage.prompt_tokens prompts[n], or no usage for None,
+    and that notes the tracker's context tokens as each call arrives."""
+
+    def __init__(
+        self, replies: list[dict[str, Any]], prompts: list[int | None], tracker: RunTracker
+    ) -> None:
+        super().__init__(replies)
+        self.prompts = list(prompts)
+        self.tracker = tracker
+        self.context_seen: list[int] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.context_seen.append(self.tracker.context_tokens())
+        answer = super().handle(request)
+        prompt = self.prompts.pop(0)
+        if prompt is None:
+            return answer
+        usage = {"prompt_tokens": prompt, "completion_tokens": 5}
+        return httpx.Response(answer.status_code, json={**answer.json(), "usage": usage})
+
+
+async def run_tracked(llm: CountingLLM, saved: SavedRun | None = None) -> RunResult:
+    """The run as the app runs it: started in the tracker first, not ended after."""
+    config = make_config(TRACKED_MODE)
+    llm.tracker.started(RUN_ID, config.expected_steps_default)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
+    ) as http:
+        return await run_task(
+            TASK,
+            RUN_ID,
+            7,
+            config,
+            LLMClient(http, config),
+            clock=FakeClock(),
+            tracker=llm.tracker,
+            saved=saved,
+        )
+
+
+async def test_the_run_holds_its_latest_reply_s_prompt_tokens() -> None:
+    """0 during its first call: the runtime learns a prompt's tokens from the reply only."""
+    replies = [calls(calc("7*8")), calls(calc("56+3", "call-2")), final(TRACKED_MODE, "59")]
+    llm = CountingLLM(replies, [300, 340, 380], RunTracker())
+    result = await run_tracked(llm)
+    assert result.status == "done"
+    assert llm.context_seen == [0, 300, 340]
+    assert llm.tracker.context_tokens() == 380
+
+
+async def test_a_reply_with_no_count_leaves_the_run_s_context() -> None:
+    replies = [calls(calc("7*8")), calls(calc("56+3", "call-2")), final(TRACKED_MODE, "59")]
+    llm = CountingLLM(replies, [300, None, 380], RunTracker())
+    await run_tracked(llm)
+    assert llm.context_seen == [0, 300, 300]
+
+
+async def test_a_resumed_run_holds_its_last_saved_count_from_the_start() -> None:
+    """The latest saved call with a count, as the live run would have held it."""
+    earlier = replace(SAVED_CALL, prompt_tokens=310)
+    latest = replace(SAVED_CALL, step=2, prompt_tokens=330)
+    uncounted = replace(SAVED_CALL, step=3)
+    saved = replace(saved_after_step_1(), step=3, calls=[earlier, latest, uncounted])
+    llm = CountingLLM([final(TRACKED_MODE, "56")], [360], RunTracker())
+    await run_tracked(llm, saved)
+    assert llm.context_seen == [330]
+    assert llm.tracker.context_tokens() == 360
+
+
+async def test_a_resumed_run_with_no_saved_count_holds_nothing_until_its_reply() -> None:
+    llm = CountingLLM([final(TRACKED_MODE, "56")], [360], RunTracker())
+    await run_tracked(llm, saved_after_step_1())
+    assert llm.context_seen == [0]

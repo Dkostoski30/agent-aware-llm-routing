@@ -193,6 +193,13 @@ def _last_reply_ms(calls: Sequence[CallRecord], clock: Clock) -> float | None:
     return clock.monotonic_ms() - max(0, since_ms)
 
 
+def _last_count(calls: Sequence[CallRecord]) -> int | None:
+    """The prompt tokens of the latest saved call with a count: what the run held when its runtime
+    died, as a reply with no count leaves the figure as it was (P4.10)."""
+    counts = [call.prompt_tokens for call in calls if call.prompt_tokens is not None]
+    return counts[-1] if counts else None
+
+
 def _tool_message(call_id: str, content: dict[str, Any]) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": call_id, "content": json.dumps(content)}
 
@@ -212,9 +219,9 @@ async def run_task(
 ) -> RunResult:
     """tables and documents are the run request's files, already read
     (documents.read_run_files); clock times the calls (a test passes a fake one). tracker, when
-    given, has started the run and hears each call's x-step as it is sent (P3.8); the caller ends
-    the run there. saved continues a run a dead runtime left (P4.4): the step it was on is sent
-    again with its x-step, from the history saved before it."""
+    given, has started the run and hears each call's x-step as it is sent (P3.8) and each reply's
+    prompt tokens (P4.10); the caller ends the run there. saved continues a run a dead runtime left
+    (P4.4): the step it was on is sent again with its x-step, from the history saved before it."""
     run = _Run(run_id, task, config, saved)
     tools = offered_tools(config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
@@ -230,6 +237,9 @@ async def run_task(
         run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     else:
         run.log(logging.INFO, "run resumed", tool_choice=config.tool_choice)
+        held = _last_count(run.calls)
+        if tracker is not None and held is not None:
+            tracker.context(run_id, held)
     while run.step < config.max_steps:
         run.step += 1
         headers = {
@@ -259,6 +269,8 @@ async def run_task(
         )
         last_reply_ms = replied_ms
         run.calls.append(call_record)
+        if tracker is not None and reply.prompt_tokens is not None:
+            tracker.context(run_id, reply.prompt_tokens)
         message = reply.message
         tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
         # Only what the next call needs; the other fields vLLM returns stay out of the history.

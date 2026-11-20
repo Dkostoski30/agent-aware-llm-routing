@@ -18,9 +18,9 @@ finished runs. Decided with the user, docs/task-cards/26-P2.3-replayer.md.
 With the picker's plugin on, each run's end goes to the picker as the run stops, finished or failed
 (P3.3, D1), as the agent runtime sends it after its final save.
 
-A run tracker counts each run from its start time to its end and serves the remaining work on
-/metrics at replay.tracker_port for the life of the replay (D2, P3.8), so Prometheus sees the
-replayed load as it sees the agent's.
+A run tracker counts each run from its start time to its end and serves the remaining work and the
+context the runs hold on /metrics at replay.tracker_port for the life of the replay (D2, P3.8,
+P4.10), so Prometheus sees the replayed load as it sees the agent's.
 
 Usage: python -m load_generator.replay TRACE PATTERN [--profile real] [--seed N] [--out FILE]
 """
@@ -321,7 +321,7 @@ async def _replay_run(
     """A run from its start time to its last reply, or to its first failed call. Each gap starts at
     the end of the step before (D9), so a slow pod delays the rest of the run, as with a real agent;
     a fanned-out step ends with its last reply. The tracker, if any, holds the run from its start
-    time to its end, with each step's headers as it is sent."""
+    time to its end, with each step's headers and the plan's prompt tokens as it is sent."""
     loop = asyncio.get_running_loop()
     await asyncio.sleep(max(0.0, zero + run.start_seconds - loop.time()))
     expected = run.steps[0].expected_steps
@@ -336,8 +336,10 @@ async def _replay_run(
             if step.expected_steps != expected:
                 expected = step.expected_steps
                 tracker.expected_changed(run.run_id, expected)
-            # Once per step: a fanned-out step's calls share its x-step.
+            # Once per step: a fanned-out step's calls share its x-step and its prompt, so the
+            # context counts once (P4.9's rule); a retry sends the same prompt (P4.10).
             tracker.stepped(run.run_id, step.step)
+            tracker.context(run.run_id, step.prompt_tokens)
         results = await asyncio.gather(
             *(
                 _call(client, model, run, step, previous_end, deadline_seconds, retry)
