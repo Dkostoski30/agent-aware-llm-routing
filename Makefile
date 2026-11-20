@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pod-removed drain-check calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -349,6 +349,22 @@ pod-removed:
 drain-check:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make drain-check EXPERIMENT=experiments/drain.yaml"; exit 2; fi
 	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.drain $(EXPERIMENT)
+
+# A replay with the vLLM pod most runs are pinned to killed partway (force-deleted, no drain), per variant with the
+# replay's retry off or on (P4.4): how many runs complete. The replay's lines, its printed lines, the picker's log per
+# variant and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the file's profile;
+# it puts the profile's routing back after.
+failover-check:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make failover-check EXPERIMENT=experiments/failover.yaml"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.failover $(EXPERIMENT)
+
+# Live agent runs on real pods through two kills, a vLLM pod's (the runtime retries) then the agent runtime's (the new
+# runtime resumes the runs from Redis), P4.4: every run must end done with its saved steps unchanged. A .json and the
+# agent's log per case in experiments/results/, stamped with the file's hash. Needs make up (real); it turns the file's
+# rules on for the check and puts the profile's back after.
+failover-live:
+	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make failover-live EXPERIMENT=experiments/failover-live.yaml"; exit 2; fi
+	PYTHONPATH=agent:loadgen:experiments uv run --locked python infra/checks/failover_live.py $(EXPERIMENT)
 
 # Real vLLM pods measured for the simulator, as sim/calibration-<hash>-*.csv and sim/cold-start-<hash>-*.csv (P2.8a).
 # Needs make up (real, not sim): it deploys real and real-plain in turn, scales the pods and restarts them, then deploys

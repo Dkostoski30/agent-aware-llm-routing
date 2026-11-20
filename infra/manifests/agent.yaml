@@ -8,6 +8,10 @@ metadata:
   namespace: default
 spec:
   replicas: 1
+  # One runtime at a time, the old one gone before the new one starts: a runtime that starts resumes every run Redis
+  # holds as running, so each must have been left by a dead one (P4.4). A second replica would need a lease per run.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: agent

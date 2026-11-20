@@ -8,6 +8,7 @@ the shape vLLM's /v1/chat/completions returns it.
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,8 @@ from agent_runtime.config import AgentConfig, Sampling, ToolChoice
 from agent_runtime.csv_tools import Table, group_by, parse_file
 from agent_runtime.documents import Document, parse_document, read_document
 from agent_runtime.llm import LLMClient
-from agent_runtime.loop import RunResult, StepCallback, run_task
+from agent_runtime.loop import REPEATED_CALL, RunResult, SavedRun, StepCallback, run_task
+from agent_runtime.retry import NO_RETRY, RetryPolicy
 from agent_runtime.store import CallRecord
 from jsonschema import Draft202012Validator
 
@@ -55,6 +57,7 @@ def make_config(mode: ToolChoice) -> AgentConfig:
         max_invalid_calls=MAX_INVALID_CALLS,
         expected_steps_default=3,
         llm_timeout_seconds=5,
+        retry=NO_RETRY,
         history_ttl_seconds=60,
         sampling=Sampling(temperature=0.7, top_p=0.8, top_k=20),
         system_prompt=SYSTEM_PROMPT,
@@ -148,8 +151,9 @@ async def run(
     seed: int | None = 7,
     tables: Sequence[Table] = (),
     documents: Sequence[Document] = (),
+    retry: RetryPolicy = NO_RETRY,
 ) -> tuple[RunResult, ScriptedLLM]:
-    config = make_config(mode)
+    config = replace(make_config(mode), retry=retry)
     transport = httpx.MockTransport(llm.handle)
     async with httpx.AsyncClient(transport=transport, base_url="http://gateway") as http:
         llm_client = LLMClient(http, config)
@@ -697,9 +701,13 @@ class FailsAfterScript(ScriptedLLM):
 
 
 async def run_on_clock(
-    mode: ToolChoice, llm: ScriptedLLM, clock: FakeClock, on_step: StepCallback | None = None
+    mode: ToolChoice,
+    llm: ScriptedLLM,
+    clock: FakeClock,
+    on_step: StepCallback | None = None,
+    retry: RetryPolicy = NO_RETRY,
 ) -> RunResult:
-    config = make_config(mode)
+    config = replace(make_config(mode), retry=retry)
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
     ) as http:
@@ -914,3 +922,261 @@ async def test_the_llm_call_line_logs_the_call_record(
         assert line["run-id"] == RUN_ID
         # The reply had no system_fingerprint, so the line has no pod either.
         assert "pod" not in line
+
+
+# Retry of a call whose pod died (P4.4). No wait between attempts, so the tests do not sleep.
+RETRY = RetryPolicy(retries=2, backoff_seconds=0)
+
+
+class FlakyLLM(ScriptedLLM):
+    """Answers the requests whose index (from 0) is in failures with that failure, the others from
+    the script; with a clock, every request takes CALL_MS on it."""
+
+    def __init__(
+        self,
+        replies: list[dict[str, Any]],
+        failures: dict[int, httpx.Response | httpx.HTTPError],
+        clock: FakeClock | None = None,
+    ) -> None:
+        super().__init__(replies)
+        self.failures = failures
+        self.clock = clock
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        if self.clock is not None:
+            self.clock.advance(CALL_MS)
+        failure = self.failures.get(len(self.requests))
+        if failure is None:
+            return super().handle(request)
+        self.requests.append(request)
+        if isinstance(failure, httpx.HTTPError):
+            raise failure
+        return failure
+
+
+def gateway_503() -> httpx.Response:
+    return httpx.Response(503, text="no healthy upstream")
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(
+    "failure",
+    [gateway_503(), httpx.ConnectError("refused"), httpx.RemoteProtocolError("peer closed")],
+    ids=["503", "refused", "cut"],
+)
+async def test_a_call_whose_pod_died_is_sent_again_as_the_same_step(
+    mode: ToolChoice, failure: httpx.Response | httpx.HTTPError
+) -> None:
+    llm = FlakyLLM([calls(calc("7*8")), final(mode, "56")], {1: failure})
+    result, _ = await run(mode, llm, retry=RETRY)
+    assert (result.status, result.answer, result.steps) == ("done", "56", 2)
+    assert [r.headers["x-step"] for r in llm.requests] == ["1", "2", "2"]
+    bodies = llm.bodies()
+    assert bodies[1] == bodies[2]
+    assert [c.step for c in result.calls] == [1, 2]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_retry_leaves_no_trace_in_the_history(mode: ToolChoice) -> None:
+    """The step view numbers steps by the history's assistant messages (P2.6), so a failed attempt
+    must add none."""
+    plain, _ = await run(mode, ScriptedLLM([calls(calc("7*8")), final(mode, "56")]))
+    retried, _ = await run(
+        mode,
+        FlakyLLM([calls(calc("7*8")), final(mode, "56")], {0: gateway_503()}),
+        retry=RETRY,
+    )
+    assert retried.messages == plain.messages
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_call_past_its_deadline_is_not_sent_again(mode: ToolChoice) -> None:
+    llm = FlakyLLM([final(mode, "56")], {0: httpx.ReadTimeout("deadline")})
+    result, _ = await run(mode, llm, retry=RETRY)
+    assert (result.status, result.steps) == ("failed", 1)
+    assert result.error is not None
+    assert "ReadTimeout" in result.error
+    assert len(llm.requests) == 1
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_4xx_is_not_sent_again(mode: ToolChoice) -> None:
+    llm = FlakyLLM([final(mode, "56")], {0: httpx.Response(400, text="bad request")})
+    result, _ = await run(mode, llm, retry=RETRY)
+    assert result.status == "failed"
+    assert len(llm.requests) == 1
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_out_of_retries_the_run_fails_on_the_last_error(mode: ToolChoice) -> None:
+    failures: dict[int, httpx.Response | httpx.HTTPError] = {
+        0: gateway_503(),
+        1: gateway_503(),
+        2: httpx.Response(500, text="scripted failure"),
+    }
+    result, llm = await run(mode, FlakyLLM([final(mode, "56")], failures), retry=RETRY)
+    assert (result.status, result.steps, result.calls) == ("failed", 1, [])
+    assert result.error is not None
+    assert result.error.startswith("LLM call failed: HTTPStatusError")
+    assert "500" in result.error
+    assert len(llm.requests) == 3
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_retry_is_logged_with_its_step_attempt_and_reason(
+    mode: ToolChoice, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_runtime")
+    failures: dict[int, httpx.Response | httpx.HTTPError] = {
+        1: httpx.ConnectError("refused"),
+        2: gateway_503(),
+    }
+    llm = FlakyLLM([calls(calc("7*8")), final(mode, "56")], failures)
+    await run(mode, llm, retry=RETRY)
+    retried = [r.__dict__ for r in caplog.records if r.getMessage() == "llm call retried"]
+    assert [(f["run-id"], f["step"], f["attempt"]) for f in retried] == [
+        (RUN_ID, 2, 1),
+        (RUN_ID, 2, 2),
+    ]
+    assert retried[0]["reason"] == "ConnectError: refused"
+    assert retried[1]["reason"].startswith("HTTPStatusError")
+    assert all(r.levelno == logging.WARNING for r in caplog.records if r.__dict__ in retried)
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_retried_calls_record_is_the_attempt_that_answered(mode: ToolChoice) -> None:
+    """Its start, length and gap are those of the attempt that got the reply; the failed attempt
+    took CALL_MS before it."""
+    clock = FakeClock()
+    llm = FlakyLLM([calls(calc("7*8")), final(mode, "56")], {1: gateway_503()}, clock)
+    result = await run_on_clock(mode, llm, clock, retry=RETRY)
+    timing = [(c.step, c.ts_start, c.duration_ms, c.gap_before_ms) for c in result.calls]
+    assert timing == [
+        (1, WALL_START_MS, CALL_MS, 0),
+        (2, WALL_START_MS + 2 * CALL_MS, CALL_MS, CALL_MS),
+    ]
+
+
+# Resuming a run a dead runtime left (P4.4): what it saved after step 1, a calculator call.
+SAVED_CALL = CallRecord(
+    step=1,
+    ts_start=WALL_START_MS - 10_000,
+    duration_ms=2_000,
+    gap_before_ms=0,
+    expected_steps=3,
+    prompt_tokens=None,
+    completion_tokens=None,
+    cached_tokens=None,
+    pod=POD,
+)
+
+
+def saved_after_step_1(invalid_calls: int = 0) -> SavedRun:
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": TASK},
+        {"role": "assistant", "content": None, "tool_calls": [calc("7*8")]},
+        {"role": "tool", "tool_call_id": "call-1", "content": json.dumps({"result": 56})},
+    ]
+    return SavedRun(messages=messages, step=1, invalid_calls=invalid_calls, calls=[SAVED_CALL])
+
+
+async def resume(
+    mode: ToolChoice, llm: ScriptedLLM, saved: SavedRun, clock: FakeClock | None = None
+) -> RunResult:
+    config = make_config(mode)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
+    ) as http:
+        return await run_task(
+            TASK,
+            RUN_ID,
+            7,
+            config,
+            LLMClient(http, config),
+            clock=clock or FakeClock(),
+            saved=saved,
+        )
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_run_sends_the_lost_step_again_from_the_saved_history(
+    mode: ToolChoice,
+) -> None:
+    saved = saved_after_step_1()
+    llm = ScriptedLLM([final(mode, "56")])
+    result = await resume(mode, llm, saved)
+    assert (result.status, result.answer, result.steps) == ("done", "56", 2)
+    assert [r.headers["x-step"] for r in llm.requests] == ["2"]
+    assert llm.bodies()[0]["messages"] == saved.messages
+    assert [c.step for c in result.calls] == [1, 2]
+    assert result.calls[0] == SAVED_CALL
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_run_still_answers_a_repeat_of_a_saved_call_from_the_history(
+    mode: ToolChoice,
+) -> None:
+    llm = ScriptedLLM([calls(calc("7*8", "call-2")), final(mode, "56")])
+    result = await resume(mode, llm, saved_after_step_1())
+    assert result.status == "done"
+    repeated = json.loads(llm.bodies()[1]["messages"][-1]["content"])
+    assert repeated == {"error": REPEATED_CALL.format(name="calculator")}
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_saved_invalid_call_is_not_a_call_that_ran(mode: ToolChoice) -> None:
+    """Only a call that passed the schema ran; the model may still make it right after resume."""
+    saved = saved_after_step_1()
+    saved.messages[2]["tool_calls"] = [calc("2^3")]
+    llm = ScriptedLLM([calls(calc("2^3", "call-2")), final(mode, "8")])
+    result = await resume(mode, llm, saved)
+    assert result.invalid_calls == 1
+    assert "already called" not in llm.bodies()[1]["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_run_counts_its_saved_invalid_calls(mode: ToolChoice) -> None:
+    llm = ScriptedLLM([calls(calc("2^3")), final(mode, "8")])
+    result = await resume(mode, llm, saved_after_step_1(invalid_calls=MAX_INVALID_CALLS - 1))
+    assert result.status == "failed"
+    assert result.invalid_calls == MAX_INVALID_CALLS
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_calls_gap_runs_from_the_saved_calls_end_on_the_wall_clock(
+    mode: ToolChoice,
+) -> None:
+    """No monotonic clock outlives the dead runtime, so the gap holds the restart."""
+    clock = FakeClock()
+    result = await resume(mode, TimedLLM([final(mode, "56")], clock), saved_after_step_1(), clock)
+    saved_end = SAVED_CALL.ts_start + SAVED_CALL.duration_ms
+    assert result.calls[1].gap_before_ms == WALL_START_MS - saved_end
+    assert result.calls[1].ts_start == WALL_START_MS
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_wall_clock_behind_the_saved_calls_end_gives_a_gap_of_0(mode: ToolChoice) -> None:
+    clock = FakeClock()
+    clock.set_wall_back(WALL_SET_BACK_MS)
+    result = await resume(mode, TimedLLM([final(mode, "56")], clock), saved_after_step_1(), clock)
+    assert result.calls[1].gap_before_ms == 0
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_run_that_died_before_its_first_reply_resumes_at_step_1(mode: ToolChoice) -> None:
+    saved = SavedRun(messages=saved_after_step_1().messages[:2], step=0, invalid_calls=0, calls=[])
+    llm = ScriptedLLM([final(mode, "56")])
+    result = await resume(mode, llm, saved)
+    assert [r.headers["x-step"] for r in llm.requests] == ["1"]
+    assert result.calls[0].gap_before_ms == 0
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_calls_gap_runs_from_the_last_saved_call(mode: ToolChoice) -> None:
+    clock = FakeClock()
+    earlier = replace(SAVED_CALL, ts_start=SAVED_CALL.ts_start - 30_000)
+    later = replace(SAVED_CALL, step=2)
+    saved = replace(saved_after_step_1(), step=2, calls=[earlier, later])
+    result = await resume(mode, TimedLLM([final(mode, "56")], clock), saved, clock)
+    assert result.calls[2].gap_before_ms == WALL_START_MS - (later.ts_start + later.duration_ms)

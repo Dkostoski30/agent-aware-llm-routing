@@ -1,0 +1,36 @@
+replay: 1/30 tau2_retail-867-1 tau2_retail: 13 calls, pods ['vllm-54dd797b86-4jts2']
+replay: 2/30 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-54dd797b86-glqn7']
+failover: killing vllm-54dd797b86-4jts2, live pins {'vllm-54dd797b86-4jts2': 4, 'vllm-54dd797b86-glqn7': 4}
+replay: gaia_dev-310-8 step 2: no full reply: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.137.163/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: tau2_airline-764-7 step 1: no full reply: RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')
+replay: tau2_airline-772-10 step 1: no full reply: RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')
+replay: 3/30 gaia_dev-310-8 gaia_dev: 2 calls, pods ['vllm-54dd797b86-4jts2']
+replay: 4/30 tau2_airline-764-7 tau2_airline: 1 calls, pods []
+replay: 5/30 tau2_airline-772-10 tau2_airline: 1 calls, pods []
+replay: 6/30 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 7/30 tau2_telecom-963-2 tau2_telecom: 11 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 8/30 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 9/30 hotpotqa-22-5 hotpotqa: 2 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 10/30 bfcl-615-6 bfcl: 10 calls, pods ['vllm-54dd797b86-4jts2', 'vllm-54dd797b86-glqn7']
+replay: 11/30 bfcl-522-11 bfcl: 9 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 12/30 bfcl-624-13 bfcl: 11 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 13/30 hotpotqa-42-12 hotpotqa: 2 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 14/30 gaia_dev-476-17 gaia_dev: 2 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 15/30 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 16/30 tau2_telecom-986-18 tau2_telecom: 9 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 17/30 hotpotqa-145-20 hotpotqa: 4 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 18/30 bfcl-514-16 bfcl: 12 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 19/30 tau2_airline-816-14 tau2_airline: 8 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 20/30 gaia_dev-270-19 gaia_dev: 30 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 21/30 bfcl-565-21 bfcl: 17 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 22/30 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 23/30 bfcl-527-25 bfcl: 9 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 24/30 bfcl-679-24 bfcl: 12 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 25/30 bfcl-561-22 bfcl: 11 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 26/30 gaia_dev-345-26 gaia_dev: 30 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 27/30 bfcl-708-27 bfcl: 5 calls, pods ['vllm-54dd797b86-glqn7']
+replay: 28/30 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 29/30 hotpotqa-25-28 hotpotqa: 3 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 30/30 bfcl-508-29 bfcl: 8 calls, pods ['vllm-54dd797b86-xqg2v']
+replay: 234 calls, 3 failed
+replay: wrote /home/kosto/thesis/experiments/results/failover-aa3c44493359-retry-off.jsonl

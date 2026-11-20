@@ -1,10 +1,10 @@
 """Run history (D7): each run's metadata, full message list and LLM call records, saved after every
-step."""
+step, and the set of running runs, which a runtime that starts resumes (P4.4)."""
 
 import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from redis.asyncio import Redis
 from redis.typing import EncodableT, FieldT
@@ -26,6 +26,8 @@ class RunRecord:
     # Milliseconds since the Unix epoch, the unit of the trace's ts_start (schemas/trace.v1.json).
     created_ms: int
     updated_ms: int
+    # The run request's seed, which a resumed run keeps sending (P4.4); None when it had none.
+    seed: int | None
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,12 @@ class CallRecord:
         never reads as 0."""
         return {name: value for name, value in asdict(self).items() if value is not None}
 
+    @classmethod
+    def from_fields(cls, fields: dict[str, Any]) -> "CallRecord":
+        """A record as fields saved it; what it left out comes back as None."""
+        values: dict[str, Any] = {name: fields.get(name) for name in cls.__dataclass_fields__}
+        return cls(**values)
+
 
 class RunStore(Protocol):
     async def save(
@@ -74,6 +82,18 @@ class RunStore(Protocol):
         """The run's call records as saved (CallRecord.fields); empty if it has none."""
         ...
 
+    async def get_files(self, run_id: str) -> list[dict[str, str]] | None:
+        """The run request's files as saved, or None if the run expired."""
+        ...
+
+    async def running_runs(self) -> list[str]:
+        """The runs last saved as running that have not expired, by id."""
+        ...
+
+
+# The set of runs last saved as running. With one runtime at a time (infra/manifests/agent.yaml,
+# strategy Recreate), a run in it when a runtime starts was left by a dead one (P4.4).
+RUNNING_KEY = "thesis:runs:running"
 
 _INT_FIELDS = ("step", "expected_steps", "invalid_calls", "created_ms", "updated_ms")
 
@@ -81,10 +101,13 @@ _INT_FIELDS = ("step", "expected_steps", "invalid_calls", "created_ms", "updated
 class RedisStore:
     """thesis:run:<id> is a hash of the record, thesis:run:<id>:messages the messages as JSON,
     thesis:run:<id>:calls the call records as a JSON list (CallRecord.fields), thesis:run:<id>:files
-    the run request's files as JSON.
+    the run request's files as JSON, and thesis:runs:running (RUNNING_KEY) the ids of the running
+    runs.
 
-    The record, messages and calls are written in one MULTI transaction with the same TTL, so a
-    reader (P4.4 failover on another pod) never sees them from different steps. The files
+    The record, messages and calls are written in one MULTI transaction with the same TTL, with the
+    run's place in the running set, so a reader (a runtime resuming the run, P4.4) never sees them
+    from different steps. The set has no TTL of its own: running_runs drops a run whose keys
+    expired. The files
     are written once; every save renews their TTL with the run's, so they expire together. The
     client must decode responses (decode_responses=True), so the hash comes back as strings.
     """
@@ -109,6 +132,10 @@ class RedisStore:
             pipe.set(f"{key}:calls", calls_json, ex=self._ttl_seconds)
             pipe.expire(key, self._ttl_seconds)
             pipe.expire(f"{key}:files", self._ttl_seconds)
+            if record.status == "running":
+                pipe.sadd(RUNNING_KEY, record.run_id)
+            else:
+                pipe.srem(RUNNING_KEY, record.run_id)
             await pipe.execute()
 
     async def save_files(self, run_id: str, files: list[dict[str, str]]) -> None:
@@ -126,6 +153,8 @@ class RedisStore:
         values: dict[str, Any] = {name: fields.get(name) for name in RunRecord.__dataclass_fields__}
         for name in _INT_FIELDS:
             values[name] = int(values[name])
+        if values["seed"] is not None:
+            values["seed"] = int(values["seed"])
         return RunRecord(**values), json.loads(messages)
 
     async def get_calls(self, run_id: str) -> list[dict[str, Any]]:
@@ -134,3 +163,21 @@ class RedisStore:
             return []
         records: list[dict[str, Any]] = json.loads(calls)
         return records
+
+    async def get_files(self, run_id: str) -> list[dict[str, str]] | None:
+        files = await self._redis.get(f"thesis:run:{run_id}:files")
+        if files is None:
+            return None
+        saved: list[dict[str, str]] = json.loads(files)
+        return saved
+
+    async def running_runs(self) -> list[str]:
+        alive = []
+        # Strings: the client decodes responses (the class docstring).
+        members = cast(set[str], await self._redis.smembers(RUNNING_KEY))
+        for run_id in sorted(members):
+            if await self._redis.exists(f"thesis:run:{run_id}"):
+                alive.append(run_id)
+            else:
+                await self._redis.srem(RUNNING_KEY, run_id)
+        return alive

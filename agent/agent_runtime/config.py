@@ -6,6 +6,8 @@ from typing import Literal, cast, get_args
 
 import yaml
 
+from agent_runtime.retry import RetryPolicy, retry_policy
+
 # D10: "required" lets vLLM constrain every call to the tool schemas, "auto" lets the runtime check
 # each call.
 ToolChoice = Literal["required", "auto"]
@@ -26,6 +28,8 @@ class AgentConfig:
     max_invalid_calls: int
     expected_steps_default: int
     llm_timeout_seconds: float
+    # How a call whose pod died is sent again (P4.4).
+    retry: RetryPolicy
     history_ttl_seconds: int
     sampling: Sampling
     system_prompt: str
@@ -71,6 +75,7 @@ def load_config(path: Path) -> AgentConfig:
         max_invalid_calls=agent["max_invalid_calls"],
         expected_steps_default=agent["expected_steps_default"],
         llm_timeout_seconds=agent["llm_timeout_seconds"],
+        retry=retry_policy(agent),
         history_ttl_seconds=agent["history_ttl_seconds"],
         sampling=Sampling(**agent["sampling"]),
         system_prompt=agent["system_prompt"],

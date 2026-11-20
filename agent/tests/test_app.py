@@ -11,7 +11,9 @@ each poll sees. Every event a test gets is validated against schemas/run-events.
 import json
 import logging
 import re
+import time
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +21,7 @@ import httpx
 import pytest
 from agent_runtime.app import create_app, run_events
 from agent_runtime.config import AgentConfig, Sampling
+from agent_runtime.retry import NO_RETRY
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RunRecord, RunStatus, RunStore
 from fastapi.testclient import TestClient
@@ -46,6 +49,7 @@ def make_config(end_of_run: bool = False) -> AgentConfig:
         max_invalid_calls=3,
         expected_steps_default=EXPECTED_STEPS,
         llm_timeout_seconds=5,
+        retry=NO_RETRY,
         history_ttl_seconds=60,
         sampling=Sampling(temperature=0.7, top_p=0.8, top_k=20),
         system_prompt="You are a calculator agent.",
@@ -101,6 +105,21 @@ class MemoryStore:
         saved = zip(self.saves, self.calls, strict=True)
         found = [calls for save, calls in saved if save[0].run_id == run_id]
         return [call.fields() for call in found[-1]] if found else []
+
+    async def get_files(self, run_id: str) -> list[dict[str, str]] | None:
+        return self.files.get(run_id)
+
+    async def running_runs(self) -> list[str]:
+        last = {record.run_id: record for record, _ in self.saves}
+        return sorted(run_id for run_id, record in last.items() if record.status == "running")
+
+    def left_by_a_dead_runtime(
+        self, record: RunRecord, messages: list[dict[str, Any]], calls: list[CallRecord]
+    ) -> None:
+        """A run as a runtime that died after saving it left it here."""
+        self.saves.append((record, list(messages)))
+        self.calls.append(list(calls))
+        self.files.setdefault(record.run_id, [])
 
 
 class StoreDown(Exception):
@@ -463,6 +482,7 @@ def test_running_run_shows_the_steps_so_far() -> None:
         error=None,
         created_ms=1,
         updated_ms=2,
+        seed=None,
     )
     service.store.saves.append((record, messages))
     run = service.client.get("/runs/run-0123456789ab").json()
@@ -533,6 +553,7 @@ def saved_record(step: int, status: RunStatus = "running", answer: str | None = 
         error=None,
         created_ms=CREATED_MS,
         updated_ms=CREATED_MS + 100 * step,
+        seed=None,
     )
 
 
@@ -780,3 +801,92 @@ def test_calls_of_a_run_whose_first_call_got_no_reply_are_empty() -> None:
 def test_calls_of_an_unknown_run_is_404() -> None:
     response = Service([]).client.get("/runs/run-000000000000/calls")
     assert response.status_code == 404
+
+
+# Resuming the runs a dead runtime left (P4.4). TestClient runs the app's startup only inside a
+# with block, where the resumed runs go on in its event loop's thread.
+RESUME_WAIT_SECONDS = 5.0
+CALL_1 = CallRecord(
+    step=1,
+    ts_start=CREATED_MS + 10,
+    duration_ms=50,
+    gap_before_ms=0,
+    expected_steps=EXPECTED_STEPS,
+    prompt_tokens=None,
+    completion_tokens=None,
+    cached_tokens=None,
+    pod=None,
+)
+
+
+def ended(store: MemoryStore, run_id: str) -> RunRecord:
+    """The run's last save once it is no longer running."""
+    give_up = time.monotonic() + RESUME_WAIT_SECONDS
+    while time.monotonic() < give_up:
+        last = [record for record, _ in store.saves if record.run_id == run_id][-1]
+        if last.status != "running":
+            return last
+        time.sleep(0.01)
+    raise AssertionError(f"{run_id} still running after {RESUME_WAIT_SECONDS} s")
+
+
+def test_a_runtime_that_starts_resumes_the_runs_a_dead_one_left() -> None:
+    store = MemoryStore()
+    store.left_by_a_dead_runtime(saved_record(1), STEP_1, [CALL_1])
+    service = Service([calc("56+3"), text("59")], end_of_run=True, store=store)
+    with service.client:
+        record = ended(store, RUN_ID)
+    assert (record.status, record.answer, record.step) == ("done", "59", 3)
+    assert [request.headers["x-step"] for request in service.requests] == ["2", "3"]
+    assert json.loads(service.requests[0].content)["messages"] == STEP_1
+    assert [call.step for call in store.calls[-1]] == [1, 2, 3]
+    assert store.calls[-1][0] == CALL_1
+    # Counted from its resume to its end, and its end sent to the picker after the final save.
+    assert service.tracked[0] == (EXPECTED_STEPS - 2, 1)
+    assert service.tracker.active_runs() == 0
+    assert service.ends == [("POST", f"/runs/{RUN_ID}/end", "done")]
+
+
+def test_a_resumed_run_keeps_its_seed_and_its_files() -> None:
+    store = MemoryStore()
+    record = replace(saved_record(0), seed=11)
+    store.left_by_a_dead_runtime(record, STEP_0, [])
+    store.files[RUN_ID] = [SALES_FILE]
+    service = Service([text("South")], store=store)
+    with service.client:
+        ended(store, RUN_ID)
+    body = json.loads(service.requests[0].content)
+    assert body["seed"] == 11
+    tools = [tool["function"]["name"] for tool in body["tools"]]
+    assert "group_by" in tools
+
+
+def test_only_runs_saved_as_running_are_resumed() -> None:
+    store = MemoryStore()
+    store.left_by_a_dead_runtime(saved_record(3, "done", "59"), DONE, [CALL_1])
+    service = Service([], store=store)
+    with service.client:
+        time.sleep(0.1)
+    assert service.requests == []
+    assert len(store.saves) == 1
+
+
+def test_a_resumed_run_whose_files_the_profile_now_refuses_fails_with_why() -> None:
+    """A changed profile restarts the runtime (thesis/config-hash), so its limits may be new."""
+    store = MemoryStore()
+    store.left_by_a_dead_runtime(saved_record(0), STEP_0, [])
+    store.files[RUN_ID] = [SALES_FILE, SALES_FILE, SALES_FILE]
+    service = Service([], store=store)
+    with service.client:
+        record = ended(store, RUN_ID)
+    assert record.status == "failed"
+    assert record.error is not None
+    assert record.error.startswith("files of the resumed run: ")
+    assert service.requests == []
+    assert service.tracker.active_runs() == 0
+
+
+def test_a_new_run_saves_its_seed() -> None:
+    service = Service([text("59")])
+    run_id = service.start({"task": TASK, "seed": 7})
+    assert {record.seed for record, _ in service.store.saves if record.run_id == run_id} == {7}

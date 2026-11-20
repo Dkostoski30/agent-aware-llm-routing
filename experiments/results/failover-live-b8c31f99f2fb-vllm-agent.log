@@ -1,0 +1,126 @@
+{"ts": "2026-11-20T00:57:17.357+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:49914 - \"POST /runs HTTP/1.1\" 202"}
+{"ts": "2026-11-20T00:57:17.358+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run started", "run-id": "run-d055c7178cdf", "step": 0, "tool_choice": "auto"}
+{"ts": "2026-11-20T00:57:17.399+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:49914 - \"POST /runs HTTP/1.1\" 202"}
+{"ts": "2026-11-20T00:57:17.400+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run started", "run-id": "run-c2ff32e8bb59", "step": 0, "tool_choice": "auto"}
+{"ts": "2026-11-20T00:57:17.434+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:49914 - \"POST /runs HTTP/1.1\" 202"}
+{"ts": "2026-11-20T00:57:17.434+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run started", "run-id": "run-b3c81cff1b11", "step": 0, "tool_choice": "auto"}
+{"ts": "2026-11-20T00:57:17.441+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:49914 - \"POST /runs HTTP/1.1\" 202"}
+{"ts": "2026-11-20T00:57:17.441+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run started", "run-id": "run-32c4b7651f5f", "step": 0, "tool_choice": "auto"}
+{"ts": "2026-11-20T00:57:17.447+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:49914 - \"POST /runs HTTP/1.1\" 202"}
+{"ts": "2026-11-20T00:57:17.448+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run started", "run-id": "run-035bd1f40ffe", "step": 0, "tool_choice": "auto"}
+{"ts": "2026-11-20T00:57:18.031+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:53196 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:24.567+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:53196 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:27.162+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44964 - \"GET /healthz HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.019+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44970 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.022+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44970 - \"GET /runs/run-c2ff32e8bb59 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.024+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44970 - \"GET /runs/run-b3c81cff1b11 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.027+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44970 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.030+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44970 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:29.607+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:30.632+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:31.171+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 500 Internal Server Error\""}
+{"ts": "2026-11-20T00:57:31.172+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 500 Internal Server Error\""}
+{"ts": "2026-11-20T00:57:31.173+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 500 Internal Server Error\""}
+{"ts": "2026-11-20T00:57:31.173+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 500 Internal Server Error\""}
+{"ts": "2026-11-20T00:57:31.174+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 500 Internal Server Error\""}
+{"ts": "2026-11-20T00:57:31.175+00:00", "level": "WARNING", "logger": "agent_runtime.loop", "message": "llm call retried", "run-id": "run-c2ff32e8bb59", "step": 1, "attempt": 1, "reason": "HTTPStatusError: Server error '500 Internal Server Error' for url 'http://inference-gateway.default.svc.cluster.local/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"}
+{"ts": "2026-11-20T00:57:31.176+00:00", "level": "WARNING", "logger": "agent_runtime.loop", "message": "llm call retried", "run-id": "run-035bd1f40ffe", "step": 1, "attempt": 1, "reason": "HTTPStatusError: Server error '500 Internal Server Error' for url 'http://inference-gateway.default.svc.cluster.local/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"}
+{"ts": "2026-11-20T00:57:31.176+00:00", "level": "WARNING", "logger": "agent_runtime.loop", "message": "llm call retried", "run-id": "run-32c4b7651f5f", "step": 1, "attempt": 1, "reason": "HTTPStatusError: Server error '500 Internal Server Error' for url 'http://inference-gateway.default.svc.cluster.local/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"}
+{"ts": "2026-11-20T00:57:31.176+00:00", "level": "WARNING", "logger": "agent_runtime.loop", "message": "llm call retried", "run-id": "run-b3c81cff1b11", "step": 1, "attempt": 1, "reason": "HTTPStatusError: Server error '500 Internal Server Error' for url 'http://inference-gateway.default.svc.cluster.local/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"}
+{"ts": "2026-11-20T00:57:31.177+00:00", "level": "WARNING", "logger": "agent_runtime.loop", "message": "llm call retried", "run-id": "run-d055c7178cdf", "step": 1, "attempt": 1, "reason": "HTTPStatusError: Server error '500 Internal Server Error' for url 'http://inference-gateway.default.svc.cluster.local/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"}
+{"ts": "2026-11-20T00:57:31.635+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:32.640+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:33.643+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:34.567+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:34.647+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:35.650+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:36.653+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:37.161+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:37790 - \"GET /healthz HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:37.656+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:38.660+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:39.567+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:39.663+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:40.666+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:41.669+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:42.673+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:43.676+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:44.567+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:44.680+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:45.683+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:46.687+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:47.161+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:51812 - \"GET /healthz HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:47.692+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:48.696+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:49.568+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:49.699+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:50.703+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:51.537+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:57:51.538+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-d055c7178cdf", "step": 1, "tool_calls": ["csv_summary"], "finish_reason": "tool_calls", "ts_start": 1795136256180, "duration_ms": 15359, "gap_before_ms": 0, "expected_steps": 2, "prompt_tokens": 777, "completion_tokens": 20, "cached_tokens": 0, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:57:51.711+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:52.715+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:55.257+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:56.106+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:56.260+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:57.264+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:58.268+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:58.700+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:41328 - \"GET /healthz HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:59.273+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:57:59.914+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:57:59.915+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-035bd1f40ffe", "step": 1, "tool_calls": ["group_by"], "finish_reason": "tool_calls", "ts_start": 1795136256177, "duration_ms": 22200, "gap_before_ms": 0, "expected_steps": 2, "prompt_tokens": 787, "completion_tokens": 38, "cached_tokens": 752, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:57:59.917+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:57:59.918+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-b3c81cff1b11", "step": 1, "tool_calls": ["group_by"], "finish_reason": "tool_calls", "ts_start": 1795136256179, "duration_ms": 22201, "gap_before_ms": 0, "expected_steps": 2, "prompt_tokens": 784, "completion_tokens": 38, "cached_tokens": 752, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:00.105+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:00.106+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-c2ff32e8bb59", "step": 1, "tool_calls": ["group_by"], "finish_reason": "tool_calls", "ts_start": 1795136256176, "duration_ms": 22392, "gap_before_ms": 0, "expected_steps": 2, "prompt_tokens": 779, "completion_tokens": 39, "cached_tokens": 752, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:00.275+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:00.279+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-d055c7178cdf", "step": 2, "tool_calls": [], "finish_reason": "stop", "ts_start": 1795136271547, "duration_ms": 7194, "gap_before_ms": 9, "expected_steps": 2, "prompt_tokens": 955, "completion_tokens": 19, "cached_tokens": 768, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:00.279+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run done", "run-id": "run-d055c7178cdf", "step": 2, "error": null}
+{"ts": "2026-11-20T00:58:00.281+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:01.105+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:01.284+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:01.290+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-d055c7178cdf/calls HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:01.299+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-c2ff32e8bb59 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:02.094+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:02.095+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-32c4b7651f5f", "step": 1, "tool_calls": ["compare"], "finish_reason": "tool_calls", "ts_start": 1795136256178, "duration_ms": 24379, "gap_before_ms": 0, "expected_steps": 2, "prompt_tokens": 784, "completion_tokens": 50, "cached_tokens": 752, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:02.303+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-c2ff32e8bb59 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:03.307+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-c2ff32e8bb59 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:03.772+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:03.774+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-b3c81cff1b11", "step": 2, "tool_calls": [], "finish_reason": "stop", "ts_start": 1795136279947, "duration_ms": 3827, "gap_before_ms": 29, "expected_steps": 2, "prompt_tokens": 920, "completion_tokens": 19, "cached_tokens": 768, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:03.774+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run done", "run-id": "run-b3c81cff1b11", "step": 2, "error": null}
+{"ts": "2026-11-20T00:58:03.775+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:03.776+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-c2ff32e8bb59", "step": 2, "tool_calls": [], "finish_reason": "stop", "ts_start": 1795136280108, "duration_ms": 3668, "gap_before_ms": 2, "expected_steps": 2, "prompt_tokens": 937, "completion_tokens": 18, "cached_tokens": 768, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:03.776+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run done", "run-id": "run-c2ff32e8bb59", "step": 2, "error": null}
+{"ts": "2026-11-20T00:58:04.310+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-c2ff32e8bb59 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:04.314+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-c2ff32e8bb59/calls HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:04.318+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-b3c81cff1b11 HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:04.321+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-b3c81cff1b11/calls HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:04.325+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:05.337+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:06.105+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:06.341+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:07.345+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:08.349+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:08.700+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:36590 - \"GET /healthz HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:09.272+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:09.273+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-32c4b7651f5f", "step": 2, "tool_calls": [], "finish_reason": "stop", "ts_start": 1795136282098, "duration_ms": 7175, "gap_before_ms": 3, "expected_steps": 2, "prompt_tokens": 982, "completion_tokens": 20, "cached_tokens": 768, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:09.273+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run done", "run-id": "run-32c4b7651f5f", "step": 2, "error": null}
+{"ts": "2026-11-20T00:58:09.352+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:09.356+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-32c4b7651f5f/calls HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:09.359+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:10.363+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:11.106+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:11.367+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:12.371+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:12.903+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:12.904+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-035bd1f40ffe", "step": 2, "tool_calls": ["group_by"], "finish_reason": "tool_calls", "ts_start": 1795136279923, "duration_ms": 12981, "gap_before_ms": 7, "expected_steps": 2, "prompt_tokens": 923, "completion_tokens": 39, "cached_tokens": 768, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:13.377+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:14.381+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:15.385+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:16.106+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.10:50670 - \"GET /metrics HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:16.390+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:17.394+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:17.902+00:00", "level": "INFO", "logger": "httpx", "message": "HTTP Request: POST http://inference-gateway.default.svc.cluster.local/v1/chat/completions \"HTTP/1.1 200 OK\""}
+{"ts": "2026-11-20T00:58:17.903+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "llm call", "run-id": "run-035bd1f40ffe", "step": 3, "tool_calls": [], "finish_reason": "stop", "ts_start": 1795136292906, "duration_ms": 4998, "gap_before_ms": 2, "expected_steps": 2, "prompt_tokens": 1067, "completion_tokens": 26, "cached_tokens": 912, "pod": "vllm-6b8f7487d9-gzxbr"}
+{"ts": "2026-11-20T00:58:17.903+00:00", "level": "INFO", "logger": "agent_runtime.loop", "message": "run done", "run-id": "run-035bd1f40ffe", "step": 3, "error": null}
+{"ts": "2026-11-20T00:58:18.397+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:18.399+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:44974 - \"GET /runs/run-035bd1f40ffe/calls HTTP/1.1\" 200"}
+{"ts": "2026-11-20T00:58:18.699+00:00", "level": "INFO", "logger": "uvicorn.access", "message": "10.42.0.1:41916 - \"GET /healthz HTTP/1.1\" 200"}

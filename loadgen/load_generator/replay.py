@@ -5,10 +5,13 @@ runs arriving by a pattern from config/ under a fixed seed (load_generator.plan)
 per run. Times come from the event loop's monotonic clock; ts_start alone is wall clock, since the
 wall clock moved seconds against it under WSL2 (P2.2a).
 
-A replay never retries, so a call with no full reply ends its run and the others go on: a replay
-runs under overload on purpose and P3.4 and P4.4 count the runs that complete. A reply that is not
-the planned length or not the expected shape is not a full reply. That call's line holds the planned
-tokens and no duration_ms. The output is written once, after the last run, and never written over;
+A call whose pod died is sent again as the agent runtime's would be, by its own rule
+(agent_runtime.retry, P4.4), when the profile's replay.retry is on; each retry is a printed line,
+and the call's trace line is the attempt that answered or the last one. Any other call with no full
+reply ends its run and the others go on: a replay runs under overload on purpose and P3.4 and P4.4
+count the runs that complete. A reply that is not the planned length or not the expected shape is
+not a full reply, and is not sent again. A failed call's line holds the planned tokens and no
+duration_ms. The output is written once, after the last run, and never written over;
 until then each run's lines go to <output>.partial as it ends, so a replay that dies keeps its
 finished runs. Decided with the user, docs/task-cards/26-P2.3-replayer.md.
 
@@ -36,6 +39,7 @@ from typing import Any
 
 import httpx
 import yaml
+from agent_runtime.retry import NO_RETRY, RetryPolicy, retry_policy, send_with_retries
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
@@ -158,10 +162,15 @@ async def _lines_of(response: httpx.Response) -> AsyncIterator[bytes]:
     yield rest
 
 
+# The last line of a full stream, from vLLM and from the simulator alike (llm-d-inference-sim
+# v1.0.0, read on the cluster 2026-11-20).
+DONE_LINE = b"data: [DONE]"
+
+
 def _chunk_of(line: bytes) -> dict[str, Any] | None:
     """A server-sent line's JSON; None for what holds none: blank lines and the [DONE] mark."""
     data = line.strip()
-    if not data.startswith(b"data: ") or data == b"data: [DONE]":
+    if not data.startswith(b"data: ") or data == DONE_LINE:
         return None
     try:
         chunk: dict[str, Any] = json.loads(data.removeprefix(b"data: "))
@@ -186,16 +195,22 @@ async def stream_reply(
     headers: Mapping[str, str],
     started: float,
 ) -> Reply:
-    """Reads the whole stream. A non-2xx answer or a broken connection raises httpx.HTTPError; a
-    chunk of another shape, a stream that ends without the token counts or a reply of another length
-    than max_tokens, ReplyError."""
+    """Reads the whole stream. A non-2xx answer or a broken connection raises httpx.HTTPError, and
+    so does a stream that ends with neither its token counts nor its [DONE] mark: the gateway ends
+    a stream cleanly when its pod dies after the reply has started (failover-576b813b6b4c), so the
+    end is the only sign of the cut, and httpx's RemoteProtocolError is what a cut connection
+    raises. The counts come in the last chunk before [DONE], so a stream that has them is whole. A
+    chunk of another shape, a [DONE] with no token counts before it or a reply of another length
+    than max_tokens raises ReplyError."""
     loop = asyncio.get_running_loop()
     first_token: float | None = None
     usage: Mapping[str, Any] | None = None
+    done = False
     async with client.stream("POST", CHAT_PATH, json=body, headers=headers) as response:
         response.raise_for_status()
         pod = response.headers.get(SIMULATED_POD_HEADER)
         async for line in _lines_of(response):
+            done = done or line.strip() == DONE_LINE
             chunk = _chunk_of(line)
             if chunk is None:
                 continue
@@ -204,6 +219,10 @@ async def stream_reply(
             usage = chunk.get("usage") or usage
             pod = chunk.get("system_fingerprint") or pod
     ended = loop.time()
+    if usage is None and not done:
+        raise httpx.RemoteProtocolError(
+            "the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply"
+        )
     if usage is None:
         raise ReplyError("the stream ended without the token counts")
     if usage["completion_tokens"] != body["max_tokens"]:
@@ -234,18 +253,44 @@ async def _call(
     step: PlannedStep,
     previous_end: float | None,
     deadline_seconds: float,
+    retry: RetryPolicy,
 ) -> tuple[dict[str, Any], float | None]:
     """One call's trace line and when its reply ended; None when it got no full reply. A real
     agent's call fails after agent.llm_timeout_seconds because its answer arrives whole
     (agent_runtime.llm), while a read timeout on a stream restarts with each chunk, so here the
-    deadline is on the whole call."""
-    started = asyncio.get_running_loop().time()
+    deadline is on each attempt of the whole call. The line's start and gap are those of the
+    attempt that answered, or of the last one."""
+    loop = asyncio.get_running_loop()
+    body = chat_request(model, step.content, step.completion_tokens)
+    headers = call_headers(run.run_id, step)
+    # Each attempt's start on the event loop's clock and on the wall clock (ts_start).
+    starts: list[tuple[float, int]] = []
+
+    async def attempt() -> Reply:
+        started = loop.time()
+        starts.append((started, round(time.time() * 1000)))
+        async with asyncio.timeout(deadline_seconds):
+            return await stream_reply(client, body, headers, started)
+
+    def retried(number: int, error: httpx.HTTPError) -> None:
+        print(
+            f"replay: {run.run_id} step {step.step}: retry {number}, attempt sent at "
+            f"{starts[-1][1]}: {error!r}",
+            flush=True,
+        )
+
+    reply: Reply | None = None
+    try:
+        reply = await send_with_retries(attempt, retry, retried)
+    except (httpx.HTTPError, ReplyError, TimeoutError) as error:
+        print(f"replay: {run.run_id} step {step.step}: no full reply: {error!r}", flush=True)
+    started, ts_start = starts[-1]
     line: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run.run_id,
         "task_type": run.task_type,
         "step": step.step,
-        "ts_start": round(time.time() * 1000),
+        "ts_start": ts_start,
         "gap_before_ms": 0 if previous_end is None else _milliseconds(started - previous_end),
         "expected_steps": step.expected_steps,
         "prompt_tokens": step.prompt_tokens,
@@ -253,12 +298,7 @@ async def _call(
     }
     if step.parallel_group is not None:
         line["parallel_group"] = step.parallel_group
-    body = chat_request(model, step.content, step.completion_tokens)
-    try:
-        async with asyncio.timeout(deadline_seconds):
-            reply = await stream_reply(client, body, call_headers(run.run_id, step), started)
-    except (httpx.HTTPError, ReplyError, TimeoutError) as error:
-        print(f"replay: {run.run_id} step {step.step}: no full reply: {error!r}", flush=True)
+    if reply is None:
         return line, None
     line.update(
         duration_ms=reply.duration_ms,
@@ -276,6 +316,7 @@ async def _replay_run(
     zero: float,
     deadline_seconds: float,
     tracker: RunTracker | None,
+    retry: RetryPolicy,
 ) -> list[dict[str, Any]]:
     """A run from its start time to its last reply, or to its first failed call. Each gap starts at
     the end of the step before (D9), so a slow pod delays the rest of the run, as with a real agent;
@@ -299,7 +340,7 @@ async def _replay_run(
             tracker.stepped(run.run_id, step.step)
         results = await asyncio.gather(
             *(
-                _call(client, model, run, step, previous_end, deadline_seconds)
+                _call(client, model, run, step, previous_end, deadline_seconds, retry)
                 for _ in range(step.calls)
             )
         )
@@ -334,18 +375,19 @@ async def replay_runs(
     keep_run: Callable[[list[dict[str, Any]]], None],
     picker: httpx.AsyncClient | None = None,
     tracker: RunTracker | None = None,
+    retry: RetryPolicy = NO_RETRY,
 ) -> list[dict[str, Any]]:
     """Every run's lines in the plan's order, whichever run ended first, so that two replays of one
     seed can be compared line by line. keep_run gets a run's lines as it ends. With a picker, each
     run's end goes to it as the run stops; None is the plugin off, where nothing serves it. With a
     tracker, each run counts in it while it goes; None leaves calls out of the remaining work, as
-    an experiment's warm-up calls are."""
+    an experiment's warm-up calls are. retry sends a call whose pod died again (P4.4)."""
     zero = asyncio.get_running_loop().time()
     finished = 0
 
     async def replay_one(run: PlannedRun) -> list[dict[str, Any]]:
         nonlocal finished
-        lines = await _replay_run(client, model, run, zero, deadline_seconds, tracker)
+        lines = await _replay_run(client, model, run, zero, deadline_seconds, tracker, retry)
         if picker is not None:
             await end_run(picker, run.run_id)
         keep_run(lines)
@@ -480,6 +522,7 @@ async def _replay(
     keep_run: Callable[[list[dict[str, Any]]], None],
     end_runs: bool,
     tracker: RunTracker,
+    retry: RetryPolicy,
 ) -> list[dict[str, Any]]:
     # Before the first call: a picker with no end-of-run port stops the replay here.
     picker_base = picker_url() if end_runs else None
@@ -503,7 +546,15 @@ async def _replay(
                 httpx.AsyncClient(base_url=picker_base, timeout=PICKER_TIMEOUT_SECONDS)
             )
         )
-        return await replay_runs(gateway, model, plan, timeout, keep_run, picker, tracker)
+        return await replay_runs(gateway, model, plan, timeout, keep_run, picker, tracker, retry)
+
+
+def replay_retry(profile: Mapping[str, Any]) -> RetryPolicy:
+    """The agent's retry rule when the profile's replay.retry is on (P4.4), else none."""
+    retry = profile["replay"]["retry"]
+    if not isinstance(retry, bool):
+        raise ReplayError(f"replay.retry is {retry!r}, expected true or false")
+    return retry_policy(profile["agent"]) if retry else NO_RETRY
 
 
 def replay_to_file(
@@ -517,8 +568,9 @@ def replay_to_file(
     """A replay of a profile's named pattern to out, by default output_path. seed None is the
     profile's. end_runs sends each run's end to the picker: true when the running picker has the
     plugin on, which an experiment's variant may set apart from its profile. The run tracker's
-    /metrics listens on replay.tracker_port from before the first call to after the last. Returns
-    its lines, failed calls included."""
+    /metrics listens on replay.tracker_port from before the first call to after the last. A call
+    whose pod died is sent again by replay.retry. Returns its lines, failed calls included."""
+    retry = replay_retry(profile)
     config = load_replay_config(profile["replay"])
     pattern = named_pattern(config, pattern_name)
     seed = config.seed if seed is None else seed
@@ -547,6 +599,7 @@ def replay_to_file(
                 lambda run_lines: _append_lines(partial, run_lines),
                 end_runs,
                 tracker,
+                retry,
             )
         )
     check_lines(trace_validator(), lines)

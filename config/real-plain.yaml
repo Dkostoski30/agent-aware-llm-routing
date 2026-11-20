@@ -158,6 +158,10 @@ replay:
   # through infra/manifests/replayer-metrics.yaml. Any port free on the node: k3s listens on 6443-6444, 10010 and
   # 10248-10259, vLLM's Docker container on 8000 (make up stops it).
   tracker_port: 9400
+  # A replayed call is sent again as the agent's would be (agent.llm_retries and agent.llm_retry_backoff_seconds, P4.4),
+  # so a replay fails a call when the agent it replays would. Replays before P4.4 never retried (experiments/log.md);
+  # experiments/failover.yaml turns it off for its control.
+  retry: true
   # How many tokens two runs have in common at the start of a prompt.
   shared_prefix_tokens:
     # Any two runs: none, although inside vLLM real runs of different types share their system prompt (192-256 tokens,
@@ -268,6 +272,12 @@ agent:
   # and the replayer holds the whole call to it, so an overloaded pod's longest calls fail first, which P3.4's and
   # P4.4's counts must allow for.
   llm_timeout_seconds: 120
+  # A call whose pod died is sent again with the same step and history (P4.4, agent_runtime/retry.py): on no connection,
+  # a connection cut or a 5xx from the gateway, never on the deadline above, which means overload. 2: one for the dead
+  # pod, one for a retry the picker sent there before it learned the pod had left. A first guess.
+  llm_retries: 2
+  # The wait before each retry: P3.4's settle, the picker's informer dropping the dead pod (experiments/pod-removed.yaml).
+  llm_retry_backoff_seconds: 5
   # How long Redis keeps a run's metadata and messages (D7). 24 h covers a whole demo or experiment day, so the
   # chat's step view (P3.13) still shows the steps of that day's runs; older chats keep their answers (SQLite) but
   # lose their steps. Redis has no persistence, so a restart drops the history earlier anyway.

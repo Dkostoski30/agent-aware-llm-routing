@@ -1,0 +1,95 @@
+{
+  "experiment": "failover",
+  "hash": "aa3c44493359",
+  "profile": "sim",
+  "profile_sha256": "4c2af60622fa606b687f7e8113df03a2e670b090a72faf352c7aac8f273a6103",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 125,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "retry-off",
+      "retry": false,
+      "killed_pod": "vllm-54dd797b86-4jts2",
+      "live_pins_at_kill": {
+        "vllm-54dd797b86-4jts2": 4,
+        "vllm-54dd797b86-glqn7": 4
+      },
+      "picker_log_since": "2026-11-20T02:12:51.284379+00:00",
+      "kill_requested_ms": 1795140903507,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "runs": 30,
+      "done": 27,
+      "completion_rate": 0.9,
+      "deadline_runs": [],
+      "on_killed": [
+        "bfcl-615-6 step 1: answered by vllm-54dd797b86-4jts2",
+        "tau2_airline-764-7 step 1: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')",
+        "gaia_dev-310-8 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.137.163/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "tau2_airline-772-10 step 1: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')"
+      ],
+      "retries": 0,
+      "failed_by_kill": [
+        "gaia_dev-310-8",
+        "tau2_airline-764-7",
+        "tau2_airline-772-10"
+      ],
+      "affected_runs": [
+        "bfcl-615-6",
+        "gaia_dev-310-8"
+      ],
+      "remapped_runs": [
+        "bfcl-615-6"
+      ],
+      "void": false
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "killed_pod": "vllm-67479948f7-m5r2z",
+      "live_pins_at_kill": {
+        "vllm-67479948f7-m5r2z": 4,
+        "vllm-67479948f7-vg4rn": 4
+      },
+      "picker_log_since": "2026-11-20T02:25:02.491475+00:00",
+      "kill_requested_ms": 1795141634841,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "runs": 30,
+      "done": 30,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "tau2_telecom-963-2 step 10: answered by vllm-67479948f7-m5r2z",
+        "hotpotqa-124-4 step 1: retried 1, answered by vllm-67479948f7-vg4rn",
+        "hotpotqa-22-5 step 1: retried 1, answered by vllm-67479948f7-vg4rn",
+        "hotpotqa-83-9 step 1: retried 1, answered by vllm-67479948f7-vg4rn"
+      ],
+      "retries": 3,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "tau2_telecom-963-2"
+      ],
+      "remapped_runs": [
+        "tau2_telecom-963-2"
+      ],
+      "void": false
+    }
+  ]
+}

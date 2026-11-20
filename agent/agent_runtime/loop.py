@@ -4,7 +4,7 @@ call (P2.2a)."""
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -13,7 +13,8 @@ import httpx
 from agent_runtime.config import AgentConfig
 from agent_runtime.csv_tools import Table
 from agent_runtime.documents import Document
-from agent_runtime.llm import LLMClient, LLMResponseError
+from agent_runtime.llm import ChatReply, LLMClient, LLMResponseError
+from agent_runtime.retry import send_with_retries
 from agent_runtime.run_tracker import RunTracker
 from agent_runtime.store import CallRecord
 from agent_runtime.tools import (
@@ -81,6 +82,17 @@ class RunResult:
     calls: list[CallRecord]
 
 
+@dataclass(frozen=True)
+class SavedRun:
+    """What a run had saved when its runtime died, so another one continues it (P4.4): the history
+    and the call records after its last saved step, the calls it had sent, its invalid calls."""
+
+    messages: list[dict[str, Any]]
+    step: int
+    invalid_calls: int
+    calls: list[CallRecord]
+
+
 def initial_messages(task: str, config: AgentConfig) -> list[dict[str, Any]]:
     """The history a run starts from: the system prompt and the task."""
     return [
@@ -92,14 +104,14 @@ def initial_messages(task: str, config: AgentConfig) -> list[dict[str, Any]]:
 class _Run:
     """State of one run while the loop works on it."""
 
-    def __init__(self, run_id: str, task: str, config: AgentConfig) -> None:
+    def __init__(self, run_id: str, task: str, config: AgentConfig, saved: SavedRun | None) -> None:
         self.run_id = run_id
         self.config = config
-        self.messages = initial_messages(task, config)
+        self.messages = initial_messages(task, config) if saved is None else list(saved.messages)
         # Number of LLM calls sent so far; 0 on the lines logged before the first call.
-        self.step = 0
-        self.invalid_calls = 0
-        self.calls: list[CallRecord] = []
+        self.step = 0 if saved is None else saved.step
+        self.invalid_calls = 0 if saved is None else saved.invalid_calls
+        self.calls: list[CallRecord] = [] if saved is None else list(saved.calls)
 
     def log(self, level: int, message: str, **fields: Any) -> None:
         logger.log(level, message, extra={"run-id": self.run_id, "step": self.step, **fields})
@@ -125,6 +137,62 @@ class _Run:
         )
 
 
+async def _send(
+    run: _Run,
+    llm: LLMClient,
+    definitions: list[dict[str, Any]],
+    headers: dict[str, str],
+    seed: int | None,
+    clock: Clock,
+) -> tuple[ChatReply, int, float]:
+    """The step's call, sent again with the same history and x-step when its pod died
+    (agent.llm_retries, P4.4), with the wall-clock and the monotonic start of the attempt that got
+    the reply. A failed attempt adds nothing to the history, so the step view keeps one entry per
+    x-step (P2.6)."""
+    starts: list[tuple[int, float]] = []
+
+    async def attempt() -> ChatReply:
+        starts.append((clock.wall_ms(), clock.monotonic_ms()))
+        return await llm.chat(run.messages, definitions, headers, seed)
+
+    def retried(number: int, error: httpx.HTTPError) -> None:
+        reason = f"{type(error).__name__}: {error}"
+        run.log(logging.WARNING, "llm call retried", attempt=number, reason=reason)
+
+    reply = await send_with_retries(attempt, run.config.retry, retried)
+    ts_start, started_ms = starts[-1]
+    return reply, ts_start, started_ms
+
+
+def _calls_that_ran(
+    messages: list[dict[str, Any]], tools: Mapping[str, dict[str, Any]]
+) -> set[tuple[str, str]]:
+    """(tool, arguments as sorted JSON) of every call in the history that passed its schema, for
+    REPEATED_CALL: the loop ran each such call, or answered it as a repeat of one that ran. A
+    running run's history holds no final answer, which ends a run."""
+    ran = set()
+    for message in messages:
+        for call in message.get("tool_calls") or []:
+            name = call["function"]["name"]
+            try:
+                arguments = check_call(name, call["function"]["arguments"], tools)
+            except InvalidCallError:
+                continue
+            ran.add((name, json.dumps(arguments, sort_keys=True)))
+    return ran
+
+
+def _last_reply_ms(calls: Sequence[CallRecord], clock: Clock) -> float | None:
+    """When the last saved call's reply arrived, on this process's monotonic clock: its end on the
+    wall clock, the only clock the dead runtime's records share with this one. Never after now,
+    since the wall clock can step back (P2.3) and a gap below 0 breaks run-calls.v1."""
+    if not calls:
+        return None
+    last = calls[-1]
+    since_ms = clock.wall_ms() - (last.ts_start + last.duration_ms)
+    return clock.monotonic_ms() - max(0, since_ms)
+
+
 def _tool_message(call_id: str, content: dict[str, Any]) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": call_id, "content": json.dumps(content)}
 
@@ -140,23 +208,28 @@ async def run_task(
     documents: Sequence[Document] = (),
     clock: Clock = SYSTEM_CLOCK,
     tracker: RunTracker | None = None,
+    saved: SavedRun | None = None,
 ) -> RunResult:
     """tables and documents are the run request's files, already read
     (documents.read_run_files); clock times the calls (a test passes a fake one). tracker, when
     given, has started the run and hears each call's x-step as it is sent (P3.8); the caller ends
-    the run there."""
-    run = _Run(run_id, task, config)
+    the run there. saved continues a run a dead runtime left (P4.4): the step it was on is sent
+    again with its x-step, from the history saved before it."""
+    run = _Run(run_id, task, config, saved)
     tools = offered_tools(config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
     tables_by_id = {table.id: table for table in tables}
     documents_by_id = {document.id: document for document in documents}
     # (tool, arguments as sorted JSON) of every call that ran, for REPEATED_CALL.
-    ran: set[tuple[str, str]] = set()
+    ran = _calls_that_ran(run.messages, tools)
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
     expected_steps = config.expected_steps_default
     # When the last reply arrived, on clock.monotonic_ms(); None until the first one.
-    last_reply_ms: float | None = None
-    run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
+    last_reply_ms = _last_reply_ms(run.calls, clock)
+    if saved is None:
+        run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
+    else:
+        run.log(logging.INFO, "run resumed", tool_choice=config.tool_choice)
     while run.step < config.max_steps:
         run.step += 1
         headers = {
@@ -166,12 +239,11 @@ async def run_task(
         }
         if tracker is not None:
             tracker.stepped(run_id, run.step)
-        ts_start = clock.wall_ms()
-        started_ms = clock.monotonic_ms()
         try:
-            reply = await llm.chat(run.messages, definitions, headers, seed)
+            reply, ts_start, started_ms = await _send(run, llm, definitions, headers, seed, clock)
         except (httpx.HTTPError, LLMResponseError) as error:
-            # No reply, so no call record; run.step still counts the call and the error says why.
+            # No reply, so no call record; run.step still counts the call and the error says why:
+            # the last attempt's, after any retries, which the "llm call retried" lines count.
             return run.finish(error=f"LLM call failed: {type(error).__name__}: {error}")
         replied_ms = clock.monotonic_ms()
         call_record = CallRecord(

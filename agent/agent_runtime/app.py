@@ -1,9 +1,11 @@
 """The agent runtime's HTTP API: start a run, read it back, stream its events, read its call
 records, health (P1.3a-2, P1.4b-1, P2.6b). With the picker's plugin on, a run's end goes to the
 picker once the run is saved (P3.3). The run tracker counts each run from its acceptance to its end,
-and GET /metrics serves its remaining work to Prometheus (D2, P3.8)."""
+and GET /metrics serves its remaining work to Prometheus (D2, P3.8). A runtime that starts resumes
+every run the store holds as running, which a dead one left (P4.4)."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -27,7 +29,7 @@ from agent_runtime.config import AgentConfig, load_config
 from agent_runtime.csv_tools import FileError, Table
 from agent_runtime.documents import Document, read_run_files
 from agent_runtime.llm import LLMClient
-from agent_runtime.loop import SYSTEM_CLOCK, initial_messages, run_task
+from agent_runtime.loop import SYSTEM_CLOCK, SavedRun, initial_messages, run_task
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RedisStore, RunRecord, RunStore
 
@@ -146,10 +148,12 @@ def create_app(
 ) -> FastAPI:
     llm = LLMClient(http, config)
     validator = Draft202012Validator(run_request_schema)
-    app = FastAPI()
 
     async def execute(
-        record: RunRecord, seed: int | None, tables: list[Table], documents: list[Document]
+        record: RunRecord,
+        tables: list[Table],
+        documents: list[Document],
+        saved: SavedRun | None = None,
     ) -> None:
         async def save_step(
             step: int, invalid_calls: int, messages: list[dict[str, Any]], calls: list[CallRecord]
@@ -165,13 +169,14 @@ def create_app(
             result = await run_task(
                 record.task,
                 record.run_id,
-                seed,
+                record.seed,
                 config,
                 llm,
                 save_step,
                 tables,
                 documents,
                 tracker=tracker,
+                saved=saved,
             )
             final = replace(
                 record,
@@ -187,6 +192,46 @@ def create_app(
                 await end_run(picker, record.run_id)
         finally:
             tracker.ended(record.run_id)
+
+    async def resume(run_id: str) -> None:
+        """Continues a run a dead runtime left from what it saved; one that expired meanwhile is
+        left alone. Its files are read again under this runtime's profile, whose limits a changed
+        profile may have moved, so a run they now refuse fails with why."""
+        found = await store.get(run_id)
+        files = await store.get_files(run_id)
+        if found is None or files is None:
+            return
+        record, messages = found
+        calls = [CallRecord.from_fields(call) for call in await store.get_calls(run_id)]
+        try:
+            tables, documents = read_run_files(files, config.max_files, config.max_file_bytes)
+        except FileError as error:
+            failed = replace(
+                record,
+                status="failed",
+                error=f"files of the resumed run: {error}",
+                updated_ms=SYSTEM_CLOCK.wall_ms(),
+            )
+            await store.save(failed, messages, calls)
+            return
+        tracker.started(run_id, record.expected_steps)
+        saved = SavedRun(messages, record.step, record.invalid_calls, calls)
+        await execute(record, tables, documents, saved)
+
+    # The resumed runs' tasks, held so the event loop does not drop them while they run.
+    resumed: set[asyncio.Task[None]] = set()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        """Before the first request: with one runtime at a time (agent.yaml, strategy Recreate),
+        every run still running in the store was left by a dead one."""
+        for run_id in await store.running_runs():
+            task = asyncio.create_task(resume(run_id))
+            resumed.add(task)
+            task.add_done_callback(resumed.discard)
+        yield
+
+    app = FastAPI(lifespan=lifespan)
 
     @app.post("/runs", status_code=202)
     async def start_run(request: Request, background: BackgroundTasks) -> dict[str, str]:
@@ -214,6 +259,7 @@ def create_app(
             error=None,
             created_ms=now,
             updated_ms=now,
+            seed=body.get("seed"),
         )
         # Saved before 202, so a GET right after it finds the run instead of a 404. The files first,
         # so a saved run always has its files (P4.4 failover reads both). No calls yet.
@@ -222,7 +268,7 @@ def create_app(
         # Counted from here, before its first call: the run's work has arrived (D2). Every agent run
         # sends agent.expected_steps_default until P4.8 knows its scenario (D13).
         tracker.started(record.run_id, record.expected_steps)
-        background.add_task(execute, record, body.get("seed"), tables, documents)
+        background.add_task(execute, record, tables, documents)
         return {"run_id": record.run_id}
 
     @app.get("/runs/{run_id}")

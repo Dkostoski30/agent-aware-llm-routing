@@ -1,0 +1,921 @@
+{
+  "experiment": "failover-live",
+  "hash": "b8c31f99f2fb",
+  "profile": "real",
+  "profile_sha256": "337f7422cad2deaa0a47c6e67edc89d793b22b809dbcaff98ad5a3d03fbd9caa",
+  "cases": [
+    {
+      "case": "vllm",
+      "signals": 5,
+      "passed": true,
+      "void": false,
+      "problems": [],
+      "runs": [
+        {
+          "run_id": "run-d055c7178cdf",
+          "question": "summary",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The average revenue per row in sales.csv is 1274.06.",
+          "correct": true,
+          "steps_before": [],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "csv_summary",
+                  "arguments": {
+                    "file": "sales"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "row_count": 36,
+                    "column_count": 5,
+                    "columns": [
+                      {
+                        "name": "month",
+                        "type": "text"
+                      },
+                      {
+                        "name": "region",
+                        "type": "text"
+                      },
+                      {
+                        "name": "product",
+                        "type": "text"
+                      },
+                      {
+                        "name": "units",
+                        "type": "number",
+                        "min": 6.0,
+                        "max": 71.0,
+                        "mean": 26.67
+                      },
+                      {
+                        "name": "revenue",
+                        "type": "number",
+                        "min": 778.7,
+                        "max": 2224.0,
+                        "mean": 1274.06
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The average revenue per row in sales.csv is 1274.06.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-c2ff32e8bb59",
+          "question": "group-total",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The total revenue of the North region is 14351.1.",
+          "correct": true,
+          "steps_before": [],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "group_count": 4,
+                    "rows": [
+                      {
+                        "group": "North",
+                        "sum": 14351.1
+                      },
+                      {
+                        "group": "West",
+                        "sum": 11341.8
+                      },
+                      {
+                        "group": "South",
+                        "sum": 10622.2
+                      },
+                      {
+                        "group": "East",
+                        "sum": 9551.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The total revenue of the North region is 14351.1.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-b3c81cff1b11",
+          "question": "group-mean",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The average units per row of the product Gadget is 17.83.",
+          "correct": true,
+          "steps_before": [],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "mean": 51.42
+                      },
+                      {
+                        "group": "Gadget",
+                        "mean": 17.83
+                      },
+                      {
+                        "group": "Gizmo",
+                        "mean": 10.75
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The average units per row of the product Gadget is 17.83.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-32c4b7651f5f",
+          "question": "compare",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The North region had 3728.9 more total revenue than the South region.",
+          "correct": true,
+          "steps_before": [],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "compare",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "left": "South",
+                    "right": "North"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "higher": {
+                      "group": "North",
+                      "sum": 14351.1
+                    },
+                    "lower": {
+                      "group": "South",
+                      "sum": 10622.2
+                    },
+                    "difference": 3728.9,
+                    "percent_more": 35.1,
+                    "summary": "North's sum of revenue (14351.1) is 3728.9 higher than South's (10622.2), 35.1% more."
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The North region had 3728.9 more total revenue than the South region.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-035bd1f40ffe",
+          "question": "two-step",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The product Widget sold the most units (617); its total revenue is 15116.5.",
+          "correct": true,
+          "steps_before": [],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "sum": 617.0
+                      },
+                      {
+                        "group": "Gadget",
+                        "sum": 214.0
+                      },
+                      {
+                        "group": "Gizmo",
+                        "sum": 129.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "revenue",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Gizmo",
+                        "sum": 17931.0
+                      },
+                      {
+                        "group": "Widget",
+                        "sum": 15116.5
+                      },
+                      {
+                        "group": "Gadget",
+                        "sum": 12818.6
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 3,
+              "content": "The product Widget sold the most units (617); its total revenue is 15116.5.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "case": "agent",
+      "signals": 2,
+      "passed": true,
+      "void": false,
+      "problems": [],
+      "runs": [
+        {
+          "run_id": "run-538d7a70e6fd",
+          "question": "summary",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The average revenue per row in sales.csv is 1274.06.",
+          "correct": true,
+          "steps_before": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "csv_summary",
+                  "arguments": {
+                    "file": "sales"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "row_count": 36,
+                    "column_count": 5,
+                    "columns": [
+                      {
+                        "name": "month",
+                        "type": "text"
+                      },
+                      {
+                        "name": "region",
+                        "type": "text"
+                      },
+                      {
+                        "name": "product",
+                        "type": "text"
+                      },
+                      {
+                        "name": "units",
+                        "type": "number",
+                        "min": 6.0,
+                        "max": 71.0,
+                        "mean": 26.67
+                      },
+                      {
+                        "name": "revenue",
+                        "type": "number",
+                        "min": 778.7,
+                        "max": 2224.0,
+                        "mean": 1274.06
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The average revenue per row in sales.csv is 1274.06.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "csv_summary",
+                  "arguments": {
+                    "file": "sales"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "row_count": 36,
+                    "column_count": 5,
+                    "columns": [
+                      {
+                        "name": "month",
+                        "type": "text"
+                      },
+                      {
+                        "name": "region",
+                        "type": "text"
+                      },
+                      {
+                        "name": "product",
+                        "type": "text"
+                      },
+                      {
+                        "name": "units",
+                        "type": "number",
+                        "min": 6.0,
+                        "max": 71.0,
+                        "mean": 26.67
+                      },
+                      {
+                        "name": "revenue",
+                        "type": "number",
+                        "min": 778.7,
+                        "max": 2224.0,
+                        "mean": 1274.06
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The average revenue per row in sales.csv is 1274.06.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-b1c00791f890",
+          "question": "group-total",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The total revenue of the North region is 14351.1.",
+          "correct": true,
+          "steps_before": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "group_count": 4,
+                    "rows": [
+                      {
+                        "group": "North",
+                        "sum": 14351.1
+                      },
+                      {
+                        "group": "West",
+                        "sum": 11341.8
+                      },
+                      {
+                        "group": "South",
+                        "sum": 10622.2
+                      },
+                      {
+                        "group": "East",
+                        "sum": 9551.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            }
+          ],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "group_count": 4,
+                    "rows": [
+                      {
+                        "group": "North",
+                        "sum": 14351.1
+                      },
+                      {
+                        "group": "West",
+                        "sum": 11341.8
+                      },
+                      {
+                        "group": "South",
+                        "sum": 10622.2
+                      },
+                      {
+                        "group": "East",
+                        "sum": 9551.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The total revenue of the North region is 14351.1.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-869c5b6b2f83",
+          "question": "group-mean",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The average units per row of the product Gadget is 17.83.",
+          "correct": true,
+          "steps_before": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "mean": 51.42
+                      },
+                      {
+                        "group": "Gadget",
+                        "mean": 17.83
+                      },
+                      {
+                        "group": "Gizmo",
+                        "mean": 10.75
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            }
+          ],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "mean",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "mean": 51.42
+                      },
+                      {
+                        "group": "Gadget",
+                        "mean": 17.83
+                      },
+                      {
+                        "group": "Gizmo",
+                        "mean": 10.75
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The average units per row of the product Gadget is 17.83.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-965c5b84b517",
+          "question": "compare",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The North region had 3728.9 more total revenue than the South region.",
+          "correct": true,
+          "steps_before": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "compare",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "left": "South",
+                    "right": "North"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "higher": {
+                      "group": "North",
+                      "sum": 14351.1
+                    },
+                    "lower": {
+                      "group": "South",
+                      "sum": 10622.2
+                    },
+                    "difference": 3728.9,
+                    "percent_more": 35.1,
+                    "summary": "North's sum of revenue (14351.1) is 3728.9 higher than South's (10622.2), 35.1% more."
+                  }
+                }
+              ],
+              "error": null
+            }
+          ],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "compare",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "left": "South",
+                    "right": "North"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "region",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "higher": {
+                      "group": "North",
+                      "sum": 14351.1
+                    },
+                    "lower": {
+                      "group": "South",
+                      "sum": 10622.2
+                    },
+                    "difference": 3728.9,
+                    "percent_more": 35.1,
+                    "summary": "North's sum of revenue (14351.1) is 3728.9 higher than South's (10622.2), 35.1% more."
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": "The North region had 3728.9 more total revenue than the South region.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2
+          ]
+        },
+        {
+          "run_id": "run-5920024cee35",
+          "question": "two-step",
+          "seed": 1,
+          "status": "done",
+          "error": null,
+          "answer": "The product Widget sold the most units (617); its total revenue is 15116.5.",
+          "correct": true,
+          "steps_before": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "sum": 617.0
+                      },
+                      {
+                        "group": "Gadget",
+                        "sum": 214.0
+                      },
+                      {
+                        "group": "Gizmo",
+                        "sum": 129.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            }
+          ],
+          "steps_after": [
+            {
+              "step": 1,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "units",
+                    "agg": "sum",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Widget",
+                        "sum": 617.0
+                      },
+                      {
+                        "group": "Gadget",
+                        "sum": 214.0
+                      },
+                      {
+                        "group": "Gizmo",
+                        "sum": 129.0
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 2,
+              "content": null,
+              "tool_calls": [
+                {
+                  "name": "group_by",
+                  "arguments": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "revenue",
+                    "agg": "sum"
+                  },
+                  "result": {
+                    "file": "sales",
+                    "by": "product",
+                    "value": "revenue",
+                    "agg": "sum",
+                    "group_count": 3,
+                    "rows": [
+                      {
+                        "group": "Gizmo",
+                        "sum": 17931.0
+                      },
+                      {
+                        "group": "Widget",
+                        "sum": 15116.5
+                      },
+                      {
+                        "group": "Gadget",
+                        "sum": 12818.6
+                      }
+                    ]
+                  }
+                }
+              ],
+              "error": null
+            },
+            {
+              "step": 3,
+              "content": "The product Widget sold the most units (617); its total revenue is 15116.5.",
+              "tool_calls": [],
+              "error": null
+            }
+          ],
+          "call_steps": [
+            1,
+            2,
+            3
+          ]
+        }
+      ]
+    }
+  ]
+}

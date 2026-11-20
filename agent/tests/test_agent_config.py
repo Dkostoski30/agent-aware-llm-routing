@@ -105,3 +105,20 @@ def test_a_plugin_switch_that_is_not_true_or_false_is_rejected(
 ) -> None:
     with pytest.raises(ValueError, match=r"routing\.plugin"):
         load_config(profile_with_plugin(tmp_path, plugin))
+
+
+@pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
+def test_profile_retries_a_call_whose_pod_died(profile: str) -> None:
+    """P4.4: at least one retry, after a wait, so the picker can drop the dead pod first."""
+    retry = load_config(CONFIG_DIR / f"{profile}.yaml").retry
+    assert retry.retries >= 1
+    assert retry.backoff_seconds > 0
+
+
+def test_a_negative_retry_count_is_rejected(tmp_path: Path) -> None:
+    profile = yaml.safe_load((CONFIG_DIR / "real.yaml").read_text())
+    profile["agent"]["llm_retries"] = -1
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ValueError, match="llm_retries"):
+        load_config(path)

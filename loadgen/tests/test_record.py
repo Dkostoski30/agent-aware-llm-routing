@@ -239,6 +239,8 @@ def test_the_calls_are_read_from_the_key_the_agent_saves_them_under(
 
         def expire(self, key: str, seconds: int) -> None: ...
 
+        def srem(self, key: str, member: str) -> None: ...
+
         def set(self, key: str, value: str, ex: int) -> None:
             saved[key] = value
 
@@ -269,6 +271,7 @@ def test_the_calls_are_read_from_the_key_the_agent_saves_them_under(
         error=None,
         created_ms=1,
         updated_ms=2,
+        seed=None,
     )
     call = CallRecord(
         step=1,

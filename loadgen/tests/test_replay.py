@@ -13,6 +13,7 @@ import json
 import selectors
 import socket
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
@@ -23,6 +24,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from agent_runtime.retry import NO_RETRY, RetryPolicy
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from jsonschema import Draft202012Validator
 from load_generator.plan import (
@@ -206,11 +208,14 @@ def ignore_run(_: list[dict[str, Any]]) -> None:
 
 
 def replay(
-    plan: list[PlannedRun], gateway: FakeGateway, deadline: float = DEADLINE_SECONDS
+    plan: list[PlannedRun],
+    gateway: FakeGateway,
+    deadline: float = DEADLINE_SECONDS,
+    retry: RetryPolicy = NO_RETRY,
 ) -> list[dict[str, Any]]:
     async def go() -> list[dict[str, Any]]:
         async with client_of(gateway) as client:
-            return await replay_runs(client, MODEL, plan, deadline, ignore_run)
+            return await replay_runs(client, MODEL, plan, deadline, ignore_run, retry=retry)
 
     return run_virtual(go())
 
@@ -1289,6 +1294,8 @@ def test_main_refuses_a_partial_file_left_by_a_replay_that_stopped(
 # A profile of its own, so that a test sees which of the profile's values main used.
 TINY_SEED = 5
 TINY_DEADLINE = 7.0
+TINY_RETRIES = 1
+TINY_BACKOFF = 3.0
 TINY_TRACKER_PORT = 9999
 
 
@@ -1296,7 +1303,11 @@ def use_tiny_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path)
     (tmp_path / "config").mkdir(exist_ok=True)
     profile = {
         "model": {"name": "the-base-model", "lora": {"name": "the-adapter"}},
-        "agent": {"llm_timeout_seconds": TINY_DEADLINE},
+        "agent": {
+            "llm_timeout_seconds": TINY_DEADLINE,
+            "llm_retries": TINY_RETRIES,
+            "llm_retry_backoff_seconds": TINY_BACKOFF,
+        },
         "routing": {"plugin": False},
         "replay": {
             "seed": TINY_SEED,
@@ -1305,6 +1316,7 @@ def use_tiny_profile(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, out: Path)
             # Far apart, so that the first run has ended when the second starts.
             "patterns": {"only-here": {"runs": 2, "rate_per_second": 0.0001}},
             "tracker_port": TINY_TRACKER_PORT,
+            "retry": True,
         },
     }
     (tmp_path / "config" / "tiny.yaml").write_text(yaml.safe_dump(profile))
@@ -1477,3 +1489,197 @@ def test_main_writes_the_output_in_the_plans_order_whichever_run_ended_first(
     main()
     written = [json.loads(line) for line in out.read_text().splitlines()]
     assert [line["run_id"] for line in written] == ["run-a-1"] * 2 + ["run-a-2"] * 2
+
+
+# Retry of a call whose pod died (P4.4), as the agent runtime does it.
+RETRY = RetryPolicy(retries=2, backoff_seconds=5.0)
+
+
+def fails_first(*answers: httpx.Response | Exception) -> Callable[[Seen], Any]:
+    """The gateway's answer to the first calls, in turn; the later ones are streamed."""
+    left = list(answers)
+    return lambda _: left.pop(0) if left else None
+
+
+def test_a_call_whose_pod_died_is_sent_again_after_the_backoff(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakeGateway(fail=fails_first(httpx.Response(503)))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 0
+    assert [line["step"] for line in lines] == [1, 2]
+    first, again = gateway.seen[0], gateway.seen[1]
+    assert again.at - first.at == pytest.approx(RETRY.backoff_seconds)
+    assert (again.body, again.headers) == (first.body, first.headers)
+    out = capsys.readouterr().out
+    assert f"{plan_of()[0].run_id} step 1: retry 1, attempt sent at " in out
+    assert "503" in out
+
+
+def test_a_retried_calls_line_is_the_attempt_that_answered() -> None:
+    """Its gap runs from the previous reply to that attempt, so it holds the lost attempt and the
+    backoff; the printed retry line says so."""
+    gateway = FakeGateway(fail=lambda seen: httpx.Response(503) if len(gateway.seen) == 2 else None)
+    plain = replay(plan_of(), FakeGateway())
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert lines[1]["duration_ms"] == plain[1]["duration_ms"]
+    assert lines[1]["gap_before_ms"] == plain[1]["gap_before_ms"] + 5000
+    assert lines[1]["ts_start"] >= lines[0]["ts_start"]
+
+
+def test_a_stream_cut_off_mid_reply_is_sent_again() -> None:
+    cut = True
+
+    async def stream(body: dict[str, Any]) -> AsyncIterator[bytes]:
+        nonlocal cut
+        if cut:
+            cut = False
+            yield event(content_chunk("hello"))
+            raise httpx.RemoteProtocolError("peer closed connection")
+        yield event(content_chunk("hello"))
+        yield usage_chunk(body)
+
+    lines = replay(plan_of(), FakeGateway(stream=stream), retry=RETRY)
+    assert failed_calls(lines) == 0
+    assert len(lines) == 2
+
+
+def test_out_of_retries_the_call_fails_and_ends_its_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakeGateway(fail=lambda _: httpx.Response(503))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert [line["step"] for line in lines] == [1]
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1 + RETRY.retries
+    out = capsys.readouterr().out
+    assert out.count(": retry ") == RETRY.retries
+    assert out.count("no full reply") == 1
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [httpx.Response(400), httpx.Response(200, content=event("[DONE]"))],
+    ids=["4xx", "short reply"],
+)
+def test_a_call_that_did_not_lose_its_pod_is_not_sent_again(answer: httpx.Response) -> None:
+    gateway = FakeGateway(fail=fails_first(answer))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1
+
+
+def test_a_call_past_its_deadline_is_not_sent_again() -> None:
+    gateway = FakeGateway(ttft=2.0, body_seconds=3.0)
+    lines = replay(plan_of(), gateway, deadline=4.0, retry=RETRY)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1
+
+
+def test_without_retry_a_dead_pod_fails_the_call() -> None:
+    gateway = FakeGateway(fail=fails_first(httpx.Response(503)))
+    lines = replay(plan_of(), gateway)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1
+
+
+@pytest.mark.parametrize(("retry", "sent"), [(True, 1 + TINY_RETRIES), (False, 1)])
+def test_main_retries_by_the_profiles_switch_and_agent_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, retry: bool, sent: int
+) -> None:
+    out = tmp_path / "out.jsonl"
+    gateway = FakeGateway(fail=lambda _: httpx.Response(503))
+    fake_cluster(monkeypatch, out, gateway, trace_file(tmp_path))
+    use_tiny_profile(monkeypatch, tmp_path, out)
+    path = tmp_path / "config" / "tiny.yaml"
+    profile = yaml.safe_load(path.read_text())
+    profile["replay"]["retry"] = retry
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(SystemExit):
+        main()
+    # Two runs, each ended by its first call.
+    assert len(gateway.seen) == 2 * sent
+
+
+def test_main_refuses_a_retry_switch_that_is_not_true_or_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    out = tmp_path / "out.jsonl"
+    gateway = FakeGateway()
+    fake_cluster(monkeypatch, out, gateway, trace_file(tmp_path))
+    use_tiny_profile(monkeypatch, tmp_path, out)
+    path = tmp_path / "config" / "tiny.yaml"
+    profile = yaml.safe_load(path.read_text())
+    profile["replay"]["retry"] = "yes"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(ReplayError, match=r"replay\.retry"):
+        main()
+    assert gateway.seen == []
+
+
+def test_a_retry_line_names_when_the_failed_attempt_was_sent_on_the_wall_clock(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """make failover-check places a retried call by its first attempt (load_generator.failover)."""
+    before = round(time.time() * 1000)
+    replay(plan_of(), FakeGateway(fail=fails_first(httpx.Response(503))), retry=RETRY)
+    after = round(time.time() * 1000)
+    (line,) = [text for text in capsys.readouterr().out.splitlines() if ": retry 1, " in text]
+    sent = int(line.split("attempt sent at ")[1].split(":")[0])
+    assert before <= sent <= after
+
+
+def stream_cut_after(*chunks: bytes) -> Callable[[dict[str, Any]], AsyncIterator[bytes]]:
+    """A stream that sends chunks and ends with no [DONE] mark, as the gateway ends one whose pod
+    died after the reply had started (failover-576b813b6b4c)."""
+
+    async def stream(_: dict[str, Any]) -> AsyncIterator[bytes]:
+        for chunk in chunks:
+            yield chunk
+
+    return stream
+
+
+def test_a_stream_that_ends_without_its_done_mark_was_cut_and_is_sent_again(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cut = stream_cut_after(event(content_chunk("hello")))
+    calls = 0
+
+    async def first_cut(body: dict[str, Any]) -> AsyncIterator[bytes]:
+        nonlocal calls
+        calls += 1
+        source = cut(body) if calls == 1 else FakeGateway()._stream(body)
+        async for chunk in source:
+            yield chunk
+
+    lines = replay(plan_of(), FakeGateway(stream=first_cut), retry=RETRY)
+    assert failed_calls(lines) == 0
+    assert "RemoteProtocolError" in capsys.readouterr().out
+
+
+def test_a_cut_stream_without_retry_is_a_failed_call_that_says_so(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    gateway = FakeGateway(stream=stream_cut_after(event(content_chunk("hello"))))
+    lines = replay(plan_of(), gateway)
+    assert failed_calls(lines) == 1
+    assert "neither its token counts nor its [DONE] mark" in capsys.readouterr().out
+
+
+def test_a_stream_with_its_token_counts_is_whole_without_its_done_mark() -> None:
+    """The counts come in the last chunk before [DONE] (vLLM's and llm-d-inference-sim v1.0.0's,
+    read on the cluster 2026-11-20), so nothing of the reply is missing."""
+    gateway = FakeGateway(stream=lambda body: stream_cut_after(usage_chunk(body))(body))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 0
+    # One call per step: none was sent again.
+    assert len(gateway.seen) == len(lines) == 2
+
+
+def test_a_done_stream_without_its_token_counts_is_not_sent_again() -> None:
+    """The reply ended as a full one would, so it is a reply of another shape, not a dead pod."""
+    gateway = FakeGateway(stream=stream_cut_after(event(content_chunk("hello")), event("[DONE]")))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1
