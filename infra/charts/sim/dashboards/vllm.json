@@ -127,6 +127,47 @@
           "legendFormat": "remaining work"
         }
       ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Cache pressure (active runs' context over the ready pods' KV cache)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(thesis_context_tokens) / (count(kube_pod_status_ready{namespace=\"default\",pod=~\"vllm-[a-z0-9]+-[a-z0-9]+\",condition=\"true\"} == 1 unless on (pod) kube_pod_deletion_timestamp{namespace=\"default\",pod=~\"vllm-[a-z0-9]+-[a-z0-9]+\"}) * $kv_cache_tokens)",
+          "legendFormat": "cache pressure"
+        }
+      ]
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "constant",
+        "name": "kv_cache_tokens",
+        "label": "KV cache tokens per pod",
+        "hide": 2,
+        "query": ""
+      }
+    ]
+  }
 }

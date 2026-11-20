@@ -2,17 +2,18 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, DestroyRef, effect, inject, signal } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { Auth } from '../auth/auth';
+import { CachePressure } from './cache-pressure';
 import { CLUSTER_API, ClusterDown, ClusterView } from './cluster';
 import { PodCard } from './pod-card';
 import { RemainingWork } from './remaining-work';
 
-/** The cluster panel's content (P3.11): the remaining work and the vLLM pods, from the app backend's GET /cluster,
- * asked again after the poll interval each answer carries, so the UI holds no number of its own. Only a logged-in
- * user asks, since the endpoint answers 401 to anyone else. When the numbers cannot be read, it says so instead of
- * showing zeros or numbers that are no longer true. */
+/** The cluster panel's content (P3.11): the remaining work, the cache pressure (P4.11) and the vLLM pods, from the
+ * app backend's GET /cluster, asked again after the poll interval each answer carries, so the UI holds no number of
+ * its own. Only a logged-in user asks, since the endpoint answers 401 to anyone else. When the numbers cannot be
+ * read, it says so instead of showing zeros or numbers that are no longer true. */
 @Component({
   selector: 'app-cluster-panel',
-  imports: [PodCard, RemainingWork],
+  imports: [CachePressure, PodCard, RemainingWork],
   template: `
     <div class="ag-panel-scroll">
       <div class="ag-panel-head"><h2>Cluster</h2></div>
@@ -22,6 +23,7 @@ import { RemainingWork } from './remaining-work';
         </p>
       } @else if (view(); as view) {
         <app-remaining-work [steps]="view.remaining_work" [runs]="view.active_runs" />
+        <app-cache-pressure [pressure]="view.cache_pressure" [warn]="view.pressure_warn" />
         <section class="ag-psec">
           <h3 class="ag-psec-title">Pods</h3>
           <div class="ag-pods">

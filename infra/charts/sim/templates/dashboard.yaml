@@ -3,6 +3,14 @@
 {{- $interval := required "monitoring.scrape_interval_seconds comes from config/<profile>.yaml" .Values.monitoring.scrape_interval_seconds }}
 {{- $dashboard := .Files.Get "dashboards/vllm.json" | fromJson }}
 {{- $_ := set $dashboard "refresh" (printf "%vs" $interval) }}
+# The cache pressure panel divides by one pod's KV cache in tokens, the hidden dashboard variable kv_cache_tokens, set here
+# from the profile, since real and demo share this file and differ in it (P4.11).
+{{- $kvTokens := required "model.kv_cache_tokens comes from config/<profile>.yaml" .Values.model.kv_cache_tokens }}
+{{- range $dashboard.templating.list }}
+{{- if eq .name "kv_cache_tokens" }}
+{{- $_ := set . "query" (toString $kvTokens) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

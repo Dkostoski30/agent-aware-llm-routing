@@ -133,6 +133,8 @@ def make_config() -> AppConfig:
         max_files=MAX_FILES,
         runtime_timeout_seconds=5.0,
         cluster_poll_seconds=5,
+        kv_cache_tokens=4384,
+        pressure_warn=1.0,
     )
 
 

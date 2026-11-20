@@ -11,6 +11,9 @@ model:
   # Set explicitly like in the other profiles. 800 MiB (7312 tokens, P0.3) is just under the 0.86 GiB vLLM derived from
   # 0.78 for this model in P0.3, so a busier desktop does not push the pod out of memory.
   kv_cache_memory_bytes: 838860800
+  # The tokens that cache holds for the 1.7B, as vLLM logged at startup at 800 MiB (P0.4, experiments/log.md). The
+  # cluster panel's cache pressure divides by it (P4.11); it changes with the bytes above.
+  kv_cache_tokens: 7312
   # Same context limit as the 0.6B, so the same agent tasks fit.
   max_model_len: 4096
   # vLLM parser that matches Qwen3's tool-call output format.
@@ -324,3 +327,7 @@ app:
   # without waiting on the model, so httpx's default of 5 s, which the agent's call to the picker also uses, is far
   # above them; past it the message gets a failed reply (502) or a read leaves the reply running.
   runtime_timeout_seconds: 5
+  # The cluster panel shows the cache pressure in the warning colour from here up (P4.11): at 1 the active runs' context
+  # fills the ready pods' KV cache on paper, and P4.9's median first token bent there (0.4 s under 0.75, 1.7 s at
+  # 1-1.25 on the real-pod replays).
+  pressure_warn: 1.0

@@ -1,5 +1,5 @@
-"""GET /cluster (P3.11): the vLLM pods, their queues and the cluster's remaining work, for the
-UI's cluster panel, as schemas/cluster.v1.json.
+"""GET /cluster (P3.11): the vLLM pods, their queues, the cluster's remaining work and its cache
+pressure (P4.11), for the UI's cluster panel, as schemas/cluster.v1.json.
 
 Read from Prometheus with instant queries, the queue ones word for word the Grafana panels', so
 the panel and Grafana differ by at most one scrape. Prometheus has no login, so it is reached only
@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app_backend import logs
+from app_backend.config import AppConfig
 
 PodState = Literal["ready", "starting", "draining", "failed"]
 
@@ -34,6 +35,9 @@ WAITING_QUERY = "sum by (pod) (vllm:num_requests_waiting)"
 RUNNING_QUERY = "sum by (pod) (vllm:num_requests_running)"
 REMAINING_QUERY = "sum(thesis_remaining_work)"
 ACTIVE_QUERY = "sum(thesis_active_runs)"
+# The prompt tokens of every active run's latest call (P4.10), the agent runtime's and the
+# replayer's alike.
+CONTEXT_QUERY = "sum(thesis_context_tokens)"
 PROMETHEUS_DOWN = "Prometheus did not answer"
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,8 @@ class Pod(BaseModel):
 class Cluster(BaseModel):
     remaining_work: int
     active_runs: int
+    cache_pressure: float | None
+    pressure_warn: float
     poll_seconds: int
     pods: list[Pod]
 
@@ -68,6 +74,17 @@ def pod_state(phase: str, *, ready: bool, deleting: bool) -> PodState:
     if ready:
         return "ready"
     return "starting"
+
+
+def cache_pressure(
+    context_tokens: float | None, ready_pods: int, kv_cache_tokens: int
+) -> float | None:
+    """The active runs' context over the KV cache of the ready pods: 1 is a cache full on paper.
+    None when nothing exports the context or no pod is ready, so the panel never shows a made-up
+    0 and never divides by zero."""
+    if context_tokens is None or ready_pods == 0:
+        return None
+    return context_tokens / (ready_pods * kv_cache_tokens)
 
 
 class ClusterReader:
@@ -96,7 +113,12 @@ class ClusterReader:
         """A sum over no series is an empty vector, which here means none active: 0."""
         return sum(int(value) for _, value in self._instant(query))
 
-    def read(self, poll_seconds: int) -> Cluster:
+    def _sum_or_none(self, query: str) -> float | None:
+        """A sum over no series means nothing exports it: None, not 0."""
+        vector = self._instant(query)
+        return sum(value for _, value in vector) if vector else None
+
+    def read(self, config: AppConfig) -> Cluster:
         phases = {labels["pod"]: labels["phase"] for labels, _ in self._instant(PHASE_QUERY)}
         ready = self._by_pod(READY_QUERY)
         deleting = self._by_pod(DELETING_QUERY)
@@ -111,15 +133,22 @@ class ClusterReader:
             )
             for name in sorted(phases)
         ]
+        # The pods shown as ready, so a draining one, still Ready to Kubernetes but sent nothing
+        # new by the picker, holds no share of the cache (decided 2026-11-20).
+        ready_pods = sum(pod.state == "ready" for pod in pods)
         return Cluster(
             remaining_work=self._total(REMAINING_QUERY),
             active_runs=self._total(ACTIVE_QUERY),
-            poll_seconds=poll_seconds,
+            cache_pressure=cache_pressure(
+                self._sum_or_none(CONTEXT_QUERY), ready_pods, config.kv_cache_tokens
+            ),
+            pressure_warn=config.pressure_warn,
+            poll_seconds=config.cluster_poll_seconds,
             pods=pods,
         )
 
 
-def router(reader: ClusterReader, poll_seconds: int, use_user_id: Any) -> APIRouter:
+def router(reader: ClusterReader, config: AppConfig, use_user_id: Any) -> APIRouter:
     """GET /cluster for logged-in users. use_user_id is app.py's dependency (401 without a
     session); the id itself is not needed, since every user sees the same cluster."""
     cluster = APIRouter()
@@ -130,12 +159,12 @@ def router(reader: ClusterReader, poll_seconds: int, use_user_id: Any) -> APIRou
         """503 when Prometheus cannot answer, with the poll interval, so the UI says the numbers
         are missing instead of showing zeros, and still knows when to ask again."""
         try:
-            return reader.read(poll_seconds)
+            return reader.read(config)
         except PrometheusUnavailable as error:
             logs.log(logger, logging.WARNING, "prometheus unavailable", error=str(error))
             return JSONResponse(
                 status_code=503,
-                content={"detail": PROMETHEUS_DOWN, "poll_seconds": poll_seconds},
+                content={"detail": PROMETHEUS_DOWN, "poll_seconds": config.cluster_poll_seconds},
             )
 
     return cluster

@@ -1,6 +1,8 @@
 {
   "remaining_work": 7,
   "active_runs": 4,
+  "cache_pressure": 1.5,
+  "pressure_warn": 1.0,
   "poll_seconds": 5,
   "pods": [
     { "name": "vllm-568fc4b669-c9kb2", "state": "overloaded", "queue": 3, "running": 2 }

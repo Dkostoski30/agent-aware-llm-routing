@@ -1,5 +1,5 @@
 """The app backend's settings, read from the app section of a config/ profile (D11), and the
-agent and monitoring settings it must agree with."""
+agent, monitoring and model settings it must agree with."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,11 +30,16 @@ class AppConfig:
     # has nothing newer sooner and asking later would lag Grafana (P3.11). Also the panel's
     # Prometheus timeout: an answer later than the next poll is no use.
     cluster_poll_seconds: int
+    # model.kv_cache_tokens: one pod's KV cache, which the panel's cache pressure divides the
+    # active runs' context by (P4.11).
+    kv_cache_tokens: int
+    # The cache pressure the panel shows in the warning colour from (P4.11).
+    pressure_warn: float
 
 
 def load_config(path: Path) -> AppConfig:
-    """Reads the app section of a profile, agent.max_files and monitoring.scrape_interval_seconds;
-    a missing key raises KeyError."""
+    """Reads the app section of a profile, agent.max_files, monitoring.scrape_interval_seconds and
+    model.kv_cache_tokens; a missing key raises KeyError."""
     profile = yaml.safe_load(path.read_text())
     app = profile["app"]
     return AppConfig(
@@ -45,4 +50,6 @@ def load_config(path: Path) -> AppConfig:
         max_files=profile["agent"]["max_files"],
         runtime_timeout_seconds=app["runtime_timeout_seconds"],
         cluster_poll_seconds=profile["monitoring"]["scrape_interval_seconds"],
+        kv_cache_tokens=profile["model"]["kv_cache_tokens"],
+        pressure_warn=app["pressure_warn"],
     )

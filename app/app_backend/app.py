@@ -134,9 +134,7 @@ def create_app(
         return user.id
 
     app.include_router(chats.router(config, runtime, clock, use_conn, Depends(current_user_id)))
-    app.include_router(
-        cluster.router(prometheus, config.cluster_poll_seconds, Depends(current_user_id))
-    )
+    app.include_router(cluster.router(prometheus, config, Depends(current_user_id)))
 
     @app.post("/auth/register", status_code=201)
     def register(credentials: Credentials, conn: Annotated[sqlite3.Connection, use_conn]) -> User:

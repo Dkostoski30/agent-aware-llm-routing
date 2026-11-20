@@ -13,7 +13,14 @@ const STARTING: ClusterPod = {
   queue: null,
   running: null,
 };
-const VIEW: ClusterView = { remaining_work: 7, active_runs: 4, poll_seconds: 5, pods: [READY, STARTING] };
+const VIEW: ClusterView = {
+  remaining_work: 7,
+  active_runs: 4,
+  cache_pressure: 1.5,
+  pressure_warn: 1,
+  poll_seconds: 5,
+  pods: [READY, STARTING],
+};
 const ANA = { id: 1, email: 'ana@example.com' };
 
 describe('ClusterPanel', () => {
@@ -23,7 +30,9 @@ describe('ClusterPanel', () => {
   let page: HTMLElement;
 
   const text = () => page.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  const steps = () => page.querySelector('.ag-metric')?.firstChild?.textContent?.trim();
+  const metrics = () =>
+    Array.from(page.querySelectorAll('.ag-metric')).map((metric) => metric.firstChild?.textContent?.trim());
+  const steps = () => metrics()[0];
   const pods = () =>
     Array.from(page.querySelectorAll('.ag-pod')).map((pod) =>
       ['.ag-pod-name', '.ag-status', '.ag-pod-grid b'].map((part) =>
@@ -73,6 +82,14 @@ describe('ClusterPanel', () => {
       [READY.name, 'Ready', '2 · 3'],
       [STARTING.name, 'Starting', '– · –'],
     ]);
+  });
+
+  it('shows the cache pressure beside the remaining work, against the warning value it carries', () => {
+    logIn();
+    answer({ ...VIEW, cache_pressure: 0.8, pressure_warn: 0.75 });
+    expect(metrics()).toEqual(['7', '0.80']);
+    expect(page.querySelectorAll('.ag-metric.high').length).toBe(1);
+    expect(text()).toContain('high from 0.75');
   });
 
   it('asks again after the poll interval the answer carries, not sooner', () => {
