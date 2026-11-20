@@ -1,0 +1,1196 @@
+<!doctype html>
+<!--
+  Agent Routing Atlas, 2D: the same sandbox as index.html, drawn on one canvas without three.js. Open it in a browser.
+  Loads two Google fonts over the network (system fonts stand in offline), and sim.js, panels.js and atlas.css beside it.
+
+  It is a model of the system with illustrative timings, not a result: the rows marked "Measured" are copied from
+  experiments/log.md, everything else comes from the sandbox (sim.js). It takes index.html's address parameters:
+  ?preset=affinity&variant=1&t=60&view=pods, ?profile=gpu24-8b, or single settings such as ?rate=8&routing=plugin.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Routing Atlas 2D</title>
+<meta name="description" content="A 2D sandbox of agent-aware LLM routing and vLLM autoscaling on Kubernetes, with the measured experiment results beside it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="atlas.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Agent Routing Atlas</h1>
+        <p>Agent tasks, the gateway that routes their LLM calls, and the GPU pods that remember their contexts</p>
+      </div>
+    </div>
+    <nav class="pages" aria-label="Version"><a href="index.html">3D</a><a href="flat.html" aria-current="page">2D</a></nav>
+    <div class="transport">
+      <button id="play" class="btn primary" aria-pressed="true">Pause</button>
+      <div class="seg top-seg" id="speed" role="radiogroup" aria-label="Speed"></div>
+      <button id="reset" class="btn">Restart</button>
+      <label class="seed">Seed <input id="seed" type="number" min="1" max="9999" value="6"></label>
+      <button id="focus" class="btn">Hide panels</button>
+      <button id="theme" class="btn" aria-label="Switch between dark and light theme">Light</button>
+    </div>
+  </header>
+
+  <aside id="controls" aria-label="Controls"></aside>
+
+  <main id="stage">
+    <div class="stage-fill" id="canvas-host"></div>
+    <div class="float chip-row"><span class="chip" id="clock"></span><span class="chip warn" title="A model of the system with illustrative timings. Only the Measured boxes on the right are results.">Sandbox: illustrative timings</span></div>
+    <div class="float stage-tools"><button id="tour-btn" class="btn primary sm">Take the tour</button><div class="seg" id="views" role="radiogroup" aria-label="View"></div></div>
+    <section class="float" id="inspector" hidden aria-label="Followed run"></section>
+    <details class="float legend">
+      <summary>How to read it</summary>
+      <div><span class="sw" style="background:var(--accent)"></span>A hexagon in the agent runtime is one agent task. Its fill grows with its context, the dots around it are its steps, a turning gear a tool call.</div>
+      <div><span class="sw ring" style="color:var(--accent)"></span>A capsule is one LLM call, longer when it carries more context; a light going back is the reply.</div>
+      <div><span class="sw" style="background:linear-gradient(90deg,#e07a7a,#7ab6e0,#9be07a)"></span>The glass tank on a pod is its KV cache, filled from the bottom: one cell per block, bright while a call uses it, dim when kept for later, grey for a finished run.</div>
+      <div><span class="sw line" style="background:var(--draining)"></span><span>Under each call in a pod's bays: amber while the pod rereads the prompt, teal while it writes the reply.</span></div>
+      <div class="states"><span><i class="dot"></i>Ready</span><span><i class="dot starting"></i>Starting</span><span><i class="dot draining"></i>Draining</span><span><i class="dot failed"></i>Failed</span></div>
+      <div class="caption">Drag to pan, scroll to zoom. Hover anything for its numbers; click a hexagon to follow its run, a pod to zoom to it.</div>
+    </details>
+    <section class="float" id="tour" hidden aria-live="polite"></section>
+    <div id="tooltip" hidden></div>
+  </main>
+
+  <aside id="metrics" aria-label="Live numbers and the selected experiment"></aside>
+  <footer id="ticker" aria-label="Event log"></footer>
+</div>
+
+<script src="sim.js"></script>
+<script src="panels.js"></script>
+<script>
+(function () {
+'use strict';
+const AP = AtlasPanels;
+const sim = AP.sim;
+const { C } = AtlasSim;
+const $ = id => document.getElementById(id);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SANS = '"Hanken Grotesk", system-ui, sans-serif';
+const MONO = '"JetBrains Mono", ui-monospace, monospace';
+const TAU = Math.PI * 2;
+let P = AP.palette();
+let dark = AP.theme() === 'dark';
+let wallNow = 0;
+let api = null;
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const fmtK = n => (n >= 100000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+// A palette colour (#rrggbb) at an opacity.
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+// Colours as functions of their opacity, so a light fades a colour to nothing instead of through black.
+const tokenA = token => a => rgba(P[token], a);
+const runA = run => a => AP.runColor(run, a);
+const STATE = { ready: ['Ready', 'ready'], starting: ['Starting', 'starting'], draining: ['Draining', 'draining'], failed: ['Failed', 'failed'] };
+
+// ===== Canvas and camera =====
+const canvas = document.createElement('canvas');
+canvas.setAttribute('role', 'img');
+canvas.setAttribute('aria-label', 'The sandbox, drawn live: agent runs, the gateway, the vLLM pods and the autoscaler');
+canvas.style.touchAction = 'none';
+$('canvas-host').appendChild(canvas);
+const ctx = canvas.getContext('2d');
+let W = 1, H = 1, DPR = 1;
+// The world point at the middle of the stage, and the stage pixels per world unit.
+const cam = { x: 0, y: 0, s: 0.5 };
+// Zoom limits: the widest shows ten pods on a small stage, the closest makes a card's smallest text about 25 px.
+const ZOOM = { min: 0.08, max: 2.5 };
+const toWorld = (sx, sy) => ({ x: (sx - W / 2) / cam.s + cam.x, y: (sy - H / 2) / cam.s + cam.y });
+function worldTransform() {
+  const k = DPR * cam.s;
+  ctx.setTransform(k, 0, 0, k, DPR * (W / 2 - cam.x * cam.s), DPR * (H / 2 - cam.y * cam.s));
+}
+function screenTransform() { ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+
+// ===== Drawing helpers =====
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function text(s, x, y, font, color, align = 'left') {
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(s, x, y);
+}
+function spaced(s, x, y, font, color, spacing, align = 'left') {
+  ctx.save(); ctx.letterSpacing = `${spacing}px`; text(s, x, y, font, color, align); ctx.restore();
+}
+function fitText(s, font, maxW) {
+  ctx.font = font;
+  if (ctx.measureText(s).width <= maxW) return s;
+  let t = s;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+function pill(s, x, y, font, fg, bg, align = 'left', h = 20) {
+  ctx.font = font;
+  const w = ctx.measureText(s).width + h;
+  const left = align === 'right' ? x - w : x;
+  rrect(left, y - h / 2, w, h, h / 2); ctx.fillStyle = bg; ctx.fill();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = fg; ctx.fillText(s, left + h / 2, y + 1);
+  ctx.textBaseline = 'alphabetic';
+}
+function line(x0, y0, x1, y1) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+function disc(x, y, r, color) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = color; ctx.fill(); }
+// A soft light: a radial fade from a colour to nothing, added on the dark theme and laid over, fainter, on the light one.
+function glow(x, y, r, colA, a) {
+  const k = Math.min(1, a) * (dark ? 1 : 0.55);
+  if (k <= 0.004) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, colA(1)); g.addColorStop(1, colA(0));
+  ctx.save();
+  ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+  ctx.globalAlpha *= k;
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function hexPath(x, y, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + (i * Math.PI) / 3; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+  ctx.closePath();
+}
+// A point on the curve from a to b whose middle is pulled up by bend units (down when negative).
+function bez(a, b, t, bend) {
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - bend, u = 1 - t;
+  return { x: u * u * a.x + 2 * u * t * mx + t * t * b.x, y: u * u * a.y + 2 * u * t * my + t * t * b.y };
+}
+// A gear: eight teeth as a thick dashed ring around a disc with a hole; turning slides the dashes round.
+function gear(x, y, r, turn, color) {
+  const seg = (TAU * r * 0.78) / 8;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r * 0.78, 0, TAU);
+  ctx.setLineDash([seg * 0.55, seg * 0.45]); ctx.lineDashOffset = -turn * r;
+  ctx.lineWidth = r * 0.44; ctx.strokeStyle = color; ctx.stroke();
+  ctx.setLineDash([]);
+  disc(x, y, r * 0.62, color);
+  disc(x, y, r * 0.24, P['surface-3']);
+  ctx.restore();
+}
+// A fan: five blades in a round housing, turning faster with the pod's load.
+function fan(x, y, r, turn, on) {
+  disc(x, y, r, P.bg);
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(turn);
+  ctx.fillStyle = rgba(P['ink-muted'], on ? 0.8 : 0.35);
+  for (let k = 0; k < 5; k++) { ctx.rotate(TAU / 5); ctx.beginPath(); ctx.ellipse(r * 0.46, 0, r * 0.42, r * 0.16, 0.55, 0, TAU); ctx.fill(); }
+  ctx.restore();
+  disc(x, y, r * 0.2, P['surface-3']);
+}
+
+// ===== Layout, in world units: a pixel at zoom 1, y downwards =====
+// The calls rise from the agent runtime (bottom) through the gateway's arch to the Endpoint Picker's dial, which sends
+// each up one lane to a pod. The pods stand on an arc around the dial, so every lane is a straight spoke.
+const HUB = { x: 0, y: 0, r: 62 };
+const RIM = HUB.r + 12;
+const GATE = { y: 150, half: 150 };
+const GATE_PT = { x: 0, y: GATE.y + 26 };
+// The runtime: 30 hexagon sockets in three rows of ten, the middle row shifted half a step like a honeycomb.
+const DAIS = { y: 340, px: 66, py: 60, hex: 21, ring: 29, x0: -372, x1: 372, y0: 238, y1: 474 };
+const POD = { w: 260, h: 220 };
+// A pod's KV tank: 12 × 23 cells, so a cell is 1/276 of its KV cache, one 16-token block in the thesis setup (4,384 tokens).
+const TANK = { x: 14, y: 46, w: 96, h: 160, cols: 12, rows: 23 };
+const CELLS = TANK.cols * TANK.rows;
+const BAYS = 8;
+const LEFT = { x0: -680, y0: -90, x1: -392, y1: 380 }, RIGHT = { x0: 392, y0: -90, x1: 680, y1: 380 };
+// The run tracker's tubes hold 8 pods' worth each, unit units per pod.
+const TRACK = { x: [-648, -602], top: 64, unit: 32, w: 30, rulerX: -560 };
+const REDIS = { x: -458, y: 118 };
+const RADAR = { x: 470, y: 34, r: 44 };
+const KEDA = { x: 470, y: 238, r: 46 };
+// The gauge's hub sits this far above the highest card, so its value plate clears the pods zone and the red overflow
+// mark, which rises at most 34 units above a card (a demand of 1.5 tanks).
+const GAUGE = { r: 130, below: 130 };
+// The pods zone reaches this far above the cards, to hold that mark.
+const PODS_TOP = 50;
+const PRESS_MAX = 3;
+// The arc: 300 units from the dial at least, pods 60 degrees apart at most and all within 120 degrees, so no lane is
+// flatter than 30 degrees and the side boards stay clear; a larger arc when the cards need more than 300 units each.
+const POD_R = 300, POD_PITCH = 300, POD_STEP = Math.PI / 3, POD_SPREAD = (2 * Math.PI) / 3;
+function arcFor(n) {
+  const step = n > 1 ? Math.min(POD_STEP, POD_SPREAD / (n - 1)) : 0;
+  const R = n > 1 ? Math.max(POD_R, POD_PITCH / (2 * Math.sin(step / 2))) : POD_R;
+  // The gauge sits above the highest card, the one nearest the middle.
+  const nearest = n % 2 ? 0 : step / 2;
+  return { n, step, R, gaugeY: -R * Math.cos(nearest) - POD.h - GAUGE.below };
+}
+let arc = arcFor(sim.pods.length);
+let gaugeY = arc.gaugeY;
+// Brings the arc to the current pod count; true when it changed.
+function syncArc() {
+  if (sim.pods.length === arc.n) return false;
+  arc = arcFor(sim.pods.length);
+  return true;
+}
+const lanePoint = (theta, r) => ({ x: HUB.x + Math.sin(theta) * r, y: HUB.y - Math.cos(theta) * r });
+const laneEnd = R => R - 6;
+const queueR = (R, k) => Math.max(RIM + 20, R - 30 - k * 22);
+const box = (x0, y0, x1, y1) => ({ x0, y0, x1, y1 });
+const union = (...bs) => bs.reduce((u, b) => box(Math.min(u.x0, b.x0), Math.min(u.y0, b.y0), Math.max(u.x1, b.x1), Math.max(u.y1, b.y1)));
+// Thirty sockets, filled from the middle of the row nearest the gateway outwards.
+const SLOT_COLS = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
+const SLOTS = [];
+for (const row of [-1, 0, 1]) for (const c of SLOT_COLS) SLOTS.push({ x: (c - 4.5 + (row === 0 ? 0.25 : -0.25)) * DAIS.px, y: DAIS.y + row * DAIS.py });
+
+// ===== Pods =====
+const podVis = new Map();
+let runsById = new Map();
+const anchorOf = v => { const a = lanePoint(v.theta, v.R); a.y += v.leaving * 40; return a; };
+const podCenter = v => { const a = anchorOf(v); return { x: a.x, y: a.y - POD.h / 2 }; };
+// The top of what fills the tank, where the least recently used contexts sit.
+function tankTop(v) {
+  const a = anchorOf(v);
+  const filled = Math.ceil(v.cells.length / TANK.cols) * (TANK.h / TANK.rows);
+  return { x: a.x - POD.w / 2 + TANK.x + TANK.w / 2, y: a.y - POD.h + TANK.y + TANK.h - filled };
+}
+// What fills a pod's tank, bottom up: one colour per cell, from sim.kvParts.
+function fillCells(v, p) {
+  const parts = p.state === 'ready' || p.state === 'draining' ? sim.kvParts(p) : [];
+  const per = sim.cfg.kvTokens / CELLS;
+  const out = [];
+  for (const part of parts) {
+    if (out.length >= CELLS) break;
+    const run = runsById.get(part.runId);
+    const color = run ? AP.runColor(run, part.live ? 1 : 0.4) : part.live ? P['ink-muted'] : rgba(P['line-strong'], 0.5);
+    const count = Math.max(1, Math.round(part.tokens / per));
+    for (let k = 0; k < count && out.length < CELLS; k++) out.push(color);
+  }
+  v.cells = out;
+}
+function syncPods(dt) {
+  if (syncArc() && !userMoved) focus(currentView);
+  const n = sim.pods.length;
+  sim.pods.forEach((p, i) => {
+    const theta = (i - (n - 1) / 2) * arc.step;
+    let v = podVis.get(p.id);
+    if (!v) {
+      v = { theta, R: arc.R, born: p.initial ? 1 : 0, leaving: 0, flash: 0, flashToken: 'accent', evict: 0, laneGlow: 0, laneToken: 'accent',
+        barrier: 0, fan: 0, smokeAt: 0, cells: [], cellsAt: -1 };
+      podVis.set(p.id, v);
+    }
+    v.tTheta = theta; v.tR = arc.R; v.pod = p;
+  });
+  gaugeY += (arc.gaugeY - gaugeY) * Math.min(1, dt * 3);
+  for (const [id, v] of podVis) {
+    const p = sim.podById(id);
+    if (!p) {
+      v.leaving += dt;
+      if (v.leaving > 1) podVis.delete(id);
+      continue;
+    }
+    v.theta += (v.tTheta - v.theta) * Math.min(1, dt * 3);
+    v.R += (v.tR - v.R) * Math.min(1, dt * 3);
+    v.born = Math.min(1, v.born + dt * 2);
+    v.flash = Math.max(0, v.flash - dt * 2.5);
+    v.evict = Math.max(0, v.evict - dt * 1.6);
+    v.laneGlow = Math.max(0, v.laneGlow - dt * 1.5);
+    // The barrier on its lane closes while the pod drains or fails: no new calls.
+    const closed = p.state === 'draining' || p.state === 'failed' ? 1 : 0;
+    v.barrier += (closed - v.barrier) * Math.min(1, dt * 4);
+    const busy = p.state === 'ready' || p.state === 'draining' ? p.running.length / Math.max(1, sim.cfg.maxSeqs) : 0;
+    v.fan += dt * (p.state === 'failed' ? 0 : 1.5 + 14 * busy);
+    if (p.state === 'failed' && wallNow - v.smokeAt > 0.15) { v.smokeAt = wallNow; const c = podCenter(v); puff(c.x + (Math.random() - 0.5) * 120, c.y); }
+    if (wallNow - v.cellsAt > 0.12) { v.cellsAt = wallNow; fillCells(v, p); }
+  }
+}
+
+// ===== Runs =====
+const runVis = new Map();
+const freeSlots = [];
+let nextSlot = 0;
+function syncRuns(dt) {
+  const seen = new Set();
+  for (const r of sim.runs) {
+    seen.add(r.id);
+    let v = runVis.get(r.id);
+    if (!v) {
+      const slot = freeSlots.length ? freeSlots.shift() : nextSlot < SLOTS.length ? nextSlot++ : -1;
+      if (slot < 0) continue;
+      v = { slot, grow: 0, fill: 0, gear: 0 };
+      runVis.set(r.id, v);
+    }
+    v.grow = Math.min(1, v.grow + dt * 3);
+    v.fill += (clamp01(r.latestPrompt / Math.max(1, sim.maxPrompt())) - v.fill) * Math.min(1, dt * 5);
+    v.gear += dt * 3;
+  }
+  for (const [id, v] of runVis) {
+    if (seen.has(id)) continue;
+    freeSlots.push(v.slot); freeSlots.sort((a, b) => a - b);
+    runVis.delete(id);
+  }
+}
+function runHome(r) {
+  const v = runVis.get(r.id);
+  return v ? { x: SLOTS[v.slot].x, y: SLOTS[v.slot].y } : { x: 0, y: DAIS.y };
+}
+
+// ===== Calls: capsules with a trail, longer when they carry more context, and the light of each reply =====
+const callVis = new Map();
+const activeCall = new Map();
+// Trail points are kept at least this far apart, and this many of them.
+const TRAIL = { gap: 5, n: 10 };
+function callTarget(c, v, orders) {
+  const pv = c.pod !== null ? podVis.get(c.pod) : null;
+  const prog = clamp01((sim.t - c.phaseStart) / Math.max(1e-6, c.phaseEnd - c.phaseStart));
+  const home = runHome(c.run);
+  switch (c.phase) {
+    case 'toGateway':
+      if (prog < 0.7) return { at: bez(home, GATE_PT, prog / 0.7, 70), show: 'packet' };
+      return { at: { x: GATE_PT.x + (HUB.x - GATE_PT.x) * ((prog - 0.7) / 0.3), y: GATE_PT.y + (HUB.y - GATE_PT.y) * ((prog - 0.7) / 0.3) }, show: 'packet' };
+    case 'hold': case 'retryWait': {
+      const a = wallNow * 2.4 + c.id;
+      return { at: { x: HUB.x + Math.cos(a) * 88, y: HUB.y + Math.sin(a) * 88 }, show: 'packet', settle: true };
+    }
+    case 'toPod': {
+      if (!pv) return { at: { x: HUB.x, y: HUB.y }, show: 'packet' };
+      const tail = queueR(pv.R, (orders.get(c.pod) || []).length);
+      const face = lanePoint(pv.theta, 1);
+      if (prog < 0.15) {
+        const rim = lanePoint(pv.theta, RIM);
+        return { at: { x: HUB.x + (rim.x - HUB.x) * (prog / 0.15), y: HUB.y + (rim.y - HUB.y) * (prog / 0.15) }, show: 'packet', face };
+      }
+      return { at: lanePoint(pv.theta, RIM + (tail - RIM) * ((prog - 0.15) / 0.85)), show: 'packet', face };
+    }
+    case 'waiting': {
+      if (!pv) return { at: { x: HUB.x, y: HUB.y }, show: 'packet' };
+      const i = Math.max(0, (orders.get(c.pod) || []).indexOf(c));
+      return { at: lanePoint(pv.theta, queueR(pv.R, i)), show: 'packet', face: lanePoint(pv.theta, 1), settle: true };
+    }
+    case 'running': return { at: { x: v.x, y: v.y }, show: 'none' };
+    case 'toAgent':
+      if (pv && prog < 0.5) return { at: lanePoint(pv.theta, laneEnd(pv.R) - (laneEnd(pv.R) - RIM) * (prog / 0.5)), show: 'reply' };
+      return { at: bez(HUB, home, Math.max(0, (prog - 0.5) / 0.5), -60), show: 'reply' };
+    default: return { at: home, show: 'none' };
+  }
+}
+function syncCalls(dt) {
+  activeCall.clear();
+  const orders = new Map(sim.pods.map(p => [p.id, sim.waitingOrder(p)]));
+  const seen = new Set();
+  for (const c of sim.calls) {
+    if (c.phase === 'gone') continue;
+    if (!activeCall.has(c.run.id) || c.index < activeCall.get(c.run.id).index) activeCall.set(c.run.id, c);
+    seen.add(c.id);
+    let v = callVis.get(c.id);
+    if (!v) {
+      const home = runHome(c.run);
+      v = { x: home.x, y: home.y, dx: 0, dy: -1, trail: [], show: 'packet', len: 14 + 26 * Math.min(1, c.prompt / Math.max(1, sim.maxPrompt())) };
+      callVis.set(c.id, v);
+    }
+    const t = callTarget(c, v, orders);
+    const px = v.x, py = v.y;
+    if (t.settle) { v.x += (t.at.x - v.x) * Math.min(1, dt * 8); v.y += (t.at.y - v.y) * Math.min(1, dt * 8); } else { v.x = t.at.x; v.y = t.at.y; }
+    const moved = Math.hypot(v.x - px, v.y - py);
+    if (t.face) { const f = Math.hypot(t.face.x - HUB.x, t.face.y - HUB.y); v.dx = (t.face.x - HUB.x) / f; v.dy = (t.face.y - HUB.y) / f; }
+    else if (moved > 0.05) { v.dx = (v.x - px) / moved; v.dy = (v.y - py) / moved; }
+    if (t.show !== v.show) v.trail.length = 0;
+    v.show = t.show; v.call = c;
+    // The trail grows while the call moves and shrinks once it stops.
+    const last = v.trail[v.trail.length - 1];
+    if (t.show !== 'none' && moved > 0.5) {
+      if (!last || Math.hypot(v.x - last.x, v.y - last.y) > TRAIL.gap) { v.trail.push({ x: v.x, y: v.y }); if (v.trail.length > TRAIL.n) v.trail.shift(); }
+    } else if (v.trail.length) v.trail.shift();
+  }
+  for (const id of callVis.keys()) if (!seen.has(id)) callVis.delete(id);
+}
+
+// ===== Effects =====
+const fx = [];
+const FX_MAX = 260;
+function addFx(f) { if (fx.length < FX_MAX) fx.push(f); }
+function ring(x, y, token, size, life) { addFx({ kind: 'ring', x, y, token, size, life, max: life }); }
+function spark(x, y, token) { addFx({ kind: 'spark', x, y, token, vx: (Math.random() - 0.5) * 160, vy: -(120 + Math.random() * 140), life: 1, max: 1 }); }
+function puff(x, y) { addFx({ kind: 'puff', x, y, vx: (Math.random() - 0.5) * 20, vy: -50, life: 1.6, max: 1.6 }); }
+// A light that waits delay seconds, then flies from one point to another in one second.
+function pulse(from, to, token, delay, bend) { addFx({ kind: 'pulse', from, to, token, delay, bend, life: 1 + delay, max: 1 + delay }); }
+function syncFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt;
+    if (f.kind === 'spark') { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 420 * dt; }
+    else if (f.kind === 'puff') { f.x += f.vx * dt; f.y += f.vy * dt; }
+    if (f.life <= 0) fx.splice(i, 1);
+  }
+}
+
+// ===== Sim events =====
+const pointer = { a: 0, target: 0, token: 'accent' };
+let tag = { age: 99, run: null };
+const board = { hR: 0, hC: 0, redis: 0, prom: 0, sweep: 0, want: 0, ready: 0, wheel: 0, spin: 0, keda: 0, gauge: 0 };
+sim.on((type, d) => {
+  if (type === 'route') {
+    const rs = AP.reason(d.reason);
+    const v = podVis.get(d.pod.id);
+    if (v) { pointer.target = v.theta; v.laneGlow = 1; v.laneToken = rs.token; }
+    pointer.token = rs.token;
+    tag = { age: 0, run: d.call.run, step: d.call.step, pod: d.pod.name, why: rs.text, token: rs.token };
+  } else if (type === 'start') {
+    const v = podVis.get(d.pod.id);
+    if (v) { v.flash = 1; v.flashToken = d.hit / d.call.prompt >= 0.5 ? 'accent' : 'draining'; }
+  } else if (type === 'done') {
+    board.redis = 1;
+  } else if (type === 'evict') {
+    const v = podVis.get(d.pod.id);
+    if (v) {
+      v.evict = 1;
+      const t = tankTop(v);
+      for (let i = 0; i < 4; i++) spark(t.x + (Math.random() - 0.5) * TANK.w, t.y, 'failed');
+    }
+  } else if (type === 'pod') {
+    const v = podVis.get(d.pod.id);
+    if (v && d.what === 'killed') { const c = podCenter(v); ring(c.x, c.y, 'failed', 150, 1.2); for (let i = 0; i < 12; i++) spark(c.x, c.y, 'failed'); }
+    if (v && d.what === 'ready') { const c = podCenter(v); ring(c.x, c.y, 'ready', 140, 1.1); }
+  } else if (type === 'scale') {
+    board.keda = 1; board.spin = 1;
+    for (const v of podVis.values()) pulse({ x: KEDA.x, y: KEDA.y }, podCenter(v), 'starting', 0, 120);
+  } else if (type === 'runEnd' || type === 'runFail') {
+    const v = runVis.get(d.run.id);
+    if (v) ring(SLOTS[v.slot].x, SLOTS[v.slot].y, type === 'runEnd' ? 'ready' : 'failed', 34, 0.9);
+  }
+});
+
+// Each scrape: Prometheus reads every pod and the run tracker, 0.06 s apart so the readings sweep across.
+let lastScrapeSeen = -1;
+function syncScrape() {
+  if (sim.lastScrape === lastScrapeSeen) return;
+  lastScrapeSeen = sim.lastScrape;
+  board.prom = 1;
+  let i = 0;
+  for (const [id, v] of podVis) {
+    const p = sim.podById(id);
+    if (p && p.state !== 'starting') pulse(tankTop(v), { x: RADAR.x, y: RADAR.y }, 'draining', 0.06 * i++, 90);
+  }
+  pulse({ x: TRACK.x[0], y: TRACK.top }, { x: RADAR.x, y: RADAR.y }, 'draining', 0.06 * i, 140);
+}
+
+function syncBoards(dt) {
+  const s = sim.gauges(), cfg = sim.cfg;
+  const k = Math.min(1, dt * 4);
+  board.hR += (Math.min(8.3, s.remaining / cfg.remainingTarget) - board.hR) * k;
+  board.hC += (Math.min(8.3, s.context / (cfg.kvTokens * cfg.pressureTarget)) - board.hC) * k;
+  board.redis = Math.max(0, board.redis - dt * 2);
+  board.prom = Math.max(0, board.prom - dt * 2);
+  board.sweep += dt * (0.9 + board.prom * 4);
+  board.want += (Math.min(s.desired, cfg.maxPods) - board.want) * Math.min(1, dt * 5);
+  board.ready += (Math.min(s.ready, cfg.maxPods) - board.ready) * Math.min(1, dt * 5);
+  board.spin = Math.max(0, board.spin - dt * 0.7);
+  board.wheel += dt * (cfg.autoscaler === 'off' ? 0 : 0.3 + board.spin * 6);
+  board.keda = Math.max(0, board.keda - dt);
+  board.gauge += (Math.min(PRESS_MAX, s.pressure) - board.gauge) * k;
+  let d = pointer.target - pointer.a;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  pointer.a += d * Math.min(1, dt * 10);
+  tag.age += dt;
+  return s;
+}
+
+// ===== Drawing: the floor and the zones =====
+function drawFloor() {
+  const a = toWorld(0, 0), b = toWorld(W, H);
+  // Grid lines 40 units apart, 80 when zoomed far out so they don't merge into a wash.
+  const step = cam.s < 0.3 ? 80 : 40;
+  ctx.lineWidth = 1 / cam.s;
+  ctx.beginPath();
+  for (let x = Math.ceil(a.x / step) * step; x <= b.x; x += step) { ctx.moveTo(x, a.y); ctx.lineTo(x, b.y); }
+  for (let y = Math.ceil(a.y / step) * step; y <= b.y; y += step) { ctx.moveTo(a.x, y); ctx.lineTo(b.x, y); }
+  ctx.strokeStyle = rgba(P.line, dark ? 0.45 : 0.6); ctx.stroke();
+  ctx.beginPath();
+  for (let x = Math.ceil(a.x / 200) * 200; x <= b.x; x += 200) for (let y = Math.ceil(a.y / 200) * 200; y <= b.y; y += 200) {
+    ctx.moveTo(x - 6, y); ctx.lineTo(x + 6, y); ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6);
+  }
+  ctx.lineWidth = 1.5 / cam.s; ctx.strokeStyle = rgba(P['line-strong'], 0.4); ctx.stroke();
+  // The edges of the stage fade into the background.
+  screenTransform();
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  g.addColorStop(0, rgba(P.bg, 0)); g.addColorStop(1, rgba(P.bg, 0.85));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  worldTransform();
+}
+function zone(b, label, caption) {
+  rrect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0, 18);
+  ctx.setLineDash([10, 8]); ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(P['line-strong'], 0.55); ctx.stroke(); ctx.setLineDash([]);
+  spaced(label, b.x0 + 18, b.y0 + 32, `600 18px ${SANS}`, P.ink, 4);
+  text(caption, b.x0 + 18, b.y0 + 50, `500 11.5px ${SANS}`, P['ink-muted']);
+}
+function podsBox() {
+  let b = null;
+  const n = sim.pods.length;
+  for (let i = 0; i < n; i++) {
+    const a = lanePoint((i - (n - 1) / 2) * arc.step, arc.R);
+    const pb = box(a.x - POD.w / 2 - 24, a.y - POD.h - PODS_TOP, a.x + POD.w / 2 + 24, a.y + 60);
+    b = b ? union(b, pb) : pb;
+  }
+  return b || box(-200, -560, 200, -200);
+}
+// The pods zone's name sits above its right end, clear of the gauge's housing (14 units wider than its radius).
+const PODS_LABEL_W = 140;
+function podsLabelBox() {
+  const b = podsBox();
+  const x0 = Math.max(b.x1 - PODS_LABEL_W, GAUGE.r + 14 + 16);
+  return box(x0, b.y0 - 72, x0 + PODS_LABEL_W, b.y0 - 4);
+}
+function drawZones() {
+  zone(LEFT, 'RUN STATE', 'the run tracker and the run history');
+  zone(RIGHT, 'AUTOSCALING', 'Prometheus reads, KEDA sets the pod count');
+  const b = podsBox(), lb = podsLabelBox();
+  rrect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0, 22);
+  ctx.setLineDash([10, 8]); ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(P['line-strong'], 0.55); ctx.stroke(); ctx.setLineDash([]);
+  const per = sim.cfg.kvTokens / CELLS;
+  spaced('vLLM PODS', lb.x1, lb.y0 + 24, `600 18px ${SANS}`, P.ink, 4, 'right');
+  text('tank = its KV cache', lb.x1, lb.y0 + 44, `500 11.5px ${SANS}`, P['ink-muted'], 'right');
+  text(per < 20 ? `1 cell ≈ ${Math.round(per)} tokens, a block` : `1 cell ≈ ${fmtK(per)} tokens`, lb.x1, lb.y0 + 60, `500 11.5px ${SANS}`, P['ink-muted'], 'right');
+}
+
+// ===== Drawing: lanes, the gateway and the Endpoint Picker's dial =====
+function drawLanes() {
+  for (const v of podVis.values()) {
+    const a = lanePoint(v.theta, RIM), b = lanePoint(v.theta, laneEnd(v.R));
+    ctx.save();
+    ctx.globalAlpha = 1 - Math.min(1, v.leaving);
+    ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    ctx.lineWidth = 26; ctx.strokeStyle = rgba(P['surface-3'], 0.9); ctx.stroke();
+    // Rungs moving outwards, the way the calls go.
+    ctx.setLineDash([5, 13]); ctx.lineDashOffset = -wallNow * 26;
+    ctx.lineWidth = 10; ctx.strokeStyle = rgba(P['line-strong'], 0.35); ctx.stroke();
+    ctx.setLineDash([]);
+    // The lane the picker just chose lights up in the colour of its reason.
+    if (v.laneGlow > 0.01) {
+      ctx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+      ctx.lineWidth = 34; ctx.strokeStyle = rgba(P[v.laneToken], 0.18 * v.laneGlow); ctx.stroke();
+      ctx.lineWidth = 4; ctx.strokeStyle = rgba(P[v.laneToken], 0.9 * v.laneGlow); ctx.stroke();
+    }
+    ctx.restore();
+    if (v.barrier > 0.02) drawBarrier(v);
+  }
+}
+// A striped boom across the lane's end; raised along the lane when open, across it when closed.
+function drawBarrier(v) {
+  const at = lanePoint(v.theta, v.R - 22);
+  const ux = Math.sin(v.theta), uy = -Math.cos(v.theta);
+  const post = { x: at.x + uy * -22, y: at.y + ux * 22 };
+  const open = Math.atan2(-uy, -ux), closed = Math.atan2(-ux, uy);
+  let d = closed - open;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  ctx.save();
+  ctx.globalAlpha = 1 - Math.min(1, v.leaving);
+  ctx.translate(post.x, post.y); ctx.rotate(open + d * v.barrier);
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? P.ink : P.draining; ctx.fillRect(i * 8, -3, 8, 6); }
+  disc(0, 0, 5, P.ink);
+  ctx.restore();
+}
+function drawGate() {
+  const cfg = sim.cfg;
+  for (const side of [-1, 1]) {
+    const px = side * GATE.half;
+    rrect(px - 11, GATE.y - 40, 22, 94, 5); ctx.fillStyle = P['surface-3']; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+    ctx.fillStyle = P.accent; ctx.fillRect(px - 1.5, GATE.y - 4, 3, 50);
+    glow(px, GATE.y + 22, 28, tokenA('accent'), 0.35);
+  }
+  rrect(-200, GATE.y - 58, 400, 46, 10); ctx.fillStyle = P.surface; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  spaced('GATEWAY · ENDPOINT PICKER', 0, GATE.y - 38, `600 13px ${SANS}`, P.ink, 3, 'center');
+  const modes = { 'round-robin': 'Round-robin: each call to the next pod in turn', default: 'Default picker: prefix 3 · queue 2 · KV 2',
+    plugin: `Thesis plugin: ${[['affinity', 'affinity'], ['overloadGuard', 'overload guard'], ['parallelSpill', 'parallel spill'], ['leastContext', 'least context'], ['priority', 'priority'], ['warmup', 'warm-up']].filter(([k]) => cfg[k]).map(r => r[1]).join(' · ') || 'no rules on'}` };
+  const font = `500 11.5px ${SANS}`;
+  text(fitText(modes[cfg.routing], font, 372), 0, GATE.y - 20, font, P['accent-ink'], 'center');
+}
+function drawHub() {
+  const { x, y, r } = HUB;
+  disc(x, y, r, P['surface-3']);
+  ctx.lineWidth = 2; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  ctx.beginPath();
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * TAU, r0 = i % 3 === 0 ? r - 12 : r - 7;
+    ctx.moveTo(x + Math.cos(a) * r0, y + Math.sin(a) * r0); ctx.lineTo(x + Math.cos(a) * (r - 3), y + Math.sin(a) * (r - 3));
+  }
+  ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(P['line-strong'], 0.8); ctx.stroke();
+  for (const v of podVis.values()) { const n = lanePoint(v.theta, r + 6); disc(n.x, n.y, 3.5, rgba(P.accent, 0.8)); }
+  disc(x, y, r - 16, P['surface-2']);
+  // The pointer turns to the lane of the latest decision, in the colour of its reason.
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(pointer.a);
+  glow(0, -(r - 14), 24, tokenA(pointer.token), 0.8);
+  ctx.beginPath();
+  ctx.moveTo(0, -(r - 10)); ctx.lineTo(9, -(r - 30)); ctx.lineTo(3.5, -(r - 30)); ctx.lineTo(3.5, 10);
+  ctx.lineTo(-3.5, 10); ctx.lineTo(-3.5, -(r - 30)); ctx.lineTo(-9, -(r - 30)); ctx.closePath();
+  ctx.fillStyle = P[pointer.token]; ctx.fill();
+  ctx.restore();
+  disc(x, y, 7, P.ink);
+  spaced('ENDPOINT PICKER', x - r - 22, y - 6, `600 12px ${SANS}`, P.ink, 2, 'right');
+  text('turns to the pod it chose', x - r - 22, y + 11, `500 11.5px ${SANS}`, P['ink-muted'], 'right');
+}
+// The latest decision, beside the dial: which run's call went where, and why. Two lines, so it ends before the
+// autoscaling zone.
+function drawTag() {
+  if (!tag.run || tag.age > 2) return;
+  ctx.save();
+  ctx.globalAlpha = tag.age < 1.4 ? 1 : Math.max(0, 1 - (tag.age - 1.4) / 0.6);
+  const x = HUB.r + 34, y = -21, h = 44;
+  const t1 = `${tag.run.name} · step ${tag.step} → ${tag.pod}`;
+  const f1 = `500 12px ${MONO}`, f2 = `600 12px ${SANS}`;
+  ctx.font = f1; const w1 = ctx.measureText(t1).width;
+  ctx.font = f2; const w2 = ctx.measureText(tag.why).width;
+  // 26 units for the run's dot on the left, 12 of margin on the right.
+  const w = Math.min(RIGHT.x0 - 12 - x, 38 + Math.max(w1, w2));
+  rrect(x, y, w, h, 12);
+  ctx.fillStyle = rgba(P.surface, 0.94); ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(P[tag.token], 0.7); ctx.stroke();
+  disc(x + 14, y + 15, 4.5, AP.runColor(tag.run));
+  text(fitText(t1, f1, w - 38), x + 26, y + 19, f1, P.ink);
+  text(fitText(tag.why, f2, w - 38), x + 26, y + 36, f2, P[tag.token]);
+  ctx.restore();
+}
+
+// ===== Drawing: the agent runtime and its runs =====
+function drawRuntime(s) {
+  const g = ctx.createLinearGradient(0, DAIS.y0, 0, DAIS.y1);
+  g.addColorStop(0, P['surface-2']); g.addColorStop(1, P.surface);
+  rrect(DAIS.x0, DAIS.y0, DAIS.x1 - DAIS.x0, DAIS.y1 - DAIS.y0, 18); ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P.line; ctx.stroke();
+  for (const sl of SLOTS) {
+    hexPath(sl.x, sl.y, DAIS.hex + 4); ctx.fillStyle = P['surface-3']; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = P.line; ctx.stroke();
+  }
+  rrect(DAIS.x0 + 10, DAIS.y1 - 34, DAIS.x1 - DAIS.x0 - 20, 26, 8); ctx.fillStyle = P['surface-3']; ctx.fill();
+  spaced('AGENT RUNTIME', DAIS.x0 + 22, DAIS.y1 - 16, `600 13px ${SANS}`, P.ink, 3);
+  const tools = sim.runs.filter(r => r.state === 'tool').length;
+  const over = Math.max(0, s.live - SLOTS.length);
+  text(`${s.live} live runs · ${tools} running a tool${over ? ` · ${over} more not shown` : ''}`, DAIS.x1 - 22, DAIS.y1 - 16, `500 11.5px ${MONO}`, P['ink-muted'], 'right');
+  text('One hexagon per agent task. It calls the LLM, runs a tool, calls again.', 0, DAIS.y1 + 28, `500 12.5px ${SANS}`, P['ink-muted'], 'center');
+}
+function drawRuns() {
+  const inspected = api.inspected();
+  for (const r of sim.runs) {
+    const v = runVis.get(r.id);
+    if (!v) continue;
+    const sl = SLOTS[v.slot];
+    const ended = r.state === 'done' || r.state === 'failed';
+    const k = ended ? clamp01((sim.t - r.endT) / C.keepRuns) : 0;
+    let y = sl.y, scale = 0.2 + 0.8 * ease(v.grow);
+    ctx.save();
+    // Done: it rises and fades. Failed: it turns red and shrinks.
+    if (r.state === 'done') { y -= ease(Math.min(1, k * 2)) * 26; ctx.globalAlpha = 1 - k; }
+    if (r.state === 'failed') { scale *= 1 - 0.45 * k; ctx.globalAlpha = 1 - 0.6 * k; }
+    const col = r.state === 'failed' ? tokenA('failed') : runA(r);
+    const R = DAIS.hex * scale;
+    if (r.state === 'call') glow(sl.x, y, 50, col, 0.3 + 0.2 * Math.sin(wallNow * 7 + r.id));
+    if (r.state === 'done') glow(sl.x, y, 44, tokenA('ready'), 0.5 * (1 - k));
+    hexPath(sl.x, y, R); ctx.fillStyle = P.bg; ctx.fill();
+    ctx.lineWidth = 2.2; ctx.strokeStyle = col(1); ctx.stroke();
+    // Its context: the inner hexagon's area grows with the prompt the run sends.
+    hexPath(sl.x, y, R * (0.25 + 0.65 * Math.sqrt(v.fill))); ctx.fillStyle = col(0.85); ctx.fill();
+    if (r.state === 'tool') gear(sl.x + R * 0.95, y - R * 0.95, 8, v.gear, P.ink);
+    if (!ended) {
+      // One dot per expected step, lit when done, blinking while its call is out.
+      const n = Math.min(24, Math.max(r.expected, r.step));
+      const done = r.state === 'call' ? r.step - 1 : r.step;
+      for (let i = 0; i < n; i++) {
+        const a = -Math.PI / 2 + (i / n) * TAU;
+        const lit = i < done || (i === done && r.state === 'call' && Math.sin(wallNow * 8) > 0);
+        disc(sl.x + Math.cos(a) * DAIS.ring, y + Math.sin(a) * DAIS.ring, 2.4, lit ? col(1) : rgba(P['line-strong'], 0.5));
+      }
+    }
+    if (r === inspected) {
+      ctx.beginPath(); ctx.arc(sl.x, y, DAIS.ring + 7, 0, TAU);
+      ctx.setLineDash([6, 5]); ctx.lineDashOffset = -wallNow * 12;
+      ctx.lineWidth = 2; ctx.strokeStyle = P.accent; ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+}
+
+// ===== Drawing: pods =====
+function drawPod(v) {
+  const p = v.pod;
+  const a = anchorOf(v);
+  const x0 = a.x - POD.w / 2, y0 = a.y - POD.h;
+  const fresh = sim.isNew(p);
+  const [stText, tok] = STATE[p.state] || STATE.ready;
+  const pillTok = fresh ? 'starting' : tok;
+  ctx.save();
+  ctx.globalAlpha = (1 - Math.min(1, v.leaving)) * v.born;
+  if (p.state === 'failed') { ctx.translate(a.x, a.y); ctx.rotate(-0.05); ctx.translate(-a.x, -a.y); }
+  glow(a.x, a.y - POD.h / 2, POD.w * 0.8, tokenA(tok), p.state === 'ready' ? 0.1 : 0.2);
+  // The chassis.
+  const g = ctx.createLinearGradient(0, y0, 0, a.y);
+  g.addColorStop(0, P['surface-3']); g.addColorStop(1, P['surface-2']);
+  rrect(x0, y0, POD.w, POD.h, 14); ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 1.5;
+  if (p.state === 'starting') ctx.setLineDash([8, 6]);
+  ctx.strokeStyle = p.state === 'ready' ? rgba(P['line-strong'], 0.7) : P[tok]; ctx.stroke();
+  ctx.setLineDash([]);
+  // Cold start: the card fills in blue until the pod is Ready.
+  if (p.state === 'starting') {
+    const k = clamp01((sim.t - p.createdAt) / Math.max(0.1, p.readyAt - p.createdAt));
+    ctx.save(); rrect(x0, y0, POD.w, POD.h, 14); ctx.clip();
+    ctx.fillStyle = rgba(P.starting, 0.16); ctx.fillRect(x0, a.y - POD.h * k, POD.w, POD.h * k);
+    ctx.fillStyle = rgba(P.starting, 0.8); ctx.fillRect(x0, a.y - POD.h * k - 1, POD.w, 2);
+    ctx.restore();
+  }
+  // Its state light: a strip in the state's colour that flashes teal when a call starts on a cached context, amber on a reread.
+  const blink = p.state === 'draining' && Math.sin(wallNow * 6) < 0;
+  rrect(x0 + 4, y0 + 40, 4, POD.h - 54, 2); ctx.fillStyle = blink ? rgba(P[tok], 0.3) : P[tok]; ctx.fill();
+  if (v.flash > 0) { glow(x0 + 6, y0 + POD.h / 2 + 16, 46, tokenA(v.flashToken), v.flash); }
+  ctx.lineWidth = 1; ctx.strokeStyle = P.line; line(x0 + 12, y0 + 34, x0 + POD.w - 12, y0 + 34);
+  drawTank(v, p, x0 + TANK.x, y0 + TANK.y);
+  // The header after the tank, so the red overflow mark rising out of the tank stays behind the pod's name.
+  text(p.name, x0 + 16, y0 + 24, `600 15px ${SANS}`, P.ink);
+  pill(fresh ? 'New' : stText, x0 + POD.w - 12, y0 + 18, `600 11px ${SANS}`, P[`${pillTok}-ink`], P[`${pillTok}-soft`], 'right');
+  const on = p.state !== 'failed' && p.state !== 'starting';
+  fan(x0 + 158, y0 + 68, 20, v.fan, on);
+  fan(x0 + 214, y0 + 68, 20, v.fan + 0.6, on);
+  drawBays(p, x0, y0);
+  // Its numbers, in the right-hand column.
+  const kv = sim.cfg.kvTokens;
+  const demand = sim.demandOn(p) / kv;
+  let lines;
+  if (p.state === 'starting') lines = [['cold start', P['starting-ink']], [`${Math.max(0, Math.ceil(p.readyAt - sim.t))} s to Ready`, P['ink-muted']]];
+  else if (p.state === 'failed') lines = [['lost, with', P['failed-ink']], ['its cache;', P['failed-ink']], ['calls retried', P['ink-muted']]];
+  else lines = [[`${p.running.length}/${sim.cfg.maxSeqs} run · ${p.waiting.length} wait`, P['ink-muted']],
+    [`KV ${Math.round((sim.allocated(p) / kv) * 100)}%`, P['ink-muted']], [`need ${demand.toFixed(2)}×`, demand > 1 ? P.failed : P['ink-muted']]];
+  const font = `500 11px ${MONO}`;
+  lines.forEach(([s, c], i) => text(fitText(s, font, POD.w - 140), x0 + 128, y0 + 176 + i * 16, font, c));
+  ctx.restore();
+}
+function drawTank(v, p, tx, ty) {
+  const cw = TANK.w / TANK.cols, ch = TANK.h / TANK.rows, bottom = ty + TANK.h;
+  rrect(tx - 4, ty - 4, TANK.w + 8, TANK.h + 8, 6); ctx.fillStyle = rgba(P.bg, 0.75); ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = v.evict > 0 ? rgba(P.failed, 0.3 + 0.7 * v.evict) : rgba(P.ink, 0.28); ctx.stroke();
+  const empty = rgba(P.line, dark ? 0.6 : 0.9);
+  for (let i = 0; i < CELLS; i++) {
+    const col = i % TANK.cols, row = (i / TANK.cols) | 0;
+    ctx.fillStyle = i < v.cells.length ? v.cells[i] : empty;
+    ctx.fillRect(tx + col * cw + 0.6, bottom - (row + 1) * ch + 0.6, cw - 1.2, ch - 1.2);
+  }
+  // The glass's highlight.
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.35)';
+  ctx.fillRect(tx + 2, ty + 2, 3, TANK.h - 4);
+  // The demand mark: the context the pod's runs will bring back. Above the tank, in red, they cannot all fit.
+  const demand = p.state === 'ready' || p.state === 'draining' ? sim.demandOn(p) / sim.cfg.kvTokens : 0;
+  if (demand <= 0.01) return;
+  const dy = bottom - Math.min(demand, 1.5) * TANK.h;
+  const token = demand > 1 ? 'failed' : demand > 0.75 ? 'draining' : 'accent-ink';
+  if (demand > 1) {
+    ctx.fillStyle = rgba(P.failed, 0.14); ctx.fillRect(tx - 4, dy, TANK.w + 8, ty - 4 - dy);
+    ctx.setLineDash([4, 3]); ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(P.failed, 0.8);
+    ctx.strokeRect(tx - 4, dy, TANK.w + 8, ty - 4 - dy); ctx.setLineDash([]);
+  }
+  ctx.lineWidth = 2; ctx.strokeStyle = P[token]; line(tx - 9, dy, tx + TANK.w + 9, dy);
+  ctx.fillStyle = P[token];
+  for (const [ex, sx] of [[tx - 9, 1], [tx + TANK.w + 9, -1]]) {
+    ctx.beginPath(); ctx.moveTo(ex, dy - 5); ctx.lineTo(ex + sx * 7, dy); ctx.lineTo(ex, dy + 5); ctx.closePath(); ctx.fill();
+  }
+}
+// The bays: the calls the pod is running, each with its progress, amber rereading the prompt, then teal writing the reply.
+function drawBays(p, x0, y0) {
+  const nb = Math.min(BAYS, sim.cfg.maxSeqs);
+  for (let i = 0; i < nb; i++) {
+    const bx = x0 + 128 + (i % 4) * 30, by = y0 + 100 + ((i / 4) | 0) * 34;
+    rrect(bx, by, 24, 18, 3); ctx.fillStyle = rgba(P.bg, 0.8); ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = P.line; ctx.stroke();
+    ctx.fillStyle = rgba(P.line, 0.9); ctx.fillRect(bx, by + 22, 24, 4);
+    const c = p.state === 'ready' || p.state === 'draining' ? p.running[i] : undefined;
+    if (!c) continue;
+    glow(bx + 12, by + 9, 20, runA(c.run), 0.45);
+    rrect(bx + 2, by + 2, 20, 14, 2); ctx.fillStyle = AP.runColor(c.run); ctx.fill();
+    const total = Math.max(1e-6, c.endT - c.startT);
+    const pre = Math.min(1, (C.prefillBase + (c.prompt - c.cached) / sim.cfg.prefillTps) / total);
+    const done = clamp01((sim.t - c.startT) / total);
+    ctx.fillStyle = P.draining; ctx.fillRect(bx, by + 22, 24 * Math.min(done, pre), 4);
+    if (done > pre) { ctx.fillStyle = P.accent; ctx.fillRect(bx + 24 * pre, by + 22, 24 * (done - pre), 4); }
+  }
+}
+
+// ===== Drawing: calls, the followed run and effects =====
+function drawCalls() {
+  const prio = sim.priorityOn();
+  ctx.lineCap = 'round';
+  for (const v of callVis.values()) {
+    if (v.show === 'none') continue;
+    const c = v.call;
+    const retry = c.phase === 'retryWait';
+    const col = retry ? tokenA('failed') : runA(c.run);
+    for (let i = 1; i < v.trail.length; i++) {
+      ctx.strokeStyle = col((i / v.trail.length) * 0.45);
+      ctx.lineWidth = v.show === 'packet' ? 3 : 2;
+      line(v.trail[i - 1].x, v.trail[i - 1].y, v.trail[i].x, v.trail[i].y);
+    }
+    if (v.show === 'reply') {
+      glow(v.x, v.y, 18, col, 0.8);
+      disc(v.x, v.y, 4.5, col(1));
+      disc(v.x, v.y, 1.8, 'rgba(255,255,255,0.8)');
+      continue;
+    }
+    // With progress priority a waiting call glows brighter the closer its run is to its last step.
+    const g = c.phase === 'waiting' && prio ? 0.1 + 1.2 * Math.min(1, c.step / c.run.expected) : 0.45;
+    const blink = retry ? 0.5 + 0.5 * Math.abs(Math.sin(wallNow * 8)) : 1;
+    glow(v.x, v.y, 16 + 12 * g, col, Math.min(1, g) * blink);
+    const hx = (v.dx * v.len) / 2, hy = (v.dy * v.len) / 2;
+    ctx.lineWidth = 8; ctx.strokeStyle = col(blink); line(v.x - hx, v.y - hy, v.x + hx, v.y + hy);
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(255,255,255,0.55)'; line(v.x - hx * 0.7, v.y - hy * 0.7, v.x + hx * 0.7, v.y + hy * 0.7);
+  }
+  ctx.lineCap = 'butt';
+}
+// The followed run's line from its hexagon to its call.
+function drawTether() {
+  const r = api.inspected();
+  const c = r ? activeCall.get(r.id) : null;
+  const v = c ? callVis.get(c.id) : null;
+  if (!v || v.show === 'none' || !runVis.has(r.id)) return;
+  const a = runHome(r);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y);
+  ctx.quadraticCurveTo((a.x + v.x) / 2, (a.y + v.y) / 2 - 60, v.x, v.y);
+  ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.strokeStyle = AP.runColor(r, 0.9); ctx.stroke(); ctx.setLineDash([]);
+}
+function drawFx() {
+  for (const f of fx) {
+    const k = clamp01(f.life / f.max);
+    if (f.kind === 'ring') {
+      ctx.beginPath(); ctx.arc(f.x, f.y, (0.3 + (1 - k) * 1.7) * f.size, 0, TAU);
+      ctx.lineWidth = 3; ctx.strokeStyle = rgba(P[f.token], k * 0.9); ctx.stroke();
+    } else if (f.kind === 'spark') {
+      ctx.fillStyle = rgba(P[f.token], k); ctx.fillRect(f.x - 2.5, f.y - 2.5, 5, 5);
+    } else if (f.kind === 'puff') {
+      disc(f.x, f.y, 10 + (1 - k) * 24, rgba(P['ink-muted'], k * 0.22));
+    } else {
+      const t = f.max - f.life - f.delay;
+      if (t < 0) continue;
+      const at = bez(f.from, f.to, Math.min(1, t), f.bend);
+      glow(at.x, at.y, 14, tokenA(f.token), 0.9);
+      disc(at.x, at.y, 3, P[f.token]);
+    }
+  }
+}
+
+// ===== Drawing: the run tracker, Redis, Prometheus, KEDA and the pressure gauge =====
+function drawTracker(s) {
+  const cfg = sim.cfg;
+  const px = LEFT.x0 + 18, pw = LEFT.x1 - LEFT.x0 - 36;
+  rrect(px, -30, pw, 66, 12); ctx.fillStyle = P.surface; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P.line; ctx.stroke();
+  spaced('RUN TRACKER', px + 14, -9, `600 14px ${SANS}`, P.ink, 3);
+  text(`${s.remaining} steps left ÷ ${cfg.remainingTarget}`, px + 14, 11, `500 12px ${MONO}`, P['accent-ink']);
+  text(`${fmtK(s.context)} context ÷ ${fmtK(cfg.kvTokens * cfg.pressureTarget)}`, px + 14, 28, `500 12px ${MONO}`, P['failed-ink']);
+  // Two tubes in pods' worth, the numbers KEDA would divide: steps left ÷ target, context ÷ one pod's KV.
+  const bottom = TRACK.top + 8 * TRACK.unit;
+  ctx.lineWidth = 1; ctx.strokeStyle = rgba(P['line-strong'], 0.3);
+  for (let k = 1; k <= 8; k++) line(TRACK.x[0] - TRACK.w / 2 - 4, bottom - k * TRACK.unit, TRACK.rulerX + 6, bottom - k * TRACK.unit);
+  [[board.hR, 'accent', 'steps'], [board.hC, 'failed-ink', 'context']].forEach(([h, token, cap], i) => {
+    const x = TRACK.x[i] - TRACK.w / 2;
+    rrect(x, TRACK.top - 6, TRACK.w, bottom - TRACK.top + 12, TRACK.w / 2); ctx.fillStyle = rgba(P.bg, 0.75); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(P.ink, 0.28); ctx.stroke();
+    const fh = Math.max(2, h * TRACK.unit);
+    const g = ctx.createLinearGradient(0, bottom - fh, 0, bottom);
+    g.addColorStop(0, rgba(P[token], 0.95)); g.addColorStop(1, rgba(P[token], 0.5));
+    rrect(x + 5, bottom - fh, TRACK.w - 10, fh, 6); ctx.fillStyle = g; ctx.fill();
+    glow(TRACK.x[i], bottom - fh, 26, tokenA(token), 0.5);
+    ctx.fillStyle = dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x + 4, TRACK.top, 3, bottom - TRACK.top);
+    text(cap, TRACK.x[i], bottom + 26, `500 11px ${SANS}`, P['ink-muted'], 'center');
+  });
+  for (let k = 1; k <= 8; k++) text(String(k), TRACK.rulerX + 12, bottom - k * TRACK.unit + 4, `500 11px ${MONO}`, P['ink-muted']);
+  text('pods', TRACK.rulerX + 16, bottom + 26, `500 11px ${SANS}`, P['ink-muted'], 'center');
+}
+// Redis: three disks, their bands glowing each time a call's result is written to the run history.
+function drawRedis() {
+  const { x, y } = REDIS, rx = 52, ry = 13, th = 24, gap = 34;
+  glow(x, y + gap, 100, tokenA('failed'), 0.3 * board.redis);
+  for (let i = 2; i >= 0; i--) {
+    const cy = y + i * gap;
+    ctx.beginPath();
+    ctx.moveTo(x - rx, cy); ctx.lineTo(x - rx, cy + th);
+    ctx.ellipse(x, cy + th, rx, ry, 0, Math.PI, 0, true);
+    ctx.lineTo(x + rx, cy);
+    ctx.ellipse(x, cy, rx, ry, 0, 0, Math.PI, false);
+    ctx.closePath();
+    ctx.fillStyle = P['surface-3']; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, cy + th / 2, rx, ry, 0, 0, Math.PI, false);
+    ctx.lineWidth = 4; ctx.strokeStyle = rgba(P.failed, 0.35 + 0.65 * board.redis); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, cy, rx, ry, 0, 0, TAU);
+    ctx.fillStyle = P['surface-2']; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  }
+  spaced('REDIS', x, y + 3 * gap + 44, `600 14px ${SANS}`, P.ink, 3, 'center');
+  text('run history,', x, y + 3 * gap + 62, `500 11.5px ${SANS}`, P['ink-muted'], 'center');
+  text('every step', x, y + 3 * gap + 77, `500 11.5px ${SANS}`, P['ink-muted'], 'center');
+}
+// Prometheus: a radar scope that sweeps faster on each scrape.
+function drawRadar() {
+  const { x, y, r } = RADAR;
+  ctx.beginPath(); ctx.moveTo(x - 16, y + r + 26); ctx.lineTo(x + 16, y + r + 26); ctx.lineTo(x + 5, y + r - 4); ctx.lineTo(x - 5, y + r - 4); ctx.closePath();
+  ctx.fillStyle = P['surface-3']; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  glow(x, y, r * 1.6, tokenA('draining'), 0.5 * board.prom);
+  disc(x, y, r, rgba(P.bg, 0.9));
+  ctx.lineWidth = 2; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  ctx.lineWidth = 1; ctx.strokeStyle = rgba(P.draining, 0.3);
+  for (const k of [0.33, 0.66]) { ctx.beginPath(); ctx.arc(x, y, r * k, 0, TAU); ctx.stroke(); }
+  line(x - r, y, x + r, y); line(x, y - r, x, y + r);
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(board.sweep);
+  const g = ctx.createConicGradient(0, 0, 0);
+  g.addColorStop(0, rgba(P.draining, 0)); g.addColorStop(0.75, rgba(P.draining, 0)); g.addColorStop(1, rgba(P.draining, 0.45));
+  disc(0, 0, r - 1, g);
+  ctx.lineWidth = 2; ctx.strokeStyle = P.draining; line(0, 0, r - 1, 0);
+  ctx.restore();
+  const tx = x + r + 18;
+  spaced('PROMETHEUS', tx, y - 14, `600 14px ${SANS}`, P.ink, 3);
+  text('reads the pods and', tx, y + 6, `500 11.5px ${SANS}`, P['ink-muted']);
+  text(`the tracker every ${sim.cfg.scrape} s`, tx, y + 22, `500 11.5px ${SANS}`, P['ink-muted']);
+}
+// KEDA: a cabinet with a dial, the pods it wants (blue needle) and the pods Ready (green), and a hand-wheel that turns when it scales.
+function drawKeda(s) {
+  const cfg = sim.cfg, { x, y, r } = KEDA;
+  glow(x, y + 30, 130, tokenA('starting'), 0.35 * board.keda);
+  const g = ctx.createLinearGradient(0, y - 64, 0, y + 126);
+  g.addColorStop(0, P['surface-3']); g.addColorStop(1, P['surface-2']);
+  rrect(x - 56, y - 64, 112, 190, 12); ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, r, Math.PI, TAU); ctx.closePath();
+  ctx.fillStyle = P.bg; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = P.line; ctx.stroke();
+  const A = v => Math.PI + (v / Math.max(1, cfg.maxPods)) * Math.PI;
+  ctx.lineWidth = 1.5; ctx.strokeStyle = P['line-strong'];
+  for (let k = 0; k <= cfg.maxPods; k++) {
+    const a = A(k);
+    line(x + Math.cos(a) * (r - 9), y + Math.sin(a) * (r - 9), x + Math.cos(a) * (r - 3), y + Math.sin(a) * (r - 3));
+  }
+  text('0', x - r + 10, y - 4, `500 10px ${MONO}`, P['ink-muted'], 'left');
+  text(String(cfg.maxPods), x + r - 10, y - 4, `500 10px ${MONO}`, P['ink-muted'], 'right');
+  ctx.lineCap = 'round';
+  for (const [val, token] of [[board.want, 'starting'], [board.ready, 'ready']]) {
+    const a = A(val), tip = { x: x + Math.cos(a) * (r - 12), y: y + Math.sin(a) * (r - 12) };
+    glow(tip.x, tip.y, 14, tokenA(token), 0.7);
+    ctx.lineWidth = 3; ctx.strokeStyle = P[token]; line(x, y, tip.x, tip.y);
+  }
+  ctx.lineCap = 'butt';
+  disc(x, y, 5, P.ink);
+  // The hand-wheel.
+  const wy = y + 76;
+  ctx.beginPath(); ctx.arc(x, wy, 24, 0, TAU); ctx.lineWidth = 4; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+  ctx.lineWidth = 2;
+  for (let k = 0; k < 6; k++) { const a = board.wheel + (k * TAU) / 6; line(x, wy, x + Math.cos(a) * 22, wy + Math.sin(a) * 22); }
+  disc(x, wy, 5, P.ink);
+  const signal = { off: 'off: a fixed pod count', cpu: 'on CPU', queue: 'on the queue', remaining: 'on remaining work', pressure: 'on cache pressure' }[cfg.autoscaler];
+  const tx = x + 74, font = `600 12px ${SANS}`;
+  spaced('KEDA', tx, y - 40, `600 16px ${SANS}`, P.ink, 4);
+  text(fitText(signal, font, RIGHT.x1 - tx - 8), tx, y - 18, font, cfg.autoscaler === 'off' ? P['ink-muted'] : P['starting-ink']);
+  text(`wants ${s.desired}`, tx, y + 8, `500 11.5px ${MONO}`, P['starting-ink']);
+  text(`${s.ready} Ready`, tx, y + 26, `500 11.5px ${MONO}`, P['ready-ink']);
+  text(`${s.starting} starting`, tx, y + 44, `500 11.5px ${MONO}`, P['ink-muted']);
+}
+// The pool's cache pressure: a gauge above the pods, 0 to 3, red past 1.
+function drawGauge(s) {
+  const cx = 0, cy = gaugeY, r = GAUGE.r;
+  const A = v => Math.PI + (Math.min(v, PRESS_MAX) / PRESS_MAX) * Math.PI;
+  const over = s.pressure >= 1;
+  spaced('CACHE PRESSURE', cx, cy - r - 46, `600 16px ${SANS}`, P.ink, 4, 'center');
+  text("live context ÷ the Ready pods' KV cache", cx, cy - r - 28, `500 11.5px ${SANS}`, P['ink-muted'], 'center');
+  ctx.beginPath(); ctx.arc(cx, cy, r + 14, Math.PI, TAU); ctx.closePath();
+  ctx.fillStyle = P['surface-2']; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = P.line; ctx.stroke();
+  ctx.lineWidth = 12;
+  ctx.beginPath(); ctx.arc(cx, cy, r - 8, A(0), A(1)); ctx.strokeStyle = rgba(P.accent, 0.85); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, r - 8, A(1), A(PRESS_MAX)); ctx.strokeStyle = rgba(P.failed, 0.75); ctx.stroke();
+  ctx.strokeStyle = P['line-strong'];
+  for (let i = 0; i <= PRESS_MAX * 4; i++) {
+    const v = i / 4, a = A(v), major = i % 2 === 0;
+    ctx.lineWidth = major ? 2 : 1;
+    line(cx + Math.cos(a) * (r - 18 - (major ? 10 : 5)), cy + Math.sin(a) * (r - 18 - (major ? 10 : 5)), cx + Math.cos(a) * (r - 18), cy + Math.sin(a) * (r - 18));
+    if (major) text(String(v), cx + Math.cos(a) * (r - 44), cy + Math.sin(a) * (r - 44) + 4, `500 11px ${MONO}`, P['ink-muted'], 'center');
+  }
+  const a = A(board.gauge), tip = { x: cx + Math.cos(a) * (r - 22), y: cy + Math.sin(a) * (r - 22) };
+  glow(tip.x, tip.y, 28, tokenA(over ? 'failed' : 'accent'), 0.7);
+  ctx.lineCap = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = over ? P.failed : P.ink; line(cx, cy, tip.x, tip.y); ctx.lineCap = 'butt';
+  disc(cx, cy, 9, P.ink); disc(cx, cy, 4, P.surface);
+  rrect(cx - 84, cy + 14, 168, 58, 12); ctx.fillStyle = over ? P['failed-soft'] : P.surface; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = over ? P.failed : P.line; ctx.stroke();
+  text(s.pressure.toFixed(2), cx, cy + 46, `500 26px ${MONO}`, over ? P.failed : P.ink, 'center');
+  text(`${fmtK(s.context)} ÷ ${fmtK(sim.cfg.kvTokens * Math.max(1, s.ready))} tokens`, cx, cy + 64, `500 11px ${MONO}`, P['ink-muted'], 'center');
+}
+
+function draw(s) {
+  screenTransform();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = P.bg; ctx.fillRect(0, 0, W, H);
+  worldTransform();
+  drawFloor();
+  drawZones();
+  glow(HUB.x, HUB.y, 260, tokenA('accent'), 0.12);
+  drawLanes();
+  drawGauge(s);
+  drawTracker(s);
+  drawRedis();
+  drawRadar();
+  drawKeda(s);
+  drawRuntime(s);
+  drawRuns();
+  drawGate();
+  drawHub();
+  for (const v of podVis.values()) drawPod(v);
+  drawTether();
+  drawCalls();
+  drawFx();
+  drawTag();
+}
+
+// ===== Views: each fits a box of the world to the stage, clear of the floating controls =====
+const PAD = { l: 28, r: 28, t: 60, b: 56 };
+function fitBox(b) {
+  const w = Math.max(40, W - PAD.l - PAD.r), h = Math.max(40, H - PAD.t - PAD.b);
+  const s = Math.min(w / (b.x1 - b.x0), h / (b.y1 - b.y0), ZOOM.max);
+  return { x: (b.x0 + b.x1) / 2 - (PAD.l - PAD.r) / (2 * s), y: (b.y0 + b.y1) / 2 - (PAD.t - PAD.b) / (2 * s), s };
+}
+const RUNTIME_BOX = box(DAIS.x0, DAIS.y0, DAIS.x1, DAIS.y1 + 40);
+// Views frame where things are going (the arc's gauge position), not where they are mid-slide.
+function gaugeBox() { return box(-GAUGE.r - 30, arc.gaugeY - GAUGE.r - 64, GAUGE.r + 30, arc.gaugeY + 76); }
+const VIEWS = {
+  overview: () => union(LEFT, RIGHT, RUNTIME_BOX, podsBox(), podsLabelBox(), gaugeBox()),
+  runs: () => union(LEFT, RUNTIME_BOX, box(-210, GATE.y - 70, 210, GATE.y + 60)),
+  gateway: () => box(-320, -HUB.r - 70, RIGHT.x0, GATE.y + 80),
+  // The pods with the gauge above them: the pressure is about their memory, and a cut-off gauge reads as a mistake.
+  pods: () => union(podsBox(), podsLabelBox(), gaugeBox()),
+  pressure: () => union(gaugeBox(), box(-POD.w, arc.gaugeY + GAUGE.below, POD.w, arc.gaugeY + GAUGE.below + 80)),
+  autoscaler: () => RIGHT,
+};
+let tween = null, currentView = 'overview', userMoved = false;
+function flyTo(target, instant) {
+  if (instant || reduceMotion) { Object.assign(cam, target); tween = null; return; }
+  tween = { from: { ...cam }, to: target, start: wallNow, dur: 1.1 };
+}
+function focus(id, instant) {
+  if (syncArc()) gaugeY = arc.gaugeY;
+  currentView = VIEWS[id] ? id : 'overview';
+  userMoved = false;
+  flyTo(fitBox(VIEWS[currentView]()), instant);
+}
+function syncTween() {
+  if (!tween) return;
+  const k = ease(Math.min(1, (wallNow - tween.start) / tween.dur));
+  cam.x = tween.from.x + (tween.to.x - tween.from.x) * k;
+  cam.y = tween.from.y + (tween.to.y - tween.from.y) * k;
+  cam.s = Math.exp(Math.log(tween.from.s) + (Math.log(tween.to.s) - Math.log(tween.from.s)) * k);
+  if (k >= 1) tween = null;
+}
+
+// ===== Hover, click, drag and zoom =====
+let drag = null, pointerIn = false, pointerPx = { x: 0, y: 0 };
+function hitAt(sx, sy) {
+  const w = toWorld(sx, sy);
+  for (const [id, v] of runVis) { const sl = SLOTS[v.slot]; if (Math.hypot(w.x - sl.x, w.y - sl.y) < DAIS.ring + 2) return { kind: 'run', id }; }
+  for (const [id, v] of podVis) {
+    if (!sim.podById(id)) continue;
+    const a = anchorOf(v);
+    if (w.x >= a.x - POD.w / 2 && w.x <= a.x + POD.w / 2 && w.y >= a.y - POD.h && w.y <= a.y) return { kind: 'pod', id };
+  }
+  return null;
+}
+canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y, moved: false }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', e => {
+  const r = canvas.getBoundingClientRect();
+  pointerPx = { x: e.clientX - r.left, y: e.clientY - r.top };
+  pointerIn = true;
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; tween = null; userMoved = true; }
+  if (drag.moved) { cam.x = drag.cx - dx / cam.s; cam.y = drag.cy - dy / cam.s; }
+});
+// A click (not a drag) on a hexagon follows its run; on a pod, zooms to it.
+canvas.addEventListener('pointerup', () => {
+  const clicked = drag && !drag.moved;
+  drag = null;
+  if (!clicked) return;
+  const t = hitAt(pointerPx.x, pointerPx.y);
+  if (t && t.kind === 'run') { const r = sim.runs.find(x => x.id === t.id); if (r) api.inspect(r); }
+  else if (t && t.kind === 'pod') {
+    const a = anchorOf(podVis.get(t.id));
+    flyTo(fitBox(box(a.x - POD.w / 2 - 40, a.y - POD.h - 90, a.x + POD.w / 2 + 40, a.y + 40)), false);
+    userMoved = true;
+  }
+});
+canvas.addEventListener('pointercancel', () => { drag = null; });
+canvas.addEventListener('pointerleave', () => { pointerIn = false; api.showTip(null); });
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const w = toWorld(sx, sy);
+  // About 16 percent per wheel notch (100 units), around the point under the pointer.
+  cam.s = Math.min(ZOOM.max, Math.max(ZOOM.min, cam.s * Math.exp(-e.deltaY * 0.0015)));
+  cam.x = w.x - (sx - W / 2) / cam.s; cam.y = w.y - (sy - H / 2) / cam.s;
+  tween = null; userMoved = true;
+}, { passive: false });
+function updateHover() {
+  const t = pointerIn && !(drag && drag.moved) ? hitAt(pointerPx.x, pointerPx.y) : null;
+  canvas.style.cursor = t ? 'pointer' : drag && drag.moved ? 'grabbing' : 'grab';
+  api.showTip(t, pointerPx.x, pointerPx.y);
+}
+
+// ===== Theme, clearing, start =====
+function retheme() {
+  P = AP.palette();
+  dark = AP.theme() === 'dark';
+  for (const v of podVis.values()) v.cellsAt = -1;
+}
+function clear() {
+  runVis.clear(); freeSlots.length = 0; nextSlot = 0;
+  callVis.clear(); activeCall.clear();
+  podVis.clear();
+  fx.length = 0;
+  tag = { age: 99, run: null };
+  lastScrapeSeen = sim.lastScrape;
+  // A restart can change the pod count (an experiment with one pod): the layout and the view follow at once.
+  if (syncArc()) { gaugeY = arc.gaugeY; if (!userMoved) focus(currentView, true); }
+}
+function resize() {
+  const r = $('stage').getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  if (!userMoved && !tween) focus(currentView, true);
+}
+resize();
+api = AP.mount({
+  views: [{ id: 'overview', label: 'Overview' }, { id: 'runs', label: 'Runs' }, { id: 'gateway', label: 'Gateway' }, { id: 'pods', label: 'Pods' },
+    { id: 'pressure', label: 'Pressure' }, { id: 'autoscaler', label: 'Autoscaler' }],
+  see: {
+    runs: 'Each hexagon in the agent runtime is a run: its fill grows with its context, the dots around it are its steps, and a gear turns while it runs a tool. The capsules streaming to the gateway are its calls; a longer capsule carries more context.',
+    gateway: "The picker's dial turns its pointer to the lane of the pod it chose, and the tag beside it says why.",
+    pods: "The glass tank on each pod is its KV cache: one cell per block, in the colour of the run that owns it, bright while a call uses it. A running call sits in one of the pod's bays; the bar under it is amber while the pod rereads the prompt and teal while it writes the reply.",
+    evict: "Evicted cells fly off the top of the tank in red, where the least recently used contexts sit. The line across the tank marks what the pod's runs will bring back; when it rises above the tank, red, they cannot all fit.",
+    affinity: "Watch a run's colour: with affinity its cells stay in one tank. Under round-robin they turn up in every tank, and the amber parts of the bays' bars grow.",
+    pressure: 'The gauge above the pods shows it.',
+    autoscaler: "Prometheus's radar collects the readings, KEDA's dial shows the pods it wants (blue needle) and the pods Ready (green), and a new pod fills in blue through its cold start.",
+    drain: 'A draining pod blinks amber and a barrier closes its lane; a failed one smokes and its calls fly back to the dial.',
+    end: 'Drag to pan, scroll to zoom, hover anything for its numbers.',
+  },
+  clear, retheme, focus,
+});
+retheme();
+new ResizeObserver(resize).observe($('stage'));
+
+let last = performance.now(), hoverAt = 0;
+function frame(now) {
+  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+  last = now;
+  wallNow += dt;
+  api.frame(dt);
+  runsById = new Map(sim.runs.map(r => [r.id, r]));
+  syncPods(dt);
+  syncRuns(dt);
+  syncCalls(dt);
+  syncScrape();
+  const s = syncBoards(dt);
+  syncFx(dt);
+  syncTween();
+  draw(s);
+  if (wallNow - hoverAt > 0.1) { hoverAt = wallNow; updateHover(); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

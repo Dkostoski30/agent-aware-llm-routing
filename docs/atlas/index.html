@@ -1,0 +1,1686 @@
+<!doctype html>
+<!--
+  Agent Routing Atlas, 3D. Open in a browser; flat.html is the same sandbox in 2D without three.js.
+  Loads three.js 0.160.0 and two Google fonts over the network, and sim.js, panels.js and atlas.css beside it.
+
+  It is a model of the system with illustrative timings, not a result: the rows marked "Measured" are copied from
+  experiments/log.md, everything else comes from the sandbox (sim.js).
+  Address parameters set it up, for links from slides: ?preset=affinity&variant=1&t=60&view=pods, ?profile=gpu24-8b,
+  or single settings such as ?rate=8&routing=plugin&kvTokens=8192.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Routing Atlas</title>
+<meta name="description" content="A 3D sandbox of agent-aware LLM routing and vLLM autoscaling on Kubernetes, with the measured experiment results beside it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="atlas.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Agent Routing Atlas</h1>
+        <p>Agent tasks, the gateway that routes their LLM calls, and the GPU pods that remember their contexts</p>
+      </div>
+    </div>
+    <nav class="pages" aria-label="Version"><a href="index.html" aria-current="page">3D</a><a href="flat.html">2D</a></nav>
+    <div class="transport">
+      <button id="play" class="btn primary" aria-pressed="true">Pause</button>
+      <div class="seg top-seg" id="speed" role="radiogroup" aria-label="Speed"></div>
+      <button id="reset" class="btn">Restart</button>
+      <label class="seed">Seed <input id="seed" type="number" min="1" max="9999" value="6"></label>
+      <button id="focus" class="btn">Hide panels</button>
+      <button id="theme" class="btn" aria-label="Switch between dark and light theme">Light</button>
+    </div>
+  </header>
+
+  <aside id="controls" aria-label="Controls"></aside>
+
+  <main id="stage">
+    <div class="stage-fill" id="canvas-host"></div>
+    <div class="float chip-row"><span class="chip" id="clock"></span><span class="chip warn" title="A model of the system with illustrative timings. Only the Measured boxes on the right are results.">Sandbox: illustrative timings</span></div>
+    <div class="float stage-tools"><button id="tour-btn" class="btn primary sm">Take the tour</button><div class="seg" id="views" role="radiogroup" aria-label="View"></div></div>
+    <section class="float" id="inspector" hidden aria-label="Followed run"></section>
+    <details class="float legend">
+      <summary>How to read it</summary>
+      <div><span class="sw" style="background:var(--accent)"></span>A hex module on the platform is one agent task. Its column is its context, the lights around it its steps, a gear a tool call.</div>
+      <div><span class="sw ring" style="color:var(--accent)"></span>A capsule is one LLM call, longer when it carries more context; a light going back is the reply.</div>
+      <div><span class="sw" style="background:linear-gradient(90deg,#e07a7a,#7ab6e0,#9be07a)"></span>The glass tank on a pod is its KV cache: one cube per block, bright while a call uses it, dim when kept for later, grey for a finished run.</div>
+      <div><span class="sw line" style="background:var(--draining)"></span><span>Under each call in a pod's bays: amber while the pod rereads the prompt, teal while it writes the reply.</span></div>
+      <div class="states"><span><i class="dot"></i>Ready</span><span><i class="dot starting"></i>Starting</span><span><i class="dot draining"></i>Draining</span><span><i class="dot failed"></i>Failed</span></div>
+      <div class="caption">Drag to orbit, scroll to zoom. Hover anything for its numbers; click a module to follow its run, a pod to fly to it.</div>
+    </details>
+    <section class="float" id="tour" hidden aria-live="polite"></section>
+    <div id="tooltip" hidden></div>
+  </main>
+
+  <aside id="metrics" aria-label="Live numbers and the selected experiment"></aside>
+  <footer id="ticker" aria-label="Event log"></footer>
+</div>
+
+<script src="sim.js"></script>
+<script src="panels.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const AP = AtlasPanels;
+const sim = AP.sim;
+const { C } = AtlasSim;
+const $ = id => document.getElementById(id);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SANS = '"Hanken Grotesk", system-ui, sans-serif';
+const MONO = '"JetBrains Mono", ui-monospace, monospace';
+let P = AP.palette();
+let themeName = AP.theme();
+// Bumped on every repaint of the theme (and once the fonts load), so every painted label redraws.
+let gen = 0;
+let wallNow = 0;
+const clamp01 = v => Math.min(1, Math.max(0, v));
+const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const V1 = new THREE.Vector3(), V2 = new THREE.Vector3(), V3 = new THREE.Vector3();
+
+// ===== Renderer, scene, camera, light =====
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+$('canvas-host').appendChild(renderer.domElement);
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(P.bg, 80, 170);
+// A soft studio room reflected in the metal, so edges and bevels catch light.
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+pmrem.dispose();
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 500);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = 1.4;
+controls.minDistance = 4;
+controls.maxDistance = 160;
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x1d2a2e, 0.5);
+const key = new THREE.DirectionalLight(0xffffff, 1.8);
+key.position.set(-16, 34, 22);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -34, right: 34, top: 34, bottom: -34, near: 1, far: 110 });
+key.shadow.camera.updateProjectionMatrix();
+key.shadow.bias = -0.0003;
+key.shadow.normalBias = 0.03;
+const rim = new THREE.DirectionalLight(0xa8dcff, 0.5);
+rim.position.set(22, 18, -30);
+scene.add(hemi, key, rim);
+
+// ===== Materials and painted textures =====
+const themed = [];
+function std(token, o = {}) {
+  const m = new THREE.MeshStandardMaterial({ color: P[token], roughness: 0.5, metalness: 0.2, ...o });
+  themed.push(() => m.color.set(P[token]));
+  return m;
+}
+function glow(token, o = {}) {
+  const m = new THREE.MeshBasicMaterial({ color: P[token], toneMapped: false, ...o });
+  themed.push(() => m.color.set(P[token]));
+  return m;
+}
+const M = {
+  body: std('surface-3', { roughness: 0.36, metalness: 0.55 }),
+  trim: std('line-strong', { roughness: 0.25, metalness: 0.85 }),
+  base: std('surface-2', { roughness: 0.75, metalness: 0.1 }),
+  recess: std('bg', { roughness: 0.95, metalness: 0 }),
+  glass: std('ink', { transparent: true, opacity: 0.07, roughness: 0.05, metalness: 0, depthWrite: false }),
+  accent: glow('accent'),
+  ready: glow('ready'),
+  starting: glow('starting'),
+};
+
+function canvasTexture(w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAniso;
+  return { canvas, ctx: canvas.getContext('2d'), tex, w, h };
+}
+// A painted label on a plane of the given width; paint() redraws it only when its key changed.
+function makePlate(w, h, worldW) {
+  const t = canvasTexture(w, h);
+  const material = new THREE.MeshBasicMaterial({ map: t.tex, transparent: true, toneMapped: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(worldW, (worldW * h) / w), material);
+  return {
+    mesh, key: null,
+    paint(k, fn) {
+      if (k === this.key) return;
+      this.key = k;
+      t.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      t.ctx.clearRect(0, 0, w, h);
+      fn(t.ctx, w, h);
+      t.tex.needsUpdate = true;
+    },
+    dispose() { t.tex.dispose(); material.dispose(); mesh.geometry.dispose(); },
+  };
+}
+function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function text(ctx, s, x, y, font, color, align = 'left') {
+  ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(s, x, y);
+}
+function spaced(ctx, s, x, y, font, color, spacing, align = 'left') {
+  ctx.save(); ctx.letterSpacing = `${spacing}px`; text(ctx, s, x, y, font, color, align); ctx.restore();
+}
+function fitText(ctx, s, font, maxW) {
+  ctx.font = font;
+  if (ctx.measureText(s).width <= maxW) return s;
+  let t = s;
+  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+function pill(ctx, s, x, y, font, fg, bg, align = 'left', h = 34) {
+  ctx.font = font;
+  const w = ctx.measureText(s).width + 24;
+  const left = align === 'right' ? x - w : x;
+  rrect(ctx, left, y - h / 2, w, h, h / 2); ctx.fillStyle = bg; ctx.fill();
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillStyle = fg; ctx.fillText(s, left + 12, y + 1);
+  ctx.textBaseline = 'alphabetic';
+  return w;
+}
+function plateBg(ctx, w, h, r = 18) {
+  rrect(ctx, 3, 3, w - 6, h - 6, r);
+  ctx.fillStyle = P.surface; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = P.line; ctx.stroke();
+}
+const fmtK = n => (n >= 100000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n)));
+const STATE = { ready: ['Ready', 'ready'], starting: ['Starting', 'starting'], draining: ['Draining', 'draining'], failed: ['Failed', 'failed'] };
+
+// Run colours: one hue per run, shared by its module, its calls and its blocks in the KV tanks.
+const runColor3 = run => { const c = AP.runHSL(run); return new THREE.Color().setHSL(c.h, c.s, c.l); };
+const runMats = new Map();
+function matsOf(run) {
+  let m = runMats.get(run.id);
+  if (!m) {
+    const color = runColor3(run);
+    m = {
+      color, kept: color.clone().lerp(new THREE.Color(P.surface), 0.45),
+      solid: new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.15, emissive: color, emissiveIntensity: 0.12, transparent: true }),
+      packet: new THREE.MeshStandardMaterial({ color, roughness: 0.25, metalness: 0.1, emissive: color, emissiveIntensity: 0.45 }),
+      glow: new THREE.MeshBasicMaterial({ color, toneMapped: false, transparent: true }),
+    };
+    runMats.set(run.id, m);
+  }
+  return m;
+}
+function recolor(run, m) {
+  m.color.copy(runColor3(run));
+  m.kept.copy(m.color).lerp(new THREE.Color(P.surface), 0.45);
+  m.solid.color.copy(m.color); m.solid.emissive.copy(m.color);
+  m.packet.color.copy(m.color); m.packet.emissive.copy(m.color);
+  m.glow.color.copy(m.color);
+}
+function dropMats(id) {
+  const m = runMats.get(id);
+  if (!m) return;
+  m.solid.dispose(); m.packet.dispose(); m.glow.dispose();
+  runMats.delete(id);
+}
+
+// ===== Layout =====
+// The calls flow from the agent platform (front) through the gateway's arch to the Endpoint Picker's switch, which sends
+// each down one lane to a pod. The pods stand on an arc around the switch, so every lane is a straight spoke.
+const S = new THREE.Vector3(0, 0, -1.5);
+const ARCH_Z = 1.9;
+const SW_R = 1.95;
+const DAIS = { z: 8.6, w: 13.8, d: 5.6, h: 0.5, px: 1.27, pz: 1.6 };
+const SIDE_X = 11.6, NEAR_Z = 3.2, FAR_Z = 8.6;
+// The arc: 8 units from the switch, pods 32 degrees apart at most, all within 140 degrees; a larger arc when they need
+// more room than 4.1 units each.
+const POD_R = 8, POD_PITCH = 4.1, POD_SPREAD = THREE.MathUtils.degToRad(140), POD_STEP = THREE.MathUtils.degToRad(32);
+function arcFor(n) {
+  const step = n > 1 ? Math.min(POD_STEP, POD_SPREAD / (n - 1)) : 0;
+  const R = n > 1 ? Math.max(POD_R, POD_PITCH / step) : POD_R;
+  return { n, step, R, gaugeZ: S.z - R - 3.6 };
+}
+let arc = arcFor(sim.pods.length);
+let gaugeZ = arc.gaugeZ;
+const outward = (theta, out) => out.set(Math.sin(theta), 0, -Math.cos(theta));
+
+// ===== The floor: a grid with each zone outlined and named =====
+const FLOOR = { x0: -26, x1: 26, z0: -34, z1: 18, ppu: 40 };
+const floorTex = canvasTexture((FLOOR.x1 - FLOOR.x0) * FLOOR.ppu, (FLOOR.z1 - FLOOR.z0) * FLOOR.ppu);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(FLOOR.x1 - FLOOR.x0, FLOOR.z1 - FLOOR.z0),
+  new THREE.MeshStandardMaterial({ map: floorTex.tex, roughness: 0.92, metalness: 0 }));
+floor.rotation.x = -Math.PI / 2;
+floor.position.set((FLOOR.x0 + FLOOR.x1) / 2, 0, (FLOOR.z0 + FLOOR.z1) / 2);
+floor.receiveShadow = true;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), std('bg', { roughness: 1, metalness: 0 }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.01;
+ground.receiveShadow = true;
+scene.add(floor, ground);
+
+function paintFloor() {
+  const { ctx, w, h } = floorTex, u = FLOOR.ppu;
+  const X = x => (x - FLOOR.x0) * u, Z = z => (z - FLOOR.z0) * u;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = P.bg; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = P.line;
+  for (let x = Math.ceil(FLOOR.x0); x <= FLOOR.x1; x++) {
+    ctx.globalAlpha = x % 4 === 0 ? 0.75 : 0.32; ctx.lineWidth = x % 4 === 0 ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(X(x), 0); ctx.lineTo(X(x), h); ctx.stroke();
+  }
+  for (let z = Math.ceil(FLOOR.z0); z <= FLOOR.z1; z++) {
+    ctx.globalAlpha = z % 4 === 0 ? 0.75 : 0.32; ctx.lineWidth = z % 4 === 0 ? 2 : 1;
+    ctx.beginPath(); ctx.moveTo(0, Z(z)); ctx.lineTo(w, Z(z)); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // The grid fades out towards the edges.
+  const fade = ctx.createRadialGradient(X(0), Z(-6), 8 * u, X(0), Z(-6), 27 * u);
+  fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, P.bg);
+  ctx.fillStyle = fade; ctx.fillRect(0, 0, w, h);
+
+  // On the light floor the key light brightens every colour, so the muted ink comes out almost white:
+  // the light theme writes the floor one step darker.
+  const light = themeName !== 'dark';
+  const outline = light ? P['ink-muted'] : P['line-strong'];
+  const ink = light ? P.ink : P['ink-muted'];
+  const zone = draw => {
+    ctx.save();
+    ctx.setLineDash([18, 12]); ctx.lineWidth = 4; ctx.strokeStyle = outline; ctx.globalAlpha = 0.7;
+    draw(); ctx.stroke();
+    ctx.restore();
+  };
+  const title = (s, x, z, align = 'left') => spaced(ctx, s, X(x), Z(z), `600 ${Math.round(0.62 * u)}px ${SANS}`, ink, 6, align);
+  const caption = (s, x, z, align = 'left') => text(ctx, s, X(x), Z(z), `500 ${Math.round(0.42 * u)}px ${SANS}`, ink, align);
+  const box = (x0, z0, x1, z1) => zone(() => rrect(ctx, X(x0), Z(z0), (x1 - x0) * u, (z1 - z0) * u, 0.7 * u));
+
+  box(-DAIS.w / 2 - 0.5, DAIS.z - DAIS.d / 2 - 0.5, DAIS.w / 2 + 0.5, DAIS.z + DAIS.d / 2 + 0.5);
+  title('AGENT RUNTIME', -DAIS.w / 2 - 0.5, DAIS.z + DAIS.d / 2 + 1.45);
+  caption('One module per agent task. It calls the LLM, runs a tool, calls again.', -DAIS.w / 2 - 0.5, DAIS.z + DAIS.d / 2 + 2.15);
+
+  zone(() => { ctx.beginPath(); ctx.arc(X(S.x), Z(S.z), 2.7 * u, 0, Math.PI * 2); });
+  box(-3.3, ARCH_Z - 1.0, 3.3, ARCH_Z + 1.0);
+  title('GATEWAY', 3.7, ARCH_Z + 0.35);
+  caption('Endpoint Picker: the switch', 3.7, ARCH_Z + 1.0);
+  caption('turns to the pod it chose', 3.7, ARCH_Z + 1.55);
+
+  // The calls' way from the platform to the arch.
+  ctx.save();
+  ctx.strokeStyle = outline; ctx.globalAlpha = 0.6; ctx.lineWidth = 5; ctx.setLineDash([22, 14]);
+  ctx.beginPath(); ctx.moveTo(X(0), Z(DAIS.z - DAIS.d / 2 - 0.6)); ctx.lineTo(X(0), Z(ARCH_Z + 1.2)); ctx.stroke();
+  ctx.setLineDash([]); ctx.fillStyle = outline;
+  ctx.beginPath(); ctx.moveTo(X(-0.35), Z(ARCH_Z + 1.65)); ctx.lineTo(X(0.35), Z(ARCH_Z + 1.65)); ctx.lineTo(X(0), Z(ARCH_Z + 1.1)); ctx.fill();
+  ctx.restore();
+  caption('LLM calls', 0.5, (DAIS.z - DAIS.d / 2 + ARCH_Z) / 2);
+
+  const a0 = arc.n > 1 ? -((arc.n - 1) / 2) * arc.step - arc.step / 2 - 0.08 : -0.32;
+  const a1 = -a0;
+  zone(() => {
+    ctx.beginPath();
+    ctx.arc(X(S.x), Z(S.z), (arc.R + 2.4) * u, a0 - Math.PI / 2, a1 - Math.PI / 2);
+    ctx.arc(X(S.x), Z(S.z), (arc.R - 3.0) * u, a1 - Math.PI / 2, a0 - Math.PI / 2, true);
+    ctx.closePath();
+  });
+  // Named beside the right end of the arc.
+  const lx = S.x + Math.sin(a1) * (arc.R + 2.4) + 0.5, lz = S.z - Math.cos(a1) * (arc.R + 2.4) + 0.6;
+  title('vLLM PODS', lx, lz);
+  const per = sim.cfg.kvTokens / CELLS;
+  caption("Each pod's glass tank is its KV cache:", lx, lz + 0.75);
+  caption(per < 20 ? `one cube ≈ ${Math.round(per)} tokens, one vLLM block` : `one cube ≈ ${fmtK(per)} tokens`, lx, lz + 1.3);
+
+  box(-SIDE_X - 2.2, NEAR_Z - 2.3, -SIDE_X + 2.2, FAR_Z + 2.0);
+  title('RUN STATE', -SIDE_X - 2.2, FAR_Z + 2.95);
+  box(SIDE_X - 2.2, NEAR_Z - 2.3, SIDE_X + 2.2, FAR_Z + 2.0);
+  title('AUTOSCALING', SIDE_X + 2.2, FAR_Z + 2.95, 'right');
+  floorTex.tex.needsUpdate = true;
+}
+
+// ===== The agent platform =====
+const dais = new THREE.Mesh(new RoundedBoxGeometry(DAIS.w, DAIS.h, DAIS.d, 3, 0.14), M.base);
+dais.position.set(0, DAIS.h / 2, DAIS.z);
+dais.castShadow = dais.receiveShadow = true;
+// Texture pixels per unit of the platform's top: sharp sockets at the overview's distance.
+const DAIS_PPU = 82;
+const daisTop = canvasTexture(Math.round((DAIS.w - 0.4) * DAIS_PPU), Math.round((DAIS.d - 0.4) * DAIS_PPU));
+const daisFace = new THREE.Mesh(new THREE.PlaneGeometry(DAIS.w - 0.4, DAIS.d - 0.4),
+  new THREE.MeshStandardMaterial({ map: daisTop.tex, roughness: 0.8, metalness: 0.1 }));
+daisFace.rotation.x = -Math.PI / 2;
+daisFace.position.set(0, DAIS.h + 0.003, DAIS.z);
+daisFace.receiveShadow = true;
+const daisPlate = makePlate(1600, 52, DAIS.w - 2.2);
+daisPlate.mesh.position.set(0, DAIS.h / 2, DAIS.z + DAIS.d / 2 + 0.006);
+scene.add(dais, daisFace, daisPlate.mesh);
+// Thirty sockets, filled from the middle of the row nearest the gateway outwards.
+const SLOT_COLS = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
+const SLOTS = [];
+for (const row of [-1, 0, 1]) for (const c of SLOT_COLS) SLOTS.push({ x: (c - 4.5) * DAIS.px, z: DAIS.z + row * DAIS.pz });
+function paintDais() {
+  const { ctx, w, h } = daisTop, u = w / (DAIS.w - 0.4);
+  ctx.fillStyle = P['surface-2']; ctx.fillRect(0, 0, w, h);
+  for (const s of SLOTS) {
+    const x = (s.x + (DAIS.w - 0.4) / 2) * u, y = (s.z - DAIS.z + (DAIS.d - 0.4) / 2) * u;
+    ctx.beginPath(); ctx.arc(x, y, 0.58 * u, 0, Math.PI * 2);
+    ctx.fillStyle = P['surface-3']; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = P.line; ctx.stroke();
+  }
+  daisTop.tex.needsUpdate = true;
+}
+
+// ===== The run modules =====
+function gearGeometry() {
+  const teeth = 8, shape = new THREE.Shape();
+  for (let i = 0; i < teeth * 4; i++) {
+    const a = (i / (teeth * 4)) * Math.PI * 2, r = i % 4 === 1 || i % 4 === 2 ? 0.22 : 0.165;
+    if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r); else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  shape.closePath();
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, 0.07, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+  return new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2, curveSegments: 12 }).translate(0, 0, -0.03);
+}
+const RG = {
+  hex: new THREE.CylinderGeometry(0.46, 0.5, 0.14, 6).translate(0, 0.07, 0),
+  column: new THREE.CylinderGeometry(0.28, 0.28, 1, 6).translate(0, 0.5, 0),
+  cap: new THREE.CylinderGeometry(0.3, 0.3, 0.05, 6),
+  pip: new THREE.BoxGeometry(0.08, 0.05, 0.08),
+  gear: gearGeometry(),
+  select: new THREE.TorusGeometry(0.74, 0.035, 8, 48).rotateX(Math.PI / 2),
+};
+const PIP_MAX = SLOTS.length * 24;
+const pips = new THREE.InstancedMesh(RG.pip, new THREE.MeshBasicMaterial({ toneMapped: false }), PIP_MAX);
+const WHITE = new THREE.Color(1, 1, 1);
+for (let i = 0; i < PIP_MAX; i++) pips.setColorAt(i, WHITE);
+pips.count = 0;
+pips.frustumCulled = false;
+scene.add(pips);
+const selectRing = new THREE.Mesh(RG.select, M.accent);
+selectRing.visible = false;
+scene.add(selectRing);
+
+const runVis = new Map();
+const freeSlots = [];
+let nextSlot = 0;
+const pickables = [];
+const unpick = (...meshes) => { for (const m of meshes) { const i = pickables.indexOf(m); if (i >= 0) pickables.splice(i, 1); } };
+
+function makeRun(r, slot) {
+  const m = matsOf(r);
+  const g = new THREE.Group();
+  g.position.set(SLOTS[slot].x, DAIS.h, SLOTS[slot].z);
+  const base = new THREE.Mesh(RG.hex, M.trim);
+  const column = new THREE.Mesh(RG.column, m.solid);
+  column.position.y = 0.14;
+  const cap = new THREE.Mesh(RG.cap, m.glow);
+  const gear = new THREE.Mesh(RG.gear, M.trim);
+  base.castShadow = column.castShadow = gear.castShadow = true;
+  g.add(base, column, cap, gear);
+  base.userData = column.userData = { kind: 'run', id: r.id };
+  pickables.push(base, column);
+  scene.add(g);
+  const fresh = sim.t - r.startT < 1;
+  return { g, base, column, cap, gear, slot, h: 0.12, grow: fresh ? 0 : 1 };
+}
+
+const PIP_MATRIX = new THREE.Matrix4();
+function syncRuns(dt) {
+  const inspected = api.inspected();
+  const seen = new Set();
+  const unlit = new THREE.Color(P['surface-3']);
+  let pn = 0;
+  for (const r of sim.runs) {
+    seen.add(r.id);
+    let v = runVis.get(r.id);
+    if (!v) {
+      const slot = freeSlots.length ? freeSlots.shift() : nextSlot < SLOTS.length ? nextSlot++ : -1;
+      if (slot < 0) continue;
+      v = makeRun(r, slot);
+      runVis.set(r.id, v);
+    }
+    const m = matsOf(r);
+    const ended = r.state === 'done' || r.state === 'failed';
+    const k = ended ? clamp01((sim.t - r.endT) / C.keepRuns) : 0;
+    v.grow = Math.min(1, v.grow + dt * 3);
+    const target = 0.12 + 1.5 * Math.min(1, r.latestPrompt / Math.max(1, sim.maxPrompt()));
+    v.h += (target - v.h) * Math.min(1, dt * 5);
+    v.column.scale.y = v.h;
+    v.cap.position.y = 0.14 + v.h + 0.025;
+    v.gear.visible = r.state === 'tool';
+    v.gear.position.y = v.cap.position.y + 0.42;
+    v.gear.rotation.z -= dt * 3;
+    const s = 0.01 + 0.99 * ease(v.grow);
+    v.g.scale.setScalar(r.state === 'done' ? s * (1 - 0.5 * k) : s);
+    const slot = SLOTS[v.slot];
+    if (r.state === 'done') {
+      v.g.position.y = DAIS.h + ease(Math.min(1, k * 2)) * 1.4;
+      m.solid.opacity = 1 - k; m.glow.opacity = 1 - k;
+      m.glow.color.set(P.ready);
+    } else if (r.state === 'failed') {
+      v.g.position.y = DAIS.h - k * 2;
+      m.solid.color.set(P.failed); m.solid.emissive.set(P.failed); m.glow.color.set(P.failed);
+    } else {
+      v.g.position.y = DAIS.h;
+      m.glow.opacity = r.state === 'call' ? 0.65 + 0.35 * Math.sin(wallNow * 7 + r.id) : 0.35;
+    }
+    if (r === inspected) { selectRing.visible = true; selectRing.position.set(slot.x, DAIS.h + 0.02, slot.z); }
+    if (ended) continue;
+    // The step lights: one per expected step, lit when done, blinking while a call is out.
+    const n = Math.min(24, Math.max(r.expected, r.step));
+    const done = r.state === 'call' ? r.step - 1 : r.step;
+    for (let i = 0; i < n && pn < PIP_MAX; i++, pn++) {
+      const a = (i / n) * Math.PI * 2;
+      PIP_MATRIX.makeTranslation(slot.x + Math.sin(a) * 0.66, DAIS.h + 0.03, slot.z + Math.cos(a) * 0.66);
+      pips.setMatrixAt(pn, PIP_MATRIX);
+      const blink = i === done && r.state === 'call' && Math.sin(wallNow * 8) > 0;
+      pips.setColorAt(pn, i < done || blink ? m.color : unlit);
+    }
+  }
+  if (!inspected || !runVis.has(inspected.id)) selectRing.visible = false;
+  pips.count = pn;
+  pips.instanceMatrix.needsUpdate = true;
+  pips.instanceColor.needsUpdate = true;
+  for (const [id, v] of runVis) {
+    if (seen.has(id)) continue;
+    scene.remove(v.g);
+    unpick(v.base, v.column);
+    freeSlots.push(v.slot); freeSlots.sort((a, b) => a - b);
+    runVis.delete(id);
+  }
+  for (const id of [...runMats.keys()]) if (!runsById.has(id)) dropMats(id);
+}
+
+// ===== The gateway: an arch the calls pass through, and the Endpoint Picker's switch behind it =====
+// Low enough that the overview looks over it onto the switch, high enough for the calls to fly through.
+const ARCH = { x: 2.55, pillarH: 3.0, lintelY: 3.72 };
+for (const sx of [-ARCH.x, ARCH.x]) {
+  const foot = new THREE.Mesh(new RoundedBoxGeometry(1.15, 0.22, 1.35, 2, 0.05), M.base);
+  foot.position.set(sx, 0.11, ARCH_Z);
+  const pillar = new THREE.Mesh(new RoundedBoxGeometry(0.78, ARCH.pillarH, 0.98, 3, 0.1), M.body);
+  pillar.position.set(sx, 0.22 + ARCH.pillarH / 2, ARCH_Z);
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.04, ARCH.pillarH - 0.7, 0.14), M.accent);
+  led.position.set(sx - Math.sign(sx) * 0.4, 0.22 + ARCH.pillarH / 2, ARCH_Z);
+  pillar.castShadow = true;
+  foot.receiveShadow = true;
+  scene.add(foot, pillar, led);
+}
+const lintel = new THREE.Mesh(new RoundedBoxGeometry(6.1, 1.0, 1.1, 3, 0.12), M.body);
+lintel.position.set(0, ARCH.lintelY, ARCH_Z);
+lintel.castShadow = true;
+const gateSign = makePlate(1024, 150, 5.6);
+gateSign.mesh.position.set(0, ARCH.lintelY, ARCH_Z + 0.556);
+scene.add(lintel, gateSign.mesh);
+const ARCH_PT = new THREE.Vector3(0, 1.6, ARCH_Z);
+const SW_TOP = new THREE.Vector3(S.x, 0.75, S.z);
+
+function arrowGeometry() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.09, 0.2); s.lineTo(0.09, 0.2); s.lineTo(0.09, 1.25); s.lineTo(0.25, 1.25);
+  s.lineTo(0, 1.68); s.lineTo(-0.25, 1.25); s.lineTo(-0.09, 1.25); s.closePath();
+  return new THREE.ExtrudeGeometry(s, { depth: 0.05, bevelEnabled: false }).rotateX(-Math.PI / 2);
+}
+const swGroup = new THREE.Group();
+swGroup.position.copy(S);
+const disc = new THREE.Mesh(new THREE.CylinderGeometry(1.85, 1.95, 0.3, 64), M.body);
+disc.position.y = 0.15;
+disc.castShadow = disc.receiveShadow = true;
+const swTex = canvasTexture(512, 512);
+const swFace = new THREE.Mesh(new THREE.CircleGeometry(1.8, 64).rotateX(-Math.PI / 2),
+  new THREE.MeshStandardMaterial({ map: swTex.tex, roughness: 0.6, metalness: 0.2 }));
+swFace.position.y = 0.302;
+const pointerMat = new THREE.MeshBasicMaterial({ color: P.accent, toneMapped: false });
+const pointer = new THREE.Mesh(arrowGeometry(), pointerMat);
+pointer.position.y = 0.31;
+const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.34, 0.26, 32), M.trim);
+hub.position.y = 0.43;
+swGroup.add(disc, swFace, pointer, hub);
+scene.add(swGroup);
+let pointerTarget = 0;
+function paintSwitch() {
+  const { ctx } = swTex;
+  ctx.clearRect(0, 0, 512, 512);
+  ctx.beginPath(); ctx.arc(256, 256, 254, 0, Math.PI * 2); ctx.fillStyle = P['surface-2']; ctx.fill();
+  ctx.lineWidth = 6; ctx.strokeStyle = P['line-strong'];
+  ctx.beginPath(); ctx.arc(256, 256, 244, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2;
+    ctx.beginPath(); ctx.moveTo(256 + Math.cos(a) * 214, 256 + Math.sin(a) * 214); ctx.lineTo(256 + Math.cos(a) * 236, 256 + Math.sin(a) * 236); ctx.stroke();
+  }
+  ctx.strokeStyle = P.line;
+  ctx.beginPath(); ctx.arc(256, 256, 120, 0, Math.PI * 2); ctx.stroke();
+  spaced(ctx, 'ENDPOINT PICKER', 256, 432, `600 25px ${SANS}`, P['ink-muted'], 3, 'center');
+  swTex.tex.needsUpdate = true;
+}
+
+// The latest routing decision, over the switch, at one size on screen (px tall) so it reads from any distance.
+const TAG = { w: 900, h: 112, px: 44 };
+const tagTex = canvasTexture(TAG.w, TAG.h);
+const tagMat = new THREE.SpriteMaterial({ map: tagTex.tex, transparent: true, depthTest: false, toneMapped: false, sizeAttenuation: false });
+const tag = new THREE.Sprite(tagMat);
+tag.position.set(S.x, 2.7, S.z);
+tag.renderOrder = 10;
+scene.add(tag);
+let tagAge = 99;
+function paintTag(d) {
+  const { ctx } = tagTex;
+  ctx.clearRect(0, 0, TAG.w, TAG.h);
+  const rs = AP.reason(d.reason), col = P[rs.token];
+  const left = `${d.call.run.name} · step ${d.call.step} → ${d.pod.name}`;
+  ctx.font = `500 34px ${SANS}`;
+  const lw = ctx.measureText(left).width;
+  ctx.font = `600 34px ${SANS}`;
+  const rw = ctx.measureText(rs.text).width;
+  const w = Math.min(TAG.w - 8, 76 + lw + 26 + rw + 30), x = (TAG.w - w) / 2;
+  rrect(ctx, x, 8, w, 96, 48); ctx.fillStyle = P.surface; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = col; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + 44, 56, 13, 0, Math.PI * 2); ctx.fillStyle = AP.runColor(d.call.run); ctx.fill();
+  text(ctx, left, x + 70, 68, `500 34px ${SANS}`, P.ink);
+  text(ctx, rs.text, x + 70 + lw + 26, 68, `600 34px ${SANS}`, col);
+  tagTex.tex.needsUpdate = true;
+  tagAge = 0;
+}
+
+// ===== Pods: a GPU server with fans, bays for the calls it runs, and its KV cache as a glass tank of blocks =====
+const POD = { w: 3.0, h: 1.05, d: 2.2, foot: 0.12 };
+const TOP = POD.foot + POD.h;
+const TANK = { x: -0.62, side: 1.5, n: 5, layers: 11, pitch: 0.27, layer: 0.255 };
+const TANK_Y0 = TOP + 0.07;
+const TANK_FULL = TANK.layers * TANK.layer;
+const TANK_H = TANK_FULL + 0.05;
+const CELLS = TANK.n * TANK.n * TANK.layers;
+const BAYS = 8;
+const BAY_W = 0.29;
+const bayPos = i => ({ x: 0.27 + (i % 4) * 0.33, y: i < 4 ? 0.9 : 0.55 });
+const LANE_W = 0.95;
+const laneEnd = R => R - POD.d / 2 - 0.05;
+const queueR = (R, k) => Math.max(SW_R + 0.5, R - 2.05 - k * 0.62);
+
+const CELL_M = [];
+for (let i = 0; i < CELLS; i++) {
+  const layer = Math.floor(i / 25), w = i % 25, row = Math.floor(w / 5), col = w % 5;
+  CELL_M.push(new THREE.Matrix4().makeTranslation(TANK.x + (col - 2) * TANK.pitch, TANK_Y0 + 0.13 + layer * TANK.layer, (row - 2) * TANK.pitch));
+}
+function tankFrame() {
+  const parts = [], half = TANK.side / 2 + 0.03;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) parts.push(new THREE.BoxGeometry(0.06, TANK_H, 0.06).translate(TANK.x + sx * half, TANK_Y0 + TANK_H / 2, sz * half));
+  for (const s of [-1, 1]) {
+    parts.push(new THREE.BoxGeometry(TANK.side + 0.12, 0.06, 0.06).translate(TANK.x, TANK_Y0 + TANK_H, s * half));
+    parts.push(new THREE.BoxGeometry(0.06, 0.06, TANK.side + 0.12).translate(TANK.x + s * half, TANK_Y0 + TANK_H, 0));
+  }
+  return mergeGeometries(parts);
+}
+function squareRing(side, t) {
+  const half = side / 2, parts = [];
+  for (const s of [-1, 1]) {
+    parts.push(new THREE.BoxGeometry(side + t, t, t).translate(0, 0, s * half));
+    parts.push(new THREE.BoxGeometry(t, t, side + t).translate(s * half, 0, 0));
+  }
+  return mergeGeometries(parts);
+}
+const PG = {
+  foot: new RoundedBoxGeometry(3.3, POD.foot, 2.5, 2, 0.04).translate(0, POD.foot / 2, 0),
+  body: new RoundedBoxGeometry(POD.w, POD.h, POD.d, 3, 0.1).translate(0, POD.foot + POD.h / 2, 0),
+  front: new THREE.PlaneGeometry(2.84, 0.86).translate(0, 0.645, POD.d / 2 + 0.002),
+  vents: mergeGeometries([
+    new THREE.PlaneGeometry(1.7, 0.64).rotateY(Math.PI / 2).translate(POD.w / 2 + 0.002, 0.66, 0),
+    new THREE.PlaneGeometry(1.7, 0.64).rotateY(-Math.PI / 2).translate(-POD.w / 2 - 0.002, 0.66, 0),
+  ]),
+  strip: new THREE.BoxGeometry(2.84, 0.045, 0.02).translate(0, 1.115, POD.d / 2),
+  tankBase: new RoundedBoxGeometry(1.64, 0.07, 1.64, 2, 0.02).translate(TANK.x, TOP + 0.035, 0),
+  tankFrame: tankFrame(),
+  glass: new THREE.BoxGeometry(TANK.side, TANK_H - 0.03, TANK.side).translate(TANK.x, TANK_Y0 + (TANK_H - 0.03) / 2, 0),
+  cell: new RoundedBoxGeometry(0.22, 0.21, 0.22, 1, 0.03),
+  demand: squareRing(TANK.side + 0.24, 0.045).translate(TANK.x, 0, 0),
+  ghost: new THREE.EdgesGeometry(new THREE.BoxGeometry(TANK.side + 0.1, 1, TANK.side + 0.1)).translate(TANK.x, 0.5, 0),
+  fanWell: new THREE.CylinderGeometry(0.44, 0.44, 0.02, 40),
+  fanBlades: new THREE.CircleGeometry(0.4, 40).rotateX(-Math.PI / 2),
+  fanRing: new THREE.TorusGeometry(0.42, 0.03, 8, 40).rotateX(Math.PI / 2),
+  cartridge: new RoundedBoxGeometry(0.26, 0.15, 0.08, 1, 0.02),
+  bar: new THREE.PlaneGeometry(1, 0.035).translate(0.5, 0, 0),
+  post: new THREE.CylinderGeometry(0.05, 0.06, 0.95, 10).translate(0, 0.475, 0),
+  arm: new THREE.BoxGeometry(1.5, 0.07, 0.05).translate(-0.75, 0, 0),
+  cold: new THREE.RingGeometry(2.0, 2.18, 64).rotateX(-Math.PI / 2),
+};
+
+// Textures every pod shares: its front panel with the bays, the side vents, the fans, the lane and the barrier.
+const frontTex = canvasTexture(512, 155);
+const frontMat = new THREE.MeshStandardMaterial({ map: frontTex.tex, roughness: 0.65, metalness: 0.15 });
+const ventTex = canvasTexture(256, 96);
+const ventMat = new THREE.MeshStandardMaterial({ map: ventTex.tex, transparent: true, roughness: 0.8 });
+const fanTex = canvasTexture(256, 256);
+const fanMat = new THREE.MeshStandardMaterial({ map: fanTex.tex, transparent: true, alphaTest: 0.4, roughness: 0.4, metalness: 0.5 });
+const laneTex = canvasTexture(64, 128);
+const laneGlowTex = canvasTexture(64, 128);
+for (const t of [laneTex, laneGlowTex]) t.tex.wrapT = THREE.RepeatWrapping;
+const stripeTex = canvasTexture(128, 16);
+const stripeMat = new THREE.MeshStandardMaterial({ map: stripeTex.tex, roughness: 0.5 });
+let frontBays = -1;
+function paintFront() {
+  const { ctx, w, h } = frontTex, u = w / 2.84;
+  const X = x => (x + 1.42) * u, Y = y => (1.075 - y) * u;
+  ctx.fillStyle = P['surface-2']; ctx.fillRect(0, 0, w, h);
+  frontBays = Math.min(BAYS, sim.cfg.maxSeqs);
+  for (let i = 0; i < frontBays; i++) {
+    const b = bayPos(i);
+    rrect(ctx, X(b.x - 0.155), Y(b.y + 0.1), 0.31 * u, 0.2 * u, 5); ctx.fillStyle = P.bg; ctx.fill();
+    rrect(ctx, X(b.x - BAY_W / 2), Y(b.y - 0.135 + 0.0175), BAY_W * u, 0.035 * u, 3); ctx.fill();
+  }
+  frontTex.tex.needsUpdate = true;
+}
+function paintPodTextures() {
+  paintFront();
+  let ctx = ventTex.ctx;
+  ctx.clearRect(0, 0, 256, 96); ctx.fillStyle = P.bg;
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 9; c++) { rrect(ctx, 10 + c * 27, 12 + r * 19, 20, 10, 5); ctx.fill(); }
+  ventTex.tex.needsUpdate = true;
+  ctx = fanTex.ctx;
+  ctx.clearRect(0, 0, 256, 256);
+  ctx.save(); ctx.translate(128, 128); ctx.fillStyle = P['line-strong'];
+  for (let i = 0; i < 7; i++) { ctx.rotate((Math.PI * 2) / 7); ctx.beginPath(); ctx.ellipse(0, -66, 20, 52, 0.4, 0, Math.PI * 2); ctx.fill(); }
+  ctx.beginPath(); ctx.arc(0, 0, 28, 0, Math.PI * 2); ctx.fillStyle = P['surface-3']; ctx.fill();
+  ctx.restore();
+  fanTex.tex.needsUpdate = true;
+  for (const [t, glowing] of [[laneTex, false], [laneGlowTex, true]]) {
+    ctx = t.ctx;
+    ctx.fillStyle = glowing ? '#000' : P['surface-2']; ctx.fillRect(0, 0, 64, 128);
+    ctx.fillStyle = glowing ? '#666' : P['line-strong'];
+    ctx.fillRect(0, 0, 4, 128); ctx.fillRect(60, 0, 4, 128);
+    ctx.strokeStyle = glowing ? '#fff' : P['line-strong']; ctx.globalAlpha = glowing ? 1 : 0.5;
+    ctx.lineWidth = 7; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(15, 88); ctx.lineTo(32, 60); ctx.lineTo(49, 88); ctx.stroke();
+    ctx.globalAlpha = 1;
+    t.tex.needsUpdate = true;
+  }
+  ctx = stripeTex.ctx;
+  ctx.fillStyle = P.draining; ctx.fillRect(0, 0, 128, 16);
+  ctx.fillStyle = P.bg;
+  for (let x = -16; x < 128; x += 32) { ctx.beginPath(); ctx.moveTo(x, 16); ctx.lineTo(x + 16, 0); ctx.lineTo(x + 32, 0); ctx.lineTo(x + 16, 16); ctx.fill(); }
+  stripeTex.tex.needsUpdate = true;
+}
+
+const podVis = new Map();
+function makePod(p) {
+  const g = new THREE.Group();
+  const add = (geo, mat, shadow) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    if (shadow) mesh.castShadow = mesh.receiveShadow = true;
+    g.add(mesh);
+    return mesh;
+  };
+  add(PG.foot, M.base, true);
+  const body = add(PG.body, M.body, true);
+  add(PG.front, frontMat);
+  add(PG.vents, ventMat);
+  const stripMat = new THREE.MeshBasicMaterial({ color: P.ready, toneMapped: false });
+  add(PG.strip, stripMat);
+  add(PG.tankBase, M.trim, true);
+  add(PG.tankFrame, M.trim, true);
+  const glassMat = M.glass.clone();
+  glassMat.emissive.set(P.failed);
+  glassMat.emissiveIntensity = 0;
+  const glass = add(PG.glass, glassMat);
+  glass.renderOrder = 2;
+  const live = new THREE.InstancedMesh(PG.cell, new THREE.MeshBasicMaterial({ toneMapped: false }), CELLS);
+  const kept = new THREE.InstancedMesh(PG.cell, new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.1 }), CELLS);
+  for (const im of [live, kept]) {
+    for (let i = 0; i < CELLS; i++) im.setColorAt(i, WHITE);
+    im.count = 0; im.frustumCulled = false; im.castShadow = true;
+    g.add(im);
+  }
+  const demandMat = new THREE.MeshBasicMaterial({ color: P.accent, toneMapped: false });
+  const demand = add(PG.demand, demandMat);
+  const ghostMat = new THREE.LineBasicMaterial({ color: P.failed, transparent: true, opacity: 0.85 });
+  const ghost = new THREE.LineSegments(PG.ghost, ghostMat);
+  g.add(ghost);
+  const fans = [];
+  for (const z of [-0.5, 0.5]) {
+    add(PG.fanWell, M.recess).position.set(0.85, TOP + 0.005, z);
+    const blades = add(PG.fanBlades, fanMat);
+    blades.position.set(0.85, TOP + 0.03, z);
+    add(PG.fanRing, M.trim).position.set(0.85, TOP + 0.035, z);
+    fans.push(blades);
+  }
+  const bays = [];
+  for (let i = 0; i < BAYS; i++) {
+    const b = bayPos(i);
+    const cartMat = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.2, emissiveIntensity: 0.55 });
+    const cart = add(PG.cartridge, cartMat);
+    cart.position.set(b.x, b.y, POD.d / 2 + 0.03);
+    const preMat = new THREE.MeshBasicMaterial({ color: P.draining, toneMapped: false });
+    const pre = add(PG.bar, preMat);
+    pre.position.set(b.x - BAY_W / 2, b.y - 0.135, POD.d / 2 + 0.006);
+    const decMat = new THREE.MeshBasicMaterial({ color: P.accent, toneMapped: false });
+    const dec = add(PG.bar, decMat);
+    dec.position.set(b.x, b.y - 0.135, POD.d / 2 + 0.007);
+    bays.push({ cart, cartMat, pre, preMat, dec, decMat });
+  }
+  const plate = makePlate(400, 168, 1.3);
+  plate.mesh.position.set(-0.7, 0.645, POD.d / 2 + 0.008);
+  g.add(plate.mesh);
+  add(PG.post, M.trim, true).position.set(0.78, 0, POD.d / 2 + 0.68);
+  const arm = add(PG.arm, stripeMat, true);
+  arm.position.set(0.78, 0.92, POD.d / 2 + 0.68);
+  arm.rotation.z = -Math.PI / 2;
+  scene.add(g);
+  const laneMat = new THREE.MeshStandardMaterial({ map: laneTex.tex, emissiveMap: laneGlowTex.tex, emissive: P.accent, emissiveIntensity: 0.12, roughness: 0.8, metalness: 0, transparent: true });
+  const lane = new THREE.Mesh(new THREE.BufferGeometry(), laneMat);
+  lane.receiveShadow = true;
+  const coldMat = new THREE.MeshBasicMaterial({ color: P.starting, transparent: true, opacity: 0, toneMapped: false, depthWrite: false });
+  const cold = new THREE.Mesh(PG.cold, coldMat);
+  scene.add(lane, cold);
+  body.userData = glass.userData = { kind: 'pod', id: p.id };
+  pickables.push(body, glass);
+  return { id: p.id, g, body, glass, glassMat, stripMat, live, kept, demand, demandMat, ghost, ghostMat, fans, bays, plate, arm,
+    lane, laneMat, cold, coldMat, theta: 0, R: POD_R, laneLen: 0, leaving: 0, flash: 0, flashColor: new THREE.Color(),
+    evict: 0, laneGlow: 0, filled: -1, painted: -1, cellsUsed: 0, barrier: 0, smokeAt: 0 };
+}
+function disposePod(v) {
+  scene.remove(v.g, v.lane, v.cold);
+  unpick(v.body, v.glass);
+  v.lane.geometry.dispose();
+  v.plate.dispose();
+  for (const m of [v.glassMat, v.stripMat, v.demandMat, v.ghostMat, v.laneMat, v.coldMat, v.live.material, v.kept.material]) m.dispose();
+  for (const b of v.bays) { b.cartMat.dispose(); b.preMat.dispose(); b.decMat.dispose(); }
+  v.live.dispose(); v.kept.dispose();
+}
+
+function buildLane(v) {
+  const len = laneEnd(v.R) - SW_R;
+  if (Math.abs(len - v.laneLen) < 0.01) return;
+  v.laneLen = len;
+  const geo = new THREE.PlaneGeometry(LANE_W, len).rotateX(-Math.PI / 2);
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setY(i, uv.getY(i) * (len / 0.9));
+  v.lane.geometry.dispose();
+  v.lane.geometry = geo;
+}
+
+const NEUTRAL = new THREE.Color(), NEUTRAL_KEPT = new THREE.Color();
+let runsById = new Map();
+function fillTank(v, p) {
+  const parts = p.state === 'ready' || p.state === 'draining' ? sim.kvParts(p) : [];
+  const per = sim.cfg.kvTokens / CELLS;
+  let i = 0, nl = 0, nk = 0;
+  for (const part of parts) {
+    if (i >= CELLS) break;
+    const run = runsById.get(part.runId);
+    const m = run ? matsOf(run) : null;
+    const count = Math.max(1, Math.round(part.tokens / per));
+    for (let k = 0; k < count && i < CELLS; k++, i++) {
+      if (part.live) { v.live.setMatrixAt(nl, CELL_M[i]); v.live.setColorAt(nl, m ? m.color : NEUTRAL); nl++; }
+      else { v.kept.setMatrixAt(nk, CELL_M[i]); v.kept.setColorAt(nk, m ? m.kept : NEUTRAL_KEPT); nk++; }
+    }
+  }
+  v.live.count = nl; v.kept.count = nk;
+  for (const im of [v.live, v.kept]) { im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; }
+  v.cellsUsed = i;
+}
+
+function paintPodPlate(v, p) {
+  const kv = sim.cfg.kvTokens;
+  const demand = sim.demandOn(p) / kv, used = Math.round((sim.allocated(p) / kv) * 100);
+  const left = Math.max(0, Math.ceil(p.readyAt - sim.t));
+  const fresh = sim.isNew(p);
+  const k = [p.state, p.running.length, p.waiting.length, used, demand.toFixed(2), fresh, left, sim.cfg.maxSeqs, gen].join('|');
+  v.plate.paint(k, (ctx, w, h) => {
+    plateBg(ctx, w, h, 20);
+    const [stText, tok] = STATE[p.state] || STATE.ready;
+    text(ctx, p.name, 22, 56, `600 40px ${SANS}`, P.ink);
+    pill(ctx, fresh ? 'New' : stText, w - 18, 42, `600 22px ${SANS}`, P[`${fresh ? 'starting' : tok}-ink`], P[`${fresh ? 'starting' : tok}-soft`], 'right');
+    let l2, l3, c3 = P['ink-muted'];
+    if (p.state === 'starting') { l2 = 'cold start'; l3 = `${left} s to Ready`; }
+    else if (p.state === 'failed') { l2 = 'lost, with its cache'; l3 = 'its calls are retried'; c3 = P['failed-ink']; }
+    else {
+      l2 = `${p.running.length}/${sim.cfg.maxSeqs} running · ${p.waiting.length} wait`;
+      l3 = `KV ${used}% · need ${demand.toFixed(2)}×`;
+      if (demand > 1) c3 = P.failed;
+    }
+    text(ctx, fitText(ctx, l2, `500 25px ${MONO}`, w - 44), 22, 104, `500 25px ${MONO}`, P['ink-muted']);
+    text(ctx, fitText(ctx, l3, `500 25px ${MONO}`, w - 44), 22, 146, `500 25px ${MONO}`, c3);
+  });
+}
+
+let floorDirty = true, floorKey = '';
+function syncPods(dt) {
+  const n = sim.pods.length;
+  if (n !== arc.n) { arc = arcFor(n); floorDirty = true; }
+  sim.pods.forEach((p, i) => {
+    const theta = (i - (n - 1) / 2) * arc.step;
+    let v = podVis.get(p.id);
+    if (!v) { v = makePod(p); v.theta = theta; v.R = arc.R; podVis.set(p.id, v); }
+    v.tTheta = theta; v.tR = arc.R;
+  });
+  gaugeZ += (arc.gaugeZ - gaugeZ) * Math.min(1, dt * 3);
+  if (frontBays !== Math.min(BAYS, sim.cfg.maxSeqs)) paintFront();
+  for (const [id, v] of podVis) {
+    const p = sim.podById(id);
+    if (!p) {
+      v.leaving += dt;
+      v.g.position.y = -v.leaving * 3;
+      v.laneMat.opacity = Math.max(0, 1 - v.leaving);
+      if (v.leaving > 1) { disposePod(v); podVis.delete(id); }
+      continue;
+    }
+    v.theta += (v.tTheta - v.theta) * Math.min(1, dt * 3);
+    v.R += (v.tR - v.R) * Math.min(1, dt * 3);
+    outward(v.theta, V1);
+    const x = S.x + V1.x * v.R, z = S.z + V1.z * v.R;
+    let y = 0;
+    if (p.state === 'starting') y = -4.3 * (1 - clamp01((sim.t - p.createdAt) / Math.max(0.1, p.readyAt - p.createdAt)));
+    if (p.state === 'failed') y = -0.25;
+    v.g.position.set(x, y, z);
+    v.g.rotation.set(0, -v.theta, p.state === 'failed' ? 0.07 : 0);
+    buildLane(v);
+    v.lane.position.set(S.x + V1.x * (SW_R + v.laneLen / 2), 0.012, S.z + V1.z * (SW_R + v.laneLen / 2));
+    v.lane.rotation.y = -v.theta;
+    v.cold.position.set(x, 0.02, z);
+    v.coldMat.opacity = p.state === 'starting' ? 0.45 + 0.3 * Math.sin(wallNow * 5) : 0;
+
+    // Status light: the state's colour, a flash in the call's colour when one starts (teal cached, amber reread).
+    const tok = (STATE[p.state] || STATE.ready)[1];
+    v.flash = Math.max(0, v.flash - dt * 2.5);
+    v.stripMat.color.set(P[tok]);
+    if (v.flash > 0) v.stripMat.color.lerp(v.flashColor, v.flash);
+    if (p.state === 'draining' && Math.sin(wallNow * 6) < 0) v.stripMat.color.multiplyScalar(0.4);
+    v.evict = Math.max(0, v.evict - dt * 1.6);
+    v.glassMat.emissiveIntensity = v.evict * 0.9;
+    v.glassMat.opacity = 0.07 + v.evict * 0.18;
+    v.laneGlow = Math.max(0, v.laneGlow - dt * 1.5);
+    v.laneMat.emissiveIntensity = 0.12 + v.laneGlow * 1.3;
+
+    // Bays: the calls running, each with its progress (amber rereading the prompt, then teal writing the reply).
+    const nb = Math.min(BAYS, sim.cfg.maxSeqs);
+    v.bays.forEach((b, i) => {
+      const c = i < nb ? p.running[i] : undefined;
+      b.cart.visible = !!c;
+      if (!c) { b.pre.visible = b.dec.visible = false; return; }
+      const m = matsOf(c.run);
+      b.cartMat.color.copy(m.color); b.cartMat.emissive.copy(m.color);
+      const total = Math.max(1e-6, c.endT - c.startT);
+      const pre = Math.min(1, (C.prefillBase + (c.prompt - c.cached) / sim.cfg.prefillTps) / total);
+      const done = clamp01((sim.t - c.startT) / total);
+      b.pre.visible = done > 0.003;
+      b.pre.scale.x = BAY_W * Math.max(0.003, Math.min(done, pre));
+      b.dec.visible = done > pre + 0.003;
+      b.dec.position.x = bayPos(i).x - BAY_W / 2 + BAY_W * pre;
+      b.dec.scale.x = BAY_W * Math.max(0.003, done - pre);
+    });
+    const busy = p.state === 'ready' || p.state === 'draining' ? p.running.length / Math.max(1, sim.cfg.maxSeqs) : 0;
+    for (const f of v.fans) f.rotation.y -= dt * (p.state === 'failed' ? 0 : 1.5 + 22 * busy);
+
+    if (wallNow - v.filled > 0.12) { v.filled = wallNow; fillTank(v, p); }
+    const demand = p.state === 'ready' || p.state === 'draining' ? sim.demandOn(p) / sim.cfg.kvTokens : 0;
+    v.demand.visible = demand > 0.01;
+    v.demand.position.y = TANK_Y0 + Math.min(demand, 1.5) * TANK_FULL;
+    v.demandMat.color.set(demand > 1 ? P.failed : demand > 0.75 ? P.draining : P['accent-ink']);
+    v.ghost.visible = demand > 1;
+    v.ghost.position.y = TANK_Y0 + TANK_FULL;
+    v.ghost.scale.y = Math.max(0.01, (Math.min(demand, 1.5) - 1) * TANK_FULL);
+
+    // The barrier on its lane closes while the pod drains or fails: no new calls.
+    const closed = p.state === 'draining' || p.state === 'failed' ? 1 : 0;
+    v.barrier += (closed - v.barrier) * Math.min(1, dt * 4);
+    v.arm.rotation.z = -Math.PI / 2 * (1 - v.barrier);
+
+    if (p.state === 'failed' && wallNow - v.smokeAt > 0.12) { v.smokeAt = wallNow; puff(V2.set(x, 1.6, z)); }
+    if (wallNow - v.painted > 0.2) { v.painted = wallNow; paintPodPlate(v, p); }
+  }
+}
+
+// ===== Calls: capsules, longer when they carry more context, and the light of each reply =====
+const CG = {
+  packet: new THREE.CapsuleGeometry(0.13, 0.5, 4, 12).rotateX(Math.PI / 2),
+  reply: new THREE.SphereGeometry(0.13, 16, 10),
+};
+const callVis = new Map();
+function bez(a, b, t, lift, out) {
+  const mx = (a.x + b.x) / 2, my = Math.max(a.y, b.y) + lift, mz = (a.z + b.z) / 2, u = 1 - t;
+  return out.set(u * u * a.x + 2 * u * t * mx + t * t * b.x, u * u * a.y + 2 * u * t * my + t * t * b.y, u * u * a.z + 2 * u * t * mz + t * t * b.z);
+}
+const runTop = (r, out) => {
+  const v = runVis.get(r.id);
+  if (!v) return out.set(0, DAIS.h + 0.5, DAIS.z);
+  const s = SLOTS[v.slot];
+  return out.set(s.x, DAIS.h + 0.3 + v.h, s.z);
+};
+const lanePoint = (v, r, y, out) => outward(v.theta, out).multiplyScalar(r).add(S).setY(y);
+const activeCall = new Map();
+const FACE = new THREE.Vector3();
+function syncCalls(dt) {
+  activeCall.clear();
+  const orders = new Map(sim.pods.map(p => [p.id, sim.waitingOrder(p)]));
+  const prio = sim.priorityOn();
+  const seen = new Set();
+  for (const c of sim.calls) {
+    if (c.phase === 'gone') continue;
+    if (!activeCall.has(c.run.id) || c.index < activeCall.get(c.run.id).index) activeCall.set(c.run.id, c);
+    seen.add(c.id);
+    const m = matsOf(c.run);
+    let v = callVis.get(c.id);
+    if (!v) {
+      const mesh = new THREE.Mesh(CG.packet, m.packet);
+      mesh.castShadow = true;
+      mesh.scale.z = 0.6 + 1.3 * Math.min(1, c.prompt / Math.max(1, sim.maxPrompt()));
+      const reply = new THREE.Mesh(CG.reply, m.glow);
+      runTop(c.run, mesh.position);
+      scene.add(mesh, reply);
+      v = { mesh, reply };
+      callVis.set(c.id, v);
+    }
+    const pv = c.pod !== null ? podVis.get(c.pod) : null;
+    const prog = clamp01((sim.t - c.phaseStart) / Math.max(1e-6, c.phaseEnd - c.phaseStart));
+    const home = runTop(c.run, V3);
+    const at = V2;
+    let showPacket = true, showReply = false, faced = false;
+    switch (c.phase) {
+      case 'toGateway':
+        if (prog < 0.7) bez(home, ARCH_PT, prog / 0.7, 2.2, at);
+        else at.lerpVectors(ARCH_PT, SW_TOP, (prog - 0.7) / 0.3);
+        break;
+      case 'hold': case 'retryWait': {
+        const a = wallNow * 2.4 + c.id;
+        at.set(S.x + Math.cos(a) * 1.0, 2.0, S.z + Math.sin(a) * 1.0);
+        break;
+      }
+      case 'toPod':
+        if (pv) {
+          const tail = queueR(pv.R, (orders.get(c.pod) || []).length);
+          if (prog < 0.15) at.lerpVectors(SW_TOP, lanePoint(pv, SW_R, 0.4, V1), prog / 0.15);
+          else lanePoint(pv, SW_R + (tail - SW_R) * ((prog - 0.15) / 0.85), 0.4, at);
+          outward(pv.theta, FACE); faced = true;
+        } else at.copy(SW_TOP);
+        break;
+      case 'waiting': {
+        const i = Math.max(0, (orders.get(c.pod) || []).indexOf(c));
+        if (pv) { lanePoint(pv, queueR(pv.R, i), 0.4, at); outward(pv.theta, FACE); faced = true; } else at.copy(SW_TOP);
+        break;
+      }
+      case 'running': showPacket = false; at.copy(v.mesh.position); break;
+      case 'toAgent':
+        showPacket = false; showReply = true;
+        if (pv && prog < 0.5) lanePoint(pv, laneEnd(pv.R) - (laneEnd(pv.R) - SW_R) * (prog / 0.5), 0.6, at);
+        else bez(SW_TOP, home, Math.max(0, (prog - 0.5) / 0.5), 2.4, at);
+        break;
+      default: at.copy(home);
+    }
+    const settle = c.phase === 'waiting' || c.phase === 'hold' || c.phase === 'retryWait';
+    const prev = V1.copy(v.mesh.position);
+    if (settle) v.mesh.position.lerp(at, Math.min(1, dt * 8)); else v.mesh.position.copy(at);
+    const moved = V3.subVectors(v.mesh.position, prev);
+    if (faced) v.mesh.lookAt(V3.copy(v.mesh.position).add(FACE));
+    else if (moved.lengthSq() > 1e-7) v.mesh.lookAt(moved.add(v.mesh.position));
+    v.reply.position.copy(at);
+    v.mesh.visible = showPacket; v.reply.visible = showReply;
+    if (c.phase === 'retryWait') { m.packet.emissive.set(P.failed); m.packet.emissiveIntensity = 0.4 + 0.5 * Math.abs(Math.sin(wallNow * 8)); }
+    else {
+      m.packet.emissive.copy(m.color);
+      // With progress priority a waiting call glows brighter the closer its run is to its last step.
+      m.packet.emissiveIntensity = c.phase === 'waiting' && prio ? 0.1 + 1.2 * Math.min(1, c.step / c.run.expected) : 0.45;
+    }
+  }
+  for (const [id, v] of callVis) {
+    if (seen.has(id)) continue;
+    scene.remove(v.mesh, v.reply);
+    callVis.delete(id);
+  }
+}
+
+// The followed run's line from its module to its call.
+const TETHER_N = 28;
+const tetherGeo = new THREE.BufferGeometry().setFromPoints(Array.from({ length: TETHER_N }, () => new THREE.Vector3()));
+const tetherMat = new THREE.LineBasicMaterial({ color: P.accent, transparent: true, opacity: 0.9, toneMapped: false });
+const tether = new THREE.Line(tetherGeo, tetherMat);
+tether.frustumCulled = false;
+tether.visible = false;
+scene.add(tether);
+function syncTether() {
+  const r = api.inspected();
+  const c = r ? activeCall.get(r.id) : null;
+  const v = c ? callVis.get(c.id) : null;
+  tether.visible = !!(v && runVis.has(r.id) && (v.mesh.visible || v.reply.visible));
+  if (!tether.visible) return;
+  const a = runTop(r, V1), b = (v.mesh.visible ? v.mesh : v.reply).position;
+  const pos = tetherGeo.attributes.position;
+  for (let i = 0; i < TETHER_N; i++) { bez(a, b, i / (TETHER_N - 1), 1.0, V2); pos.setXYZ(i, V2.x, V2.y, V2.z); }
+  pos.needsUpdate = true;
+  tetherMat.color.set(AP.runColor(r));
+}
+
+// ===== Run state: the run tracker's two tubes and Redis =====
+const tracker = new THREE.Group();
+tracker.position.set(-SIDE_X, 0, NEAR_Z);
+tracker.rotation.y = Math.PI / 5;
+scene.add(tracker);
+// Two tubes, each filled to the pods its number asks for: steps left over the remaining-work target, live context over
+// what one pod's KV cache holds at the pressure target.
+const TUBE = { h: 4.2, y0: 0.72, unit: 0.5, x: 0.55 };
+const RULER = { w: 0.4, px: 128 };
+{
+  const base = new THREE.Mesh(new RoundedBoxGeometry(2.7, 0.7, 1.4, 2, 0.08), M.base);
+  base.position.y = 0.35;
+  base.castShadow = base.receiveShadow = true;
+  tracker.add(base);
+  for (const sx of [-TUBE.x, TUBE.x]) {
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, TUBE.h, 32, 1, true), M.glass);
+    glass.position.set(sx, TUBE.y0 + TUBE.h / 2, 0);
+    glass.renderOrder = 2;
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.09, 32), M.trim);
+    top.position.set(sx, TUBE.y0 + TUBE.h, 0);
+    top.castShadow = true;
+    tracker.add(glass, top);
+  }
+}
+const fillGeo = new THREE.CylinderGeometry(0.27, 0.27, 1, 32).translate(0, 0.5, 0);
+const remainingFill = new THREE.Mesh(fillGeo, std('accent', { emissive: P.accent, emissiveIntensity: 0.35, roughness: 0.3 }));
+const contextFill = new THREE.Mesh(fillGeo, std('failed-ink', { emissive: P['failed-ink'], emissiveIntensity: 0.3, roughness: 0.3 }));
+themed.push(() => { remainingFill.material.emissive.set(P.accent); contextFill.material.emissive.set(P['failed-ink']); });
+remainingFill.position.set(-TUBE.x, TUBE.y0, 0);
+contextFill.position.set(TUBE.x, TUBE.y0, 0);
+const ruler = makePlate(RULER.px, Math.round((TUBE.h / RULER.w) * RULER.px), RULER.w);
+ruler.mesh.position.set(0, TUBE.y0 + TUBE.h / 2, 0);
+const trackerPlate = makePlate(560, 134, 2.5);
+trackerPlate.mesh.position.set(0, 0.35, 0.702);
+tracker.add(remainingFill, contextFill, ruler.mesh, trackerPlate.mesh);
+const TRACKER_TOP = new THREE.Vector3();
+
+const redis = new THREE.Group();
+redis.position.set(-SIDE_X, 0, FAR_Z);
+redis.rotation.y = Math.PI / 5;
+scene.add(redis);
+const redisBand = std('failed', { emissive: P.failed, emissiveIntensity: 0.2, roughness: 0.3, metalness: 0.3 });
+themed.push(() => redisBand.emissive.set(P.failed));
+let redisPulse = 0;
+const REDIS_Y0 = 0.5;
+{
+  const base = new THREE.Mesh(new RoundedBoxGeometry(2.4, REDIS_Y0, 2.4, 2, 0.08), M.base);
+  base.position.y = REDIS_Y0 / 2;
+  base.castShadow = base.receiveShadow = true;
+  redis.add(base);
+  for (let i = 0; i < 3; i++) {
+    const y = REDIS_Y0 + 0.27 + i * 0.6;
+    const disk = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 0.5, 48), M.body);
+    disk.position.y = y;
+    disk.castShadow = disk.receiveShadow = true;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.965, 0.965, 0.07, 48, 1, true), redisBand);
+    band.position.y = y;
+    redis.add(disk, band);
+  }
+}
+const redisTop = makePlate(256, 256, 1.6);
+redisTop.mesh.rotation.x = -Math.PI / 2;
+redisTop.mesh.position.y = REDIS_Y0 + 0.27 + 2 * 0.6 + 0.252;
+const redisPlate = makePlate(560, 107, 2.2);
+redisPlate.mesh.position.set(0, REDIS_Y0 / 2, 1.202);
+redis.add(redisTop.mesh, redisPlate.mesh);
+
+// ===== Autoscaling: Prometheus's dish and KEDA's cabinet =====
+const prom = new THREE.Group();
+prom.position.set(SIDE_X, 0, FAR_Z);
+prom.rotation.y = -Math.PI / 5;
+scene.add(prom);
+const dishGroup = new THREE.Group();
+dishGroup.position.y = 4.4;
+const feedMat = glow('draining');
+let promPulse = 0;
+{
+  const base = new THREE.Mesh(new RoundedBoxGeometry(2.4, 0.5, 1.6, 2, 0.08), M.base);
+  base.position.y = 0.25;
+  base.castShadow = base.receiveShadow = true;
+  const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.3, 32), M.body);
+  foot.position.y = 0.65;
+  foot.castShadow = true;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 3.6, 16), M.trim);
+  mast.position.y = 0.8 + 1.8;
+  mast.castShadow = true;
+  // A shallow bowl: the top cap of a sphere, turned over and tilted towards the scene.
+  const dish = new THREE.Mesh(new THREE.SphereGeometry(1.0, 40, 12, 0, Math.PI * 2, 0, 0.62), std('surface-3', { side: THREE.DoubleSide, roughness: 0.3, metalness: 0.7 }));
+  dish.rotation.x = Math.PI;
+  dish.position.y = 0.95;
+  dish.castShadow = true;
+  const tilt = new THREE.Group();
+  tilt.rotation.x = 0.75;
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8), M.trim);
+  arm.position.y = 0.25;
+  const feed = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 10), feedMat);
+  feed.position.y = 0.52;
+  tilt.add(dish, arm, feed);
+  dishGroup.add(tilt);
+  prom.add(base, foot, mast, dishGroup);
+}
+const promPlate = makePlate(560, 107, 2.2);
+promPlate.mesh.position.set(0, 0.25, 0.802);
+prom.add(promPlate.mesh);
+const DISH_AT = new THREE.Vector3();
+
+const keda = new THREE.Group();
+keda.position.set(SIDE_X, 0, NEAR_Z);
+keda.rotation.y = -Math.PI / 5;
+scene.add(keda);
+const kedaDial = makePlate(512, 512, 1.45);
+const needleGeo = new THREE.BoxGeometry(0.045, 0.62, 0.03).translate(0, 0.23, 0);
+const wantNeedle = new THREE.Mesh(needleGeo, glow('starting'));
+const readyNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.46, 0.025).translate(0, 0.17, 0), glow('ready'));
+const wheel = new THREE.Group();
+let wheelSpin = 0;
+{
+  const plinth = new THREE.Mesh(new RoundedBoxGeometry(2.7, 0.2, 1.6, 2, 0.06), M.base);
+  plinth.position.y = 0.1; plinth.receiveShadow = true;
+  const cab = new THREE.Mesh(new RoundedBoxGeometry(2.3, 2.7, 1.2, 3, 0.12), M.body);
+  cab.position.y = 0.2 + 1.35; cab.castShadow = cab.receiveShadow = true;
+  kedaDial.mesh.position.set(0, 2.12, 0.61);
+  wantNeedle.position.set(0, 2.12, 0.63);
+  readyNeedle.position.set(0, 2.12, 0.625);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.06, 20).rotateX(Math.PI / 2), M.trim);
+  cap.position.set(0, 2.12, 0.65);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.47, 0.05, 10, 40), M.trim);
+  for (let i = 0; i < 4; i++) {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.04, 0.04), M.trim);
+    spoke.rotation.z = (i * Math.PI) / 4;
+    wheel.add(spoke);
+  }
+  wheel.add(ring);
+  wheel.rotation.y = Math.PI / 2;
+  wheel.position.set(1.22, 1.6, 0);
+  keda.add(plinth, cab, kedaDial.mesh, wantNeedle, readyNeedle, cap, wheel);
+}
+const kedaPlate = makePlate(560, 150, 1.95);
+kedaPlate.mesh.position.set(0, 0.85, 0.61);
+keda.add(kedaPlate.mesh);
+const KEDA_AT = new THREE.Vector3();
+let kedaPulse = 0;
+let dialMax = -1;
+function paintKedaDial() {
+  dialMax = sim.cfg.maxPods;
+  kedaDial.paint(`${dialMax}|${gen}`, (ctx) => {
+    ctx.beginPath(); ctx.arc(256, 256, 250, 0, Math.PI * 2); ctx.fillStyle = P.surface; ctx.fill();
+    ctx.lineWidth = 6; ctx.strokeStyle = P['line-strong']; ctx.stroke();
+    for (let v = 0; v <= dialMax; v++) {
+      const a = dialAngle(v);
+      const cx = Math.cos(a), sy = -Math.sin(a);
+      ctx.lineWidth = 5; ctx.strokeStyle = P.ink;
+      ctx.beginPath(); ctx.moveTo(256 + cx * 200, 256 + sy * 200); ctx.lineTo(256 + cx * 232, 256 + sy * 232); ctx.stroke();
+      text(ctx, String(v), 256 + cx * 162, 256 + sy * 162 + 13, `600 38px ${MONO}`, P.ink, 'center');
+    }
+    spaced(ctx, 'PODS', 256, 356, `600 30px ${SANS}`, P['ink-muted'], 4, 'center');
+    ctx.fillStyle = P.starting; ctx.fillRect(176, 392, 26, 8);
+    text(ctx, 'wanted', 210, 404, `500 24px ${SANS}`, P['ink-muted']);
+    ctx.fillStyle = P.ready; ctx.fillRect(176, 428, 26, 8);
+    text(ctx, 'Ready', 210, 440, `500 24px ${SANS}`, P['ink-muted']);
+  });
+}
+// The scene's fixed anchors, computed once they are built: events can fire before the first frame.
+scene.updateMatrixWorld(true);
+dishGroup.getWorldPosition(DISH_AT);
+keda.localToWorld(KEDA_AT.set(0, 2.12, 0.6));
+tracker.localToWorld(TRACKER_TOP.set(0, TUBE.y0 + TUBE.h, 0));
+// The dial runs from 7 o'clock (0) to 5 o'clock (the most pods); angles counter-clockwise from 3 o'clock.
+const dialAngle = v => THREE.MathUtils.degToRad(225 - (v / Math.max(1, sim.cfg.maxPods)) * 270);
+
+// ===== The pool's cache pressure: a gauge behind the pods =====
+const gauge = new THREE.Group();
+scene.add(gauge);
+const GAUGE = { hubY: 3.9, r: 3.3 };
+const dialPlate = makePlate(1024, 560, 7.0);
+const dialH = (7.0 * 560) / 1024;
+dialPlate.mesh.position.set(0, GAUGE.hubY + dialH / 2 - (40 / 1024) * 7.0, 0.04);
+const gaugeNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.95, 0.05).translate(0, 1.47 - 0.3, 0), glow('ink'));
+gaugeNeedle.position.set(0, GAUGE.hubY, 0.12);
+const valuePlate = makePlate(560, 150, 2.6);
+valuePlate.mesh.position.set(0, GAUGE.hubY - 0.62, 0.06);
+{
+  const back = new THREE.Mesh(new THREE.CircleGeometry(GAUGE.r + 0.12, 64, 0, Math.PI), M.body);
+  back.position.set(0, GAUGE.hubY, -0.02);
+  const bar = new THREE.Mesh(new RoundedBoxGeometry(7.2, 1.25, 0.24, 2, 0.06), M.body);
+  bar.position.set(0, GAUGE.hubY - 0.6, -0.06);
+  const bezel = new THREE.Mesh(new THREE.TorusGeometry(GAUGE.r + 0.12, 0.1, 12, 72, Math.PI), M.trim);
+  bezel.position.set(0, GAUGE.hubY, 0);
+  const hubCap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.12, 24).rotateX(Math.PI / 2), M.trim);
+  hubCap.position.set(0, GAUGE.hubY, 0.16);
+  back.castShadow = bar.castShadow = bezel.castShadow = true;
+  gauge.add(back, bar, bezel, hubCap);
+  for (const sx of [-2.9, 2.9]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, GAUGE.hubY - 1.2, 0.2), M.trim);
+    leg.position.set(sx, (GAUGE.hubY - 1.2) / 2, -0.06);
+    leg.castShadow = true;
+    gauge.add(leg);
+  }
+  gauge.add(dialPlate.mesh, gaugeNeedle, valuePlate.mesh);
+}
+const PRESS_MAX = 3;
+function paintDial() {
+  dialPlate.paint(gen, (ctx) => {
+    const cx = 512, cy = 520, R = 470;
+    const ang = v => Math.PI + (v / PRESS_MAX) * Math.PI;
+    ctx.beginPath(); ctx.arc(cx, cy, R, Math.PI, 0); ctx.closePath(); ctx.fillStyle = P.surface; ctx.fill();
+    ctx.lineWidth = 46;
+    ctx.beginPath(); ctx.arc(cx, cy, 420, ang(0), ang(1)); ctx.strokeStyle = P['accent-soft']; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, 420, ang(1), ang(PRESS_MAX)); ctx.strokeStyle = P['failed-soft']; ctx.stroke();
+    ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(cx, cy, 447, ang(0), ang(1)); ctx.strokeStyle = P.accent; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, 447, ang(1), ang(PRESS_MAX)); ctx.strokeStyle = P.failed; ctx.stroke();
+    for (let v = 0; v <= PRESS_MAX + 1e-9; v += 0.25) {
+      const a = ang(v), major = Math.abs(v * 2 - Math.round(v * 2)) < 1e-6;
+      ctx.lineWidth = major ? 6 : 3; ctx.strokeStyle = P.ink;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (major ? 376 : 392), cy + Math.sin(a) * (major ? 376 : 392));
+      ctx.lineTo(cx + Math.cos(a) * 440, cy + Math.sin(a) * 440); ctx.stroke();
+      if (major) text(ctx, String(v), cx + Math.cos(a) * 330, cy + Math.sin(a) * 330 + 14, `600 40px ${MONO}`, P.ink, 'center');
+    }
+    spaced(ctx, 'CACHE PRESSURE', cx, 250, `600 40px ${SANS}`, P.ink, 6, 'center');
+    text(ctx, "live context ÷ the Ready pods' KV cache", cx, 300, `500 28px ${SANS}`, P['ink-muted'], 'center');
+    text(ctx, 'routing finds the cache', cx - 250, 118, `600 26px ${SANS}`, P['accent-ink'], 'center');
+    text(ctx, 'rereads no routing avoids', cx + 250, 118, `600 26px ${SANS}`, P['failed-ink'], 'center');
+  });
+}
+
+// ===== Effects =====
+const fx = [];
+const FX_MAX = 220;
+const FXG = { ring: new THREE.RingGeometry(0.8, 1, 48).rotateX(-Math.PI / 2), spark: new THREE.BoxGeometry(0.13, 0.13, 0.13),
+  puff: new THREE.SphereGeometry(0.3, 12, 8), pulse: new THREE.SphereGeometry(0.16, 12, 8) };
+function addFx(kind, geo, color, life, extra) {
+  if (fx.length >= FX_MAX) return null;
+  const m = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false, toneMapped: kind === 'puff' });
+  const mesh = new THREE.Mesh(geo, m);
+  scene.add(mesh);
+  const f = { kind, mesh, m, life, max: life, ...extra };
+  fx.push(f);
+  return f;
+}
+function ring(pos, color, size, life) { const f = addFx('ring', FXG.ring, color, life, { size }); if (f) f.mesh.position.copy(pos); }
+function spark(pos, color) {
+  const f = addFx('spark', FXG.spark, color, 1.0, { vel: new THREE.Vector3((Math.random() - 0.5) * 1.6, 1.5 + Math.random() * 1.5, (Math.random() - 0.5) * 1.6) });
+  if (f) f.mesh.position.copy(pos);
+}
+function puff(pos) {
+  const f = addFx('puff', FXG.puff, P['ink-muted'], 1.6, { vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.2, (Math.random() - 0.5) * 0.4) });
+  if (f) f.mesh.position.copy(pos);
+}
+// A dot that waits delay seconds, then flies from one point to another in one second, on an arc lift units high.
+function pulse(from, to, color, delay, lift) {
+  const f = addFx('pulse', FXG.pulse, color, 1.0 + delay, { from: from.clone(), to: to.clone(), lift, delay });
+  if (f) f.mesh.visible = false;
+}
+function syncFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.life -= dt;
+    const k = clamp01(f.life / f.max);
+    if (f.kind === 'ring') { f.mesh.scale.setScalar((0.3 + (1 - k) * 1.7) * f.size); f.m.opacity = k * 0.9; }
+    else if (f.kind === 'spark') { f.mesh.position.addScaledVector(f.vel, dt); f.vel.y -= 6 * dt; f.m.opacity = k; }
+    else if (f.kind === 'puff') { f.mesh.position.addScaledVector(f.vel, dt); f.mesh.scale.setScalar(1 + (1 - k) * 2); f.m.opacity = k * 0.35; }
+    else {
+      const t = f.max - f.life - f.delay;
+      f.mesh.visible = t >= 0;
+      if (t >= 0) bez(f.from, f.to, Math.min(1, t), f.lift, f.mesh.position);
+    }
+    if (f.life <= 0) { scene.remove(f.mesh); f.m.dispose(); fx.splice(i, 1); }
+  }
+}
+
+// ===== Sim events =====
+sim.on((type, d) => {
+  if (type === 'route') {
+    const v = podVis.get(d.pod.id);
+    if (v) {
+      pointerTarget = -v.theta;
+      const col = P[AP.reason(d.reason).token];
+      pointerMat.color.set(col);
+      v.laneMat.emissive.set(col);
+      v.laneGlow = 1;
+    }
+    paintTag(d);
+  } else if (type === 'start') {
+    const v = podVis.get(d.pod.id);
+    if (v) { v.flash = 1; v.flashColor.set(d.hit / d.call.prompt >= 0.5 ? P.accent : P.draining); }
+  } else if (type === 'done') {
+    redisPulse = 1;
+  } else if (type === 'evict') {
+    const v = podVis.get(d.pod.id);
+    if (v) {
+      v.evict = 1;
+      const top = TANK_Y0 + Math.ceil(v.cellsUsed / 25) * TANK.layer;
+      for (let i = 0; i < 3; i++) spark(v.g.localToWorld(V2.set(TANK.x + (Math.random() - 0.5) * 1.2, top, (Math.random() - 0.5) * 1.2)), P.failed);
+    }
+  } else if (type === 'pod') {
+    const v = podVis.get(d.pod.id);
+    if (v && d.what === 'killed') {
+      ring(V1.copy(v.g.position).setY(0.03), P.failed, 3.2, 1.2);
+      for (let i = 0; i < 10; i++) spark(V2.copy(v.g.position).setY(1.6), P.failed);
+    }
+    if (v && d.what === 'ready') ring(V1.copy(v.g.position).setY(0.03), P.ready, 2.8, 1.1);
+  } else if (type === 'scale') {
+    kedaPulse = 1; wheelSpin = 1;
+    for (const v of podVis.values()) pulse(KEDA_AT, V1.copy(v.g.position).setY(TOP + 0.3), P.starting, 0, 3);
+  } else if (type === 'runEnd' || type === 'runFail') {
+    const v = runVis.get(d.run.id);
+    if (v) ring(V1.set(SLOTS[v.slot].x, DAIS.h + 0.03, SLOTS[v.slot].z), type === 'runEnd' ? P.ready : P.failed, 0.9, 0.9);
+  }
+});
+
+// Each scrape: Prometheus reads every pod and the run tracker.
+let lastScrapeSeen = -1;
+function syncScrape() {
+  if (sim.lastScrape === lastScrapeSeen) return;
+  lastScrapeSeen = sim.lastScrape;
+  promPulse = 1;
+  // One reading from each pod and one from the tracker, leaving 0.06 s apart so they sweep across the pods.
+  let i = 0;
+  for (const [id, v] of podVis) {
+    const p = sim.podById(id);
+    if (p && p.state !== 'starting') pulse(v.g.localToWorld(V2.set(TANK.x, TANK_Y0 + TANK_H, 0)), DISH_AT, P.draining, 0.06 * i++, 3);
+  }
+  pulse(TRACKER_TOP, DISH_AT, P.draining, 0.06 * i, 3);
+}
+
+// ===== Boards, each frame =====
+function syncBoards(dt) {
+  const s = sim.gauges();
+  const cfg = sim.cfg;
+  // Run tracker: each tube in pods' worth, the number KEDA would divide.
+  const hR = Math.min(8.3, s.remaining / cfg.remainingTarget) * TUBE.unit;
+  const hC = Math.min(8.3, s.context / (cfg.kvTokens * cfg.pressureTarget)) * TUBE.unit;
+  remainingFill.scale.y += (Math.max(0.01, hR) - remainingFill.scale.y) * Math.min(1, dt * 4);
+  contextFill.scale.y += (Math.max(0.01, hC) - contextFill.scale.y) * Math.min(1, dt * 4);
+  // Redis glows when a call's result is written.
+  redisPulse = Math.max(0, redisPulse - dt * 2);
+  redisBand.emissiveIntensity = 0.2 + redisPulse * 1.4;
+  // Prometheus turns slowly and flashes on each read.
+  promPulse = Math.max(0, promPulse - dt * 2);
+  dishGroup.rotation.y += dt * (0.25 + promPulse * 2);
+  feedMat.color.set(P.draining).multiplyScalar(0.6 + promPulse * 0.8);
+  // KEDA: the needles show the pods wanted and the pods Ready; the wheel turns when it scales.
+  if (dialMax !== cfg.maxPods) paintKedaDial();
+  const wantA = dialAngle(Math.min(s.desired, cfg.maxPods)) - Math.PI / 2;
+  const readyA = dialAngle(Math.min(s.ready, cfg.maxPods)) - Math.PI / 2;
+  wantNeedle.rotation.z += (wantA - wantNeedle.rotation.z) * Math.min(1, dt * 5);
+  readyNeedle.rotation.z += (readyA - readyNeedle.rotation.z) * Math.min(1, dt * 5);
+  wheelSpin = Math.max(0, wheelSpin - dt * 0.7);
+  wheel.rotation.x += dt * (cfg.autoscaler === 'off' ? 0 : 0.3 + wheelSpin * 6);
+  kedaPulse = Math.max(0, kedaPulse - dt);
+  // The gauge's needle.
+  const pv = Math.min(PRESS_MAX, s.pressure);
+  const target = Math.PI / 2 - (pv / PRESS_MAX) * Math.PI;
+  gaugeNeedle.rotation.z += (target - gaugeNeedle.rotation.z) * Math.min(1, dt * 4);
+  gaugeNeedle.material.color.set(s.pressure >= 1 ? P.failed : P.ink);
+  gauge.position.set(0, 0, gaugeZ);
+  // The pointer of the switch swings to the lane of the latest decision.
+  let delta = pointerTarget - pointer.rotation.y;
+  delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+  pointer.rotation.y += delta * Math.min(1, dt * 10);
+  tagAge += dt;
+  tagMat.opacity = tagAge < 1.4 ? 1 : Math.max(0, 1 - (tagAge - 1.4) / 0.6);
+  return s;
+}
+
+function paintBoards(s) {
+  const cfg = sim.cfg;
+  const modes = { 'round-robin': 'Round-robin: each call to the next pod in turn', default: 'Default picker: prefix 3 · queue 2 · KV 2',
+    plugin: `Thesis plugin: ${[['affinity', 'affinity'], ['overloadGuard', 'overload guard'], ['parallelSpill', 'parallel spill'], ['leastContext', 'least context'], ['priority', 'priority'], ['warmup', 'warm-up']].filter(([k]) => cfg[k]).map(r => r[1]).join(' · ') || 'no rules on'}` };
+  gateSign.paint(`${modes[cfg.routing]}|${gen}`, (ctx, w, h) => {
+    plateBg(ctx, w, h, 22);
+    spaced(ctx, 'GATEWAY · ENDPOINT PICKER', 34, 64, `600 44px ${SANS}`, P.ink, 3);
+    text(ctx, fitText(ctx, modes[cfg.routing], `500 32px ${SANS}`, w - 68), 34, 116, `500 32px ${SANS}`, P['accent-ink']);
+  });
+  const tools = sim.runs.filter(r => r.state === 'tool').length;
+  const over = Math.max(0, s.live - SLOTS.length);
+  daisPlate.paint(`${s.live}|${tools}|${over}|${gen}`, (ctx, w, h) => {
+    ctx.fillStyle = P['surface-3']; ctx.fillRect(0, 0, w, h);
+    spaced(ctx, 'AGENT RUNTIME', 16, 37, `600 28px ${SANS}`, P.ink, 3);
+    text(ctx, `${s.live} live runs · ${tools} running a tool${over ? ` · ${over} more not shown` : ''}`, w - 16, 37, `500 26px ${MONO}`, P['ink-muted'], 'right');
+  });
+  trackerPlate.paint(`${s.remaining}|${fmtK(s.context)}|${cfg.remainingTarget}|${cfg.kvTokens * cfg.pressureTarget}|${gen}`, (ctx, w, h) => {
+    plateBg(ctx, w, h);
+    spaced(ctx, 'RUN TRACKER', 24, 48, `600 32px ${SANS}`, P.ink, 3);
+    text(ctx, `${s.remaining} steps left ÷ ${cfg.remainingTarget}`, 24, 86, `500 23px ${MONO}`, P['accent-ink']);
+    text(ctx, `${fmtK(s.context)} context ÷ ${fmtK(cfg.kvTokens * cfg.pressureTarget)}`, 24, 118, `500 23px ${MONO}`, P['failed-ink']);
+  });
+  ruler.paint(gen, (ctx, w, h) => {
+    const unitPx = TUBE.unit * (RULER.px / RULER.w);
+    for (let k = 1; k <= 8; k++) {
+      const y = h - k * unitPx;
+      ctx.fillStyle = P['line-strong']; ctx.fillRect(14, y - 2, w - 28, 4);
+      text(ctx, String(k), w / 2, y + 34, `600 30px ${MONO}`, P.ink, 'center');
+    }
+    text(ctx, 'pods', w / 2, h - 18, `500 26px ${SANS}`, P['ink-muted'], 'center');
+  });
+  redisPlate.paint(gen, (ctx, w, h) => {
+    plateBg(ctx, w, h);
+    spaced(ctx, 'REDIS', 24, 66, `600 36px ${SANS}`, P.ink, 4);
+    text(ctx, 'run history, every step', 168, 66, `500 26px ${SANS}`, P['ink-muted']);
+  });
+  redisTop.paint(gen, (ctx) => {
+    ctx.beginPath(); ctx.arc(128, 128, 120, 0, Math.PI * 2); ctx.fillStyle = P['surface-3']; ctx.fill();
+    spaced(ctx, 'REDIS', 128, 140, `600 40px ${SANS}`, P['ink-muted'], 4, 'center');
+  });
+  promPlate.paint(`${cfg.scrape}|${gen}`, (ctx, w, h) => {
+    plateBg(ctx, w, h);
+    spaced(ctx, 'PROMETHEUS', 24, 48, `600 32px ${SANS}`, P.ink, 3);
+    text(ctx, `reads the pods and the tracker every ${cfg.scrape} s`, 24, 88, `500 23px ${SANS}`, P['ink-muted']);
+  });
+  const signal = { off: 'off: a fixed pod count', cpu: 'on CPU', queue: 'on the queue', remaining: 'on remaining work', pressure: 'on cache pressure' }[cfg.autoscaler];
+  kedaPlate.paint(`${signal}|${s.desired}|${s.ready}|${s.starting}|${gen}`, (ctx, w, h) => {
+    plateBg(ctx, w, h);
+    spaced(ctx, 'KEDA', 24, 56, `600 38px ${SANS}`, P.ink, 4);
+    text(ctx, signal, 136, 56, `600 28px ${SANS}`, cfg.autoscaler === 'off' ? P['ink-muted'] : P['starting-ink']);
+    text(ctx, `wants ${s.desired} · ${s.ready} Ready · ${s.starting} starting`, 24, 110, `500 26px ${MONO}`, P['ink-muted']);
+  });
+  valuePlate.paint(`${s.pressure.toFixed(2)}|${s.ready}|${gen}`, (ctx, w, h) => {
+    const over = s.pressure >= 1;
+    rrect(ctx, 3, 3, w - 6, h - 6, 20); ctx.fillStyle = over ? P['failed-soft'] : P.surface; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = over ? P.failed : P.line; ctx.stroke();
+    text(ctx, s.pressure.toFixed(2), w / 2, 92, `500 76px ${MONO}`, over ? P.failed : P.ink, 'center');
+    text(ctx, `${fmtK(s.context)} ÷ ${fmtK(sim.cfg.kvTokens * Math.max(1, s.ready))} tokens`, w / 2, 132, `500 26px ${MONO}`, P['ink-muted'], 'center');
+  });
+}
+
+// ===== Views: each fits a box of the scene to the stage =====
+const box = (x0, y0, z0, x1, y1, z1) => new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+function podsBox() {
+  const b = new THREE.Box3();
+  for (const v of podVis.values()) { b.expandByPoint(V1.copy(v.g.position).add(V2.set(2.2, 4.4, 2.2))); b.expandByPoint(V1.copy(v.g.position).sub(V2.set(2.2, 0, 2.2))); }
+  return b.isEmpty() ? box(-6, 0, -14, 6, 4.4, -6) : b;
+}
+const gaugeBox = () => box(-3.8, 0, gaugeZ - 0.3, 3.8, GAUGE.hubY + GAUGE.r + 0.3, gaugeZ + 0.3);
+// Each view: the boxes to keep in frame, then the camera's elevation and azimuth in radians (0, 0 is level, from the front).
+const VIEWS = {
+  overview: () => [[box(-SIDE_X - 2.2, 0, gaugeZ - 0.4, SIDE_X + 2.2, 3, DAIS.z + DAIS.d / 2 + 2.2),
+    box(-3.6, 0, gaugeZ - 0.4, 3.6, GAUGE.hubY + GAUGE.r + 0.2, gaugeZ + 0.4)], 0.86, 0],
+  runs: () => [[box(-SIDE_X - 2.2, 0, NEAR_Z - 2, DAIS.w / 2 + 0.6, 3.5, DAIS.z + DAIS.d / 2 + 2.2)], 0.72, -0.25],
+  gateway: () => [[box(-3.4, 0, S.z - 2.6, 3.4, ARCH.lintelY + 0.6, ARCH_Z + 0.8)], 0.42, 0.55],
+  // The pods with the gauge behind them, from high enough that the gateway's arch stays out of the frame.
+  pods: () => [[podsBox(), gaugeBox()], 0.75, 0],
+  pressure: () => [[gaugeBox()], 0.36, 0],
+  autoscaler: () => [[box(SIDE_X - 2.4, 0, NEAR_Z - 2.6, SIDE_X + 2.4, 5.6, FAR_Z + 1.6)], 0.5, 0.75],
+};
+const fitCam = new THREE.PerspectiveCamera();
+function fit(boxes, elev, az) {
+  fitCam.copy(camera);
+  fitCam.updateProjectionMatrix();
+  const target = boxes.reduce((u, b) => u.union(b), new THREE.Box3()).getCenter(new THREE.Vector3());
+  const dir = new THREE.Vector3(Math.sin(az) * Math.cos(elev), Math.sin(elev), Math.cos(az) * Math.cos(elev));
+  const corners = [];
+  for (const b of boxes) {
+    for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  }
+  let lo = 0.5, hi = 400;
+  for (let i = 0; i < 30; i++) {
+    const d = (lo + hi) / 2;
+    fitCam.position.copy(target).addScaledVector(dir, d);
+    fitCam.lookAt(target);
+    fitCam.updateMatrixWorld(true);
+    const ok = corners.every(c => { V1.copy(c).project(fitCam); return Math.abs(V1.x) <= 0.9 && V1.y <= 0.8 && V1.y >= -0.86 && V1.z < 1; });
+    if (ok) hi = d; else lo = d;
+  }
+  return { pos: target.clone().addScaledVector(dir, hi), target };
+}
+let tween = null, currentView = 'overview', userMoved = false;
+function flyTo(v, instant) {
+  if (instant || reduceMotion) { camera.position.copy(v.pos); controls.target.copy(v.target); controls.update(); tween = null; return; }
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: v.pos, t1: v.target, start: wallNow, dur: 1.3 };
+}
+function focus(id, instant) {
+  currentView = VIEWS[id] ? id : 'overview';
+  userMoved = false;
+  flyTo(fit(...VIEWS[currentView]()), instant);
+}
+controls.addEventListener('start', () => { tween = null; userMoved = true; });
+
+// ===== Hover and click =====
+const raycaster = new THREE.Raycaster();
+const pointerNdc = new THREE.Vector2();
+let pointerIn = false, pointerPx = { x: 0, y: 0 }, downAt = null;
+function hitAt() {
+  raycaster.setFromCamera(pointerNdc, camera);
+  const hit = raycaster.intersectObjects(pickables, false)[0];
+  return hit ? hit.object.userData : null;
+}
+renderer.domElement.addEventListener('pointermove', e => {
+  const r = renderer.domElement.getBoundingClientRect();
+  pointerNdc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  pointerPx = { x: e.clientX - r.left, y: e.clientY - r.top };
+  pointerIn = true;
+});
+renderer.domElement.addEventListener('pointerleave', () => { pointerIn = false; api.showTip(null); });
+renderer.domElement.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY }; });
+// A click (not a drag) on a module follows its run; on a pod, flies to it.
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+  const t = hitAt();
+  if (t && t.kind === 'run') { const r = sim.runs.find(x => x.id === t.id); if (r) api.inspect(r); }
+  else if (t && t.kind === 'pod') {
+    const v = podVis.get(t.id);
+    if (v) {
+      const c = v.g.position;
+      flyTo(fit([box(c.x - 2.3, 0, c.z - 2.3, c.x + 2.3, 4.5, c.z + 2.3)], 0.45, -v.theta), false);
+      userMoved = true;
+    }
+  }
+});
+function updateHover() {
+  const t = pointerIn ? hitAt() : null;
+  renderer.domElement.style.cursor = t ? 'pointer' : '';
+  api.showTip(t, pointerPx.x, pointerPx.y);
+}
+
+// ===== Theme =====
+function retheme() {
+  P = AP.palette();
+  themeName = AP.theme();
+  gen += 1;
+  scene.background = new THREE.Color(P.bg);
+  scene.fog.color.set(P.bg);
+  hemi.groundColor.set(themeName === 'dark' ? 0x1d2a2e : 0xd9e2e0);
+  renderer.toneMappingExposure = themeName === 'dark' ? 1.0 : 0.95;
+  for (const fn of themed) fn();
+  NEUTRAL.set(P['ink-muted']);
+  NEUTRAL_KEPT.set(P['line-strong']).lerp(new THREE.Color(P.surface), 0.35);
+  for (const [id, m] of runMats) { const r = sim.runs.find(x => x.id === id); if (r) recolor(r, m); }
+  for (const v of podVis.values()) { v.glassMat.color.set(P.ink); v.glassMat.emissive.set(P.failed); v.filled = -1; }
+  floorDirty = true;
+  paintDais();
+  paintSwitch();
+  paintPodTextures();
+  paintDial();
+  paintKedaDial();
+}
+
+function clear() {
+  for (const v of runVis.values()) { scene.remove(v.g); unpick(v.base, v.column); }
+  runVis.clear(); freeSlots.length = 0; nextSlot = 0;
+  for (const v of callVis.values()) scene.remove(v.mesh, v.reply);
+  callVis.clear();
+  for (const id of [...runMats.keys()]) dropMats(id);
+  for (const v of podVis.values()) disposePod(v);
+  podVis.clear();
+  for (const f of fx) { scene.remove(f.mesh); f.m.dispose(); }
+  fx.length = 0;
+  tagAge = 99;
+  lastScrapeSeen = sim.lastScrape;
+  arc = arcFor(sim.pods.length);
+  gaugeZ = arc.gaugeZ;
+  floorDirty = true;
+}
+
+// ===== Start =====
+function resize() {
+  const r = $('stage').getBoundingClientRect();
+  renderer.setSize(r.width, r.height);
+  camera.aspect = r.width / Math.max(1, r.height);
+  camera.updateProjectionMatrix();
+  // A sprite without size attenuation is measured in the view's height, which spans 2·tan(fov/2).
+  const k = (TAG.px / Math.max(1, r.height)) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  tag.scale.set((k * TAG.w) / TAG.h, k, 1);
+  if (!userMoved && !tween) focus(currentView, true);
+}
+resize();
+const api = AP.mount({
+  views: [{ id: 'overview', label: 'Overview' }, { id: 'runs', label: 'Runs' }, { id: 'gateway', label: 'Gateway' }, { id: 'pods', label: 'Pods' },
+    { id: 'pressure', label: 'Pressure' }, { id: 'autoscaler', label: 'Autoscaler' }],
+  see: {
+    runs: 'Each hex module on the platform is a run: its column grows with its context, the lights around it are its steps, and a gear spins while it runs a tool. The capsules flying to the gateway are its calls; a longer capsule carries more context.',
+    gateway: 'The switch behind the arch turns to the lane of the pod the picker chose, and the tag above it says why.',
+    pods: "The glass tank on each pod is its KV cache: one cube per block, in the colour of the run that owns it, bright while a call uses it. A running call sits in one of the pod's bays; the bar under it is amber while the pod rereads the prompt and teal while it writes the reply.",
+    evict: "Evicted cubes pop off the top of the tank in red, where the least recently used contexts sit. The frame around the tank marks what the pod's runs will bring back; when it rises above the tank, red, they cannot all fit.",
+    affinity: "Watch a run's colour: with affinity its cubes stay in one tank. Under round-robin they turn up in every tank, and the amber parts of the bays' bars grow.",
+    pressure: 'The gauge behind the pods shows it.',
+    autoscaler: "Prometheus's dish collects the readings, KEDA's dial shows the pods it wants (blue needle) and the pods Ready (green), and a new pod rises out of the floor through its cold start.",
+    drain: 'A draining pod blinks amber and lowers the barrier on its lane; a failed one smokes and its calls fly back to the switch.',
+    end: 'Drag to orbit, scroll to zoom, hover anything for its numbers.',
+  },
+  clear, retheme, focus,
+});
+retheme();
+document.fonts.ready.then(retheme);
+new ResizeObserver(resize).observe($('stage'));
+
+const clock = new THREE.Clock();
+let hoverAt = 0, boardsAt = 0;
+function frame() {
+  const dt = Math.min(0.1, clock.getDelta());
+  wallNow = clock.elapsedTime;
+  api.frame(dt);
+  runsById = new Map(sim.runs.map(r => [r.id, r]));
+  syncPods(dt);
+  syncRuns(dt);
+  syncCalls(dt);
+  syncTether();
+  syncScrape();
+  const s = syncBoards(dt);
+  if (wallNow - boardsAt > 0.25) { boardsAt = wallNow; paintBoards(s); }
+  const fk = `${arc.n}|${sim.cfg.kvTokens}`;
+  if (floorDirty || fk !== floorKey) { floorDirty = false; floorKey = fk; paintFloor(); }
+  for (const t of [laneTex, laneGlowTex]) t.tex.offset.y -= dt * 0.6;
+  syncFx(dt);
+  if (wallNow - hoverAt > 0.1) { hoverAt = wallNow; updateHover(); }
+  if (tween) {
+    const k = ease(Math.min(1, (wallNow - tween.start) / tween.dur));
+    camera.position.lerpVectors(tween.p0, tween.p1, k);
+    controls.target.lerpVectors(tween.t0, tween.t1, k);
+    if (k >= 1) tween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

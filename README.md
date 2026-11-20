@@ -10,10 +10,10 @@
 ![Python](https://img.shields.io/badge/agent%20%2B%20app-FastAPI-009688?logo=fastapi&logoColor=white)
 ![Angular](https://img.shields.io/badge/UI-Angular-DD0031?logo=angular&logoColor=white)
 ![KEDA](https://img.shields.io/badge/autoscaling-KEDA-1F6FEB)
-![Status](https://img.shields.io/badge/status-Phase%203%20of%207-orange)
+![Status](https://img.shields.io/badge/status-Phase%204%20of%207-orange)
 
 > An LLM agent doesn't make one request. It makes a **chain** of them, and every call resends the whole conversation so far.
-> Today's load balancers treat each of those calls as a stranger. This project teaches the cluster that the calls belong together.
+> Today's inference routers match each call's prefix on its own. They don't know which calls belong to one task, how much of the task is left, or whether the live tasks' contexts still fit in the pods' memory. This project gives the cluster that knowledge and measures what it is worth.
 
 ---
 
@@ -68,11 +68,14 @@ sequenceDiagram
 
 *Illustrative token counts.*
 
-Two more things go wrong at scale:
+The first half is a balancer with no notion of prefixes, such as round-robin. The Inference Extension's default picker already scores prefix matches and keeps much of this cache (hit rate 0.815 against 0.737 for near round-robin, Gate 2). It still moved 44 of 243 later steps to another pod in P3.3, because it scores each call on its own.
+
+Three more things go wrong at scale:
 
 | Problem | Why standard tools miss it |
 |---|---|
-| **Autoscaling reacts too late.** | CPU-based scaling sees nothing (the work is on the GPU). Queue-based scaling only reacts *after* requests pile up. But the moment 20 agent tasks start, the cluster already *knows* roughly how many calls are coming. |
+| **Autoscaling scales on the wrong thing.** | CPU-based scaling sees a vLLM pod as busy or idle, nothing in between: one busy pod reads ~100% of its CPU request (P3.10). Queue-based scaling counts the calls waiting right now, so it can't tell 20 one-step tasks from 20 ten-step ones. |
+| **Contexts outgrow the KV cache.** | When the live tasks' contexts no longer fit in the pods' KV cache, calls lose their cache and wait for memory: first tokens go from under a second to tens of seconds (P4.9). vLLM's KV metric reads the memory in use now, not the context a task between two calls will bring back. |
 | **Scale-down and crashes break tasks.** | A pod removed mid-task loses that task's cache and, without care, the in-flight call. A multi-step task is only useful if it finishes. |
 
 ---
@@ -211,11 +214,13 @@ flowchart TD
 
 | Rule | Without it | With it |
 |---|---|---|
-| **Task affinity** | A task's calls scatter, each move re-processes the whole prompt | Steps 2…n hit the cache on the same pod |
+| **Task affinity** | A task's calls scatter, each move re-processes the whole prompt | Steps 2…n stay on the pod that has their cache, and hit it while that pod's runs fit in its KV cache |
 | **Overload guard** | A pinned task waits behind a long queue rather than move | A spike costs one spilled call; only sustained overload moves the task (and its cache) |
 | **Parallel calls** | Calls fired together in one reply land wherever | They share the pod while it has room, spill only under overload |
-| **Progress priority** | A task one step from done waits behind a brand-new one | Nearly finished tasks finish; aging guarantees nobody starves |
-| **Warm-up routing** | A fresh pod idles while warm pods queue | New runs prefer the newest pod right after it becomes Ready |
+| **Progress priority** | A task one step from done waits behind a brand-new one | A run's last steps go ahead of new runs' first steps; aging bounds how long any call can be overtaken |
+| **Warm-up routing** | A fresh pod idles while warm pods queue | New runs go to a pod right after it becomes Ready |
+
+What each rule was shown to do, and where it was not, is in [Results so far](#results-so-far).
 
 ---
 
@@ -225,29 +230,37 @@ Each active run knows its current step and how many steps runs of its kind usual
 
 $$\text{remaining work} = \sum_{\text{active runs}} \max(\text{expected steps} - \text{step},\ 1)$$
 
-That number is exported as a Prometheus metric and **KEDA** scales the vLLM Deployment on it. It jumps the moment tasks *start*, not after their calls start queueing.
+That number is exported as a Prometheus metric and **KEDA** scales the vLLM Deployment on it. It counts the work the active tasks still have, not only the calls waiting right now, so it sizes the pool to the work.
 
 ```mermaid
 flowchart LR
     subgraph t0["t = 0 s"]
-        b["Burst: 20 new<br/>agent tasks start"]
+        b["Burst: 5 agent tasks<br/>start at once"]
     end
     subgraph signals["What each autoscaler sees"]
-        cpu["CPU HPA<br/>CPU barely moves<br/>(the work is on the GPU)"]
-        queue["KEDA on queue depth<br/>sees load only after<br/>calls pile up in vLLM"]
-        rw["KEDA on remaining work<br/>sees ~20 × expected steps<br/>immediately"]
+        cpu["CPU HPA<br/>one busy pod reads ~100%<br/>(busy or idle, nothing between)"]
+        queue["KEDA on queue depth<br/>the calls waiting now"]
+        rw["KEDA on remaining work<br/>the steps the active<br/>tasks have left"]
     end
-    subgraph outcome["Result"]
-        late["Scales late, or never"]
-        mid["Scales once users<br/>are already waiting"]
-        early["Scale-up starts before<br/>the queue builds"]
+    subgraph outcome["Measured (P3.10)"]
+        cpuR["Scales to the maximum<br/>whenever anything runs"]
+        queueR["Same completion,<br/>up to 8 pods"]
+        rwR["Same completion,<br/>4-7 pods, 31-56% fewer<br/>idle pod-minutes"]
     end
-    b --> cpu --> late
-    b --> queue --> mid
-    b --> rw --> early
+    b --> cpu --> cpuR
+    b --> queue --> queueR
+    b --> rw --> rwR
 ```
 
-Cold start is real: a new vLLM pod needs time to load the model and warm up. That is exactly why a **leading** signal matters, and why the simulator models cold start explicitly.
+Cold start is real: a new vLLM pod needs minutes to load the model, and the simulator models it (140 s, calibrated from the real GPU). On a burst both KEDA signals scaled in the same scrape, because a burst's tasks start and queue at once, so cold start decided the time to capacity; on fan-out, remaining work scaled 30 s earlier. Where remaining work differs is how many pods it pays for (P3.10).
+
+### Cache pressure (Phase 4)
+
+A second signal, from the same run tracker:
+
+$$\text{cache pressure} = \frac{\sum_{\text{live runs}} \text{prompt tokens of the run's latest call}}{\text{pods} \times \text{KV-cache tokens per pod}}$$
+
+A run counts from its first call to its last, also while it waits on a tool and vLLM holds no request of it. P4.9 measured the curve on every real-pod replay (below); P4.10 exports the numerator as `thesis_context_tokens`; P4.11 shows pressure in the cluster panel; P4.12 has KEDA scale real pods on it, with a target that is a figure of the hardware: one pod's KV cache.
 
 ---
 
@@ -410,7 +423,7 @@ flowchart LR
 
 ## Status
 
-Planned in 7 phases, each closed by a gate check and a git tag. Phases 0–2 are on `master`; Phase 3 is on `feature/phase-3`.
+Planned in 7 phases, each closed by a gate check and a git tag. Phases 0–3 are on `master`; Phase 4 is on `feature/phase-4`.
 
 ```mermaid
 gantt
@@ -421,8 +434,8 @@ gantt
     Phase 0 · Environment (GPU in Kubernetes)    :done,   p0, 2026-10-21, 2026-10-25
     Phase 1 · Walking skeleton + fine-tuning     :done,   p1, 2026-10-26, 2026-11-01
     Phase 2 · Workload + simulator + app backend :done,   p2, 2026-11-02, 2026-11-09
-    Phase 3 · Affinity, overload, remaining work :active, p3, 2026-11-09, 2026-11-15
-    Phase 4 · Priority, drain, failover          :        p4, 2026-11-16, 2026-11-22
+    Phase 3 · Affinity, overload, remaining work :done,   p3, 2026-11-09, 2026-11-15
+    Phase 4 · Priority, drain, failover          :active, p4, 2026-11-16, 2026-11-22
     section Evaluate
     Phase 5 · Experiments E1–E3                  :        p5, 2026-11-23, 2026-11-29
     section Write
@@ -435,8 +448,8 @@ gantt
 | **0 · Environment** | ✅ Gate 0 | GPU inside Kubernetes under WSL2, two vLLM pods sharing one GPU, prefix caching visible |
 | **1 · Walking skeleton** | ✅ Gate 1 | `make up` from zero, Prometheus + Grafana, gateway + Endpoint Picker, agent runtime with Redis history, Angular step view, `make smoke` end to end; LoRA fine-tune of the small model for tool calling |
 | **2 · Workload + simulator** | ✅ Gate 2 | All three demo scenarios, call recorder, trace format + replayer, AgentProcessBench converter, first baseline, per-step badges in the UI, calibrated and validated simulator, app backend on SQLite |
-| **3 · Affinity, overload, remaining work** | 🔄 in progress | ✅ P3.1 picker built from source · ✅ P3.2 plugin skeleton + feature flags · ✅ P3.3 task affinity · ✅ P3.4 pod removed → runs remapped · ⏳ overload guard · parallel calls · burst replay · run tracker · KEDA · baselines · cluster panel · chats API · chat UI |
-| **4 · Priority, drain, failover** | ⏳ | Progress priority, warm-up routing, drain, failover, real 1↔2 validation, demo buttons, scenario suite. **Feature freeze 22.11.2026** |
+| **3 · Affinity, overload, remaining work** | ✅ Gate 3 | Picker built from source, plugin with one flag per rule, task affinity, pod removed → runs remapped, overload guard, parallel calls, burst replay, run tracker, KEDA on remaining work, CPU and queue baselines, cluster panel, chats API, chat UI. Green with stated limits: P3.3 and P3.7 closed red with their results (below) |
+| **4 · Priority, drain, failover** | 🔄 in progress | ✅ P4.1 progress priority · ✅ P4.2 warm-up routing · ✅ P4.3 drain · ✅ P4.4 failover · ✅ P4.9 cache pressure measured · 🔄 P4.10 context-tokens gauge · ⏳ real 1↔2 validation · demo buttons · scenario suite · chat routing step · pressure in the panel · KEDA on context tokens. **Feature freeze 22.11.2026** |
 | **5 · Experiments** | ⏳ | E1, E2, E3 with repetitions; demo rehearsal |
 | **6–7 · Text and defense** | ⏳ | Thesis text, mentor review, defense by 18.12.2026 |
 
@@ -444,7 +457,7 @@ gantt
 
 ## Results so far
 
-All numbers below are measured on the laptop described at the end, with the scaled-down setup. Each comes from a hash-stamped experiment file and is logged in [`experiments/log.md`](experiments/log.md), green or red (Phase 3 entries are on the `feature/phase-3` branch until it is merged).
+All numbers below are measured on the laptop described at the end, with the scaled-down setup. Each comes from a hash-stamped experiment file and is logged in [`experiments/log.md`](experiments/log.md), green or red (Phase 4 entries are on the `feature/phase-4` branch until it is merged).
 
 ### A small model learned to call tools (Phase 1–2)
 
@@ -489,7 +502,7 @@ Medians are within 15%. Tails are optimistic: on a real pod, calls that don't fi
 | Prompt tokens left uncached (calls under the KV limit) | 91,505 | **64,698 (−29%)** |
 | Overall prefix-cache hit rate | 0.821 | 0.807 |
 
-The pins hold, and where the default picker moved a run, affinity kept its cache: higher hit rate in 12 of those 15 runs. The overall rate did **not** go up: two long runs were pinned to the same pod at once, together over its KV capacity, and evicted each other. Affinity alone has no answer to cache pressure; that is the overload guard's job (next).
+The pins hold, and where the default picker moved a run, affinity kept its cache: higher hit rate in 12 of those 15 runs. The overall rate did **not** go up: two long runs were pinned to the same pod at once, together over its KV capacity, and evicted each other, while the two pods together had room (this steady load passed a pool pressure of 1 in 11 of 2,908 calls, P4.9). Affinity pins without checking that a pod's runs still fit.
 
 ### A pod disappears (Phase 3, P3.4)
 
@@ -502,6 +515,75 @@ On simulated pods, the pod holding the most live runs was deleted mid-replay.
 | Sent after the pod left the pool | 126 | **0** |
 
 Both affected runs were remapped once to the surviving pod and stayed there; 20 of 20 runs sent their end-of-run signal to the picker.
+
+### Overload guard and parallel calls (Phase 3, P3.5–P3.6)
+
+On simulated pods, under bursts:
+
+| Rule | Calls moved | Check |
+|---|---|---|
+| Overload guard | 12 spills on the burst, 0 remaps on short spikes | Every spill over the threshold; a remap on sustained overload shown by the unit tests only |
+| Parallel calls | 28 spills on burst-fan-out, 1 on steady-fan-out | Every spill over the threshold; each run's next call back on its pin |
+
+### The plugin under a burst on real pods (Phase 3, P3.7)
+
+4 replays of 357 calls on 2 real pods, both variant orders, 0 failed.
+
+| p95 | Plugin | Default picker |
+|---|---|---|
+| First token | 47.88 s | 49.54 s |
+| Run completion | 426.48 s | 405.77 s (+5.1%, against a 5% tolerance) |
+
+- Closed red on run completion, but the difference is smaller than the laptop's swing between files (11–21%), so it shows no difference either way.
+- Two first-call rules tried after it (P3.7b) were not faster in both orders either: least work −7.5% / +4.0% total run time by order, least context −14.1% / +24.4%.
+- Why: 86–89% of these calls started with more live context than the two pods' KV cache holds (next section). There, no placement can keep every run's cache.
+
+### Cache pressure (Phase 4, P4.9)
+
+Every later-step call of the real-pod replays, by the cache pressure at its start: 7,412 calls from 28 variants in 14 files, every real-pod variant with a fixed pod count (KV cache 4,384 tokens per pod).
+
+![Cache pressure: first-token time and cached share by pressure](experiments/graphs/pressure-23bc873caac9.png)
+
+| Pressure | Calls | First token p50 | p90 | Cached share |
+|---|---|---|---|---|
+| under 0.75 | 3,174 | 0.4 s | 0.7 s | 0.86 |
+| 0.75–1 | 579 | 0.6 s | 4.9 s | 0.75 |
+| 1–1.25 | 289 | 1.7 s | 15.8 s | 0.74 |
+| 1.25–1.5 | 317 | 4.9 s | 22.6 s | 0.57 |
+| 1.5–2 | 529 | 7.1 s | 27.9 s | 0.45 |
+| 2–3 | 1,870 | 13.2 s | 30.5 s | 0.35 |
+| 3 and over | 654 | 23.1 s | 41.7 s | 0.34 |
+
+- The median stays under a second up to 1 and bends between 1 and 1.5; the p90 bends earlier, at 0.75–1.
+- The default picker and the plugin give the same curve; on the burst files 89% and 86% of their calls were over 1.
+- **Limit:** pressure and the queue rise together, and medians in one bucket spread widely between files, so this is the pooled shape, not a law per replay, and it does not separate the KV cache from the queue.
+
+### Autoscaling: remaining work against the queue and CPU (Phase 3, P3.9b–P3.10)
+
+Simulated pods (cold start 140 s), one seed each:
+
+| Replay | Signal | Pods asked for | Time to capacity | Run time p50 / p95 | Idle pod-minutes |
+|---|---|---|---|---|---|
+| Burst | Remaining work | 4, then 5 | 145 s | 40.0 / 144.7 s | 9.1 |
+| Burst | Queue | 5, then 8 | 140 s | 39.0 / 145.6 s | 14.9 |
+| Fan-out | Remaining work | 2, 4, then 6 | 140 s | 57.1 / 186.0 s | 9.7 |
+| Fan-out | Queue | 3, 7, then 8 | 140 s | 49.2 / 180.5 s | 19.0 |
+
+- Completion is the same within noise. Remaining work asked for fewer pods and cost **31–56% fewer idle pod-minutes** in all four pairs (these and a first run of each).
+- On the burst both scaled in the same scrape: remaining work did **not** scale before the queue built (P3.9b). It counts tasks that have started, and a burst's tasks start and queue at once. On fan-out it scaled 30 s earlier.
+- CPU HPA on real 1↔2: one busy pod reads ~100% of its CPU request, so it scaled to 2 as soon as anything ran and would not scale down while anything ran.
+
+### Priority, warm-up, drain and failover (Phase 4, P4.1–P4.4)
+
+| Rule | Check | On | Off |
+|---|---|---|---|
+| Progress priority | 1 real pod: a run's last step sent behind 6 waiting first steps | Went ahead of all 6, first byte after 31.8 s | Behind all 6, 81.7 s |
+| Warm-up routing | Sim burst with KEDA: first calls while a pod was new | 14 of 14 to a new pod | 8 of 14 |
+| Drain | Real 2 → 1 pods during a replay | 0 interrupted runs | 2 |
+| Failover (retry) | Sim burst, the pod with the most live runs force-deleted mid-replay | 30 of 30 runs completed | 27 of 30 |
+
+- Each check shows the mechanism, on one seed. The effect on run times is for Phase 5: warm-up's one run had a worse run-time p50 (56.6 s against 41.8 s), each burst going whole to one new pod.
+- Failover on live agent runs on real pods too: with a vLLM pod killed under 5 runs, and with the agent runtime killed under 5 more, all 10 runs finished with correct answers.
 
 ---
 
@@ -540,7 +622,7 @@ Switching between the real GPU, the simulator and the demo model is one profile 
 config/        profiles (real, sim, demo): every tunable, nothing hardcoded
 schemas/       versioned JSON schemas: headers, trace, run request, run events, run calls
 infra/         cluster setup scripts, Helm charts and values, manifests
-gateway/       Go Endpoint Picker plugin (on feature/phase-3)
+gateway/       Go Endpoint Picker plugin
 agent/         Python agent runtime, tools, run tracker
 app/           Python app backend + SQLite: users, sessions, chats, attachments
 loadgen/       trace recorder, replayer, converters, experiment runner, graphs
