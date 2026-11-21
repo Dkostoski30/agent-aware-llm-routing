@@ -42,6 +42,13 @@ from load_generator.replay import failed_calls
 TOKEN_SECRET = "demo-runner-token"
 # The vLLM Deployment's pods (infra/charts/vllm), the only pods Kill may delete.
 VLLM_PODS = "app.kubernetes.io/name=vllm"
+# One line per vLLM pod: its name, its Ready condition's status, and its deletion time, which is
+# empty unless the pod is terminating (P4.6c).
+POD_FIELDS = (
+    r'jsonpath={range .items[*]}{.metadata.name}{"\t"}'
+    r'{.status.conditions[?(@.type=="Ready")].status}{"\t"}'
+    r'{.metadata.deletionTimestamp}{"\n"}{end}'
+)
 REPLAYS_DIR = "experiments/results/replays"
 # Every address of the host: the app backend comes in on the node's IP, which a WSL restart
 # changes (infra/deploy-app.sh writes the current one into the Endpoints).
@@ -64,6 +71,25 @@ class UnknownPattern(Exception):
 
 class NoSuchPod(Exception):
     """No vLLM pod has that name."""
+
+
+class LastReadyPod(Exception):
+    """No other vLLM pod is Ready, so the killed pod's runs would have nowhere to go."""
+
+
+class _Pod(NamedTuple):
+    name: str
+    # Ready and not terminating: a pod that is draining or being deleted is leaving.
+    serving: bool
+
+
+def _vllm_pods(listing: str) -> list[_Pod]:
+    """The pods in kubectl's POD_FIELDS output."""
+    pods = []
+    for line in listing.splitlines():
+        name, ready, deleted = line.split("\t")
+        pods.append(_Pod(name=name, serving=ready == "True" and deleted == ""))
+    return pods
 
 
 @dataclass(frozen=True)
@@ -235,14 +261,17 @@ class Runner:
             return self._status()
 
     def kill(self, pod: str) -> dict[str, Any]:
-        """Deletes pod with no grace, if the vLLM Deployment has it. A kubectl that fails raises
-        CalledProcessError, and the kill is not recorded."""
+        """Deletes pod with no grace, if the vLLM Deployment has it and another of its pods is
+        serving (P4.6c: a second press 2 s after the first killed both pods, and the runs failed).
+        A kubectl that fails raises CalledProcessError, and the kill is not recorded."""
         with self._lock:
-            names = self._kubectl(
-                "get", "pods", "-l", VLLM_PODS, "-o", "jsonpath={.items[*].metadata.name}"
-            ).split()
-            if pod not in names:
+            pods = _vllm_pods(self._kubectl("get", "pods", "-l", VLLM_PODS, "-o", POD_FIELDS))
+            if pod not in [each.name for each in pods]:
                 raise NoSuchPod(f"no vLLM pod {pod}")
+            if not any(each.serving for each in pods if each.name != pod):
+                raise LastReadyPod(
+                    f"no other vLLM pod is Ready: {pod}'s runs would have nowhere to go"
+                )
             self._kubectl("delete", "pod", pod, "--grace-period=0", "--force", "--wait=false")
             print(f"demo-runner: killed {pod}", flush=True)
             self._last_kill = {"pod": pod, "at": self._clock().strftime(TIME_FORMAT)}
@@ -328,6 +357,8 @@ def serve(runner: Runner, token: str, port: int) -> Iterator[int]:
                 self._answer(202, runner.kill(pod))
             except NoSuchPod as error:
                 self._answer(404, {"detail": str(error)})
+            except LastReadyPod as error:
+                self._answer(409, {"detail": str(error)})
             except subprocess.CalledProcessError as error:
                 message = (error.stderr or "").strip() or f"exit {error.returncode}"
                 self._answer(502, {"detail": f"kubectl {error.cmd[1]} failed: {message}"})

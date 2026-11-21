@@ -164,6 +164,28 @@ describe('DemoControls', () => {
     expect(caption()).toContain(`${STARTING.name} killed at 21:07:41 UTC.`);
   });
 
+  it('says it is killing the pod while the press is in flight (P4.6c)', () => {
+    answer();
+    expect(kill().textContent?.trim()).toBe('Kill pod');
+    press(kill());
+    expect(kill().textContent?.trim()).toBe(`Killing ${READY.name}…`);
+    expect(kill().disabled).toBe(true);
+    http.expectOne(DEMO_KILL_API).flush({ replay: null, last_kill: { pod: READY.name, at: '2026-11-20T21:07:41Z' } });
+    fixture.detectChanges();
+    expect(kill().textContent?.trim()).toBe('Kill pod');
+  });
+
+  it('shows the runner refusing the last Ready pod, and offers Kill again', () => {
+    answer();
+    press(kill());
+    const detail = `no other vLLM pod is Ready: ${READY.name}'s runs would have nowhere to go`;
+    http.expectOne(DEMO_KILL_API).flush({ detail }, { status: 409, statusText: 'Conflict' });
+    fixture.detectChanges();
+    expect(caption()).toBe(detail);
+    expect(kill().textContent?.trim()).toBe('Kill pod');
+    expect(kill().disabled).toBe(false);
+  });
+
   it('kills the first pod on offer when none was chosen', () => {
     answer();
     press(kill());

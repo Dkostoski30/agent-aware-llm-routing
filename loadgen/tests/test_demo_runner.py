@@ -18,11 +18,13 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 from load_generator.demo_runner import (
+    POD_FIELDS,
     TOKEN_SECRET,
     VLLM_PODS,
     Busy,
     DemoRunnerError,
     DemoSettings,
+    LastReadyPod,
     NoSuchPod,
     Runner,
     UnknownPattern,
@@ -84,17 +86,24 @@ class FakeLauncher:
 
 
 class FakeKubectl:
-    """Answers the pod list with pods; records every call."""
+    """Answers the pod list with pods, as kubectl prints POD_FIELDS: each pod Ready unless in
+    unready, terminating when in leaving; records every call."""
 
     def __init__(self, pods: list[str]) -> None:
         self.pods = pods
+        self.unready: set[str] = set()
+        self.leaving: set[str] = set()
         self.calls: list[tuple[str, ...]] = []
         self.fail_delete = False
 
     def __call__(self, *args: str) -> str:
         self.calls.append(args)
         if args[:2] == ("get", "pods"):
-            return " ".join(self.pods)
+            return "".join(
+                f"{pod}\t{'False' if pod in self.unready else 'True'}\t"
+                f"{'2026-11-21T19:52:13Z' if pod in self.leaving else ''}\n"
+                for pod in self.pods
+            )
         if args[:2] == ("delete", "pod") and self.fail_delete:
             raise subprocess.CalledProcessError(1, ["kubectl", *args], stderr="Forbidden")
         if args[:2] == ("delete", "pod"):
@@ -351,7 +360,7 @@ def test_stop_with_nothing_started_does_nothing(runner: Runner) -> None:
 def test_kill_force_deletes_an_existing_vllm_pod(runner: Runner, kubectl: FakeKubectl) -> None:
     status = runner.kill(POD_B)
     assert kubectl.calls == [
-        ("get", "pods", "-l", VLLM_PODS, "-o", "jsonpath={.items[*].metadata.name}"),
+        ("get", "pods", "-l", VLLM_PODS, "-o", POD_FIELDS),
         ("delete", "pod", POD_B, "--grace-period=0", "--force", "--wait=false"),
     ]
     assert status["last_kill"] == {"pod": POD_B, "at": "2026-11-20T21:05:03Z"}
@@ -366,6 +375,39 @@ def test_kill_of_a_pod_that_is_not_a_vllm_pod_deletes_nothing(
         runner.kill(pod)
     assert all(call[0] != "delete" for call in kubectl.calls)
     assert runner.status()["last_kill"] is None
+
+
+# The pods kubectl lists 2 s after a kill (P4.6b's run): the one left, and its replacement.
+POD_NEW = "vllm-568fc4b669-r3pl1"
+
+
+@pytest.mark.parametrize(
+    ("pods", "unready", "leaving"),
+    [
+        ([POD_A], set(), set()),
+        ([POD_A, POD_NEW], {POD_NEW}, set()),
+        ([POD_A, POD_B], set(), {POD_B}),
+        ([POD_A, POD_B], {POD_A, POD_B}, set()),
+    ],
+    ids=["alone", "other-starting", "other-terminating", "none-ready"],
+)
+def test_kill_is_refused_when_no_other_vllm_pod_is_ready(
+    runner: Runner, kubectl: FakeKubectl, pods: list[str], unready: set[str], leaving: set[str]
+) -> None:
+    kubectl.pods, kubectl.unready, kubectl.leaving = pods, unready, leaving
+    with pytest.raises(LastReadyPod, match=f"no other vLLM pod is Ready: {POD_A}"):
+        runner.kill(POD_A)
+    assert all(call[0] != "delete" for call in kubectl.calls)
+    assert runner.status()["last_kill"] is None
+
+
+def test_an_unready_pod_may_be_killed_while_another_serves(
+    runner: Runner, kubectl: FakeKubectl
+) -> None:
+    kubectl.pods, kubectl.unready = [POD_A, POD_NEW], {POD_NEW}
+    runner.kill(POD_NEW)
+    assert kubectl.calls[-1][:3] == ("delete", "pod", POD_NEW)
+    assert runner.status()["last_kill"]["pod"] == POD_NEW
 
 
 def test_a_failed_delete_is_not_recorded_as_a_kill(runner: Runner, kubectl: FakeKubectl) -> None:
@@ -466,6 +508,14 @@ def test_post_kill_of_an_unknown_pod_is_404(api: httpx.Client) -> None:
     response = api.post("/kill", json={"pod": "vllm-gone"})
     assert response.status_code == 404
     assert "vllm-gone" in response.json()["detail"]
+
+
+def test_post_kill_of_the_last_ready_pod_is_409(api: httpx.Client, kubectl: FakeKubectl) -> None:
+    kubectl.unready = {POD_B}
+    response = api.post("/kill", json={"pod": POD_A})
+    assert response.status_code == 409
+    assert response.json()["detail"].startswith(f"no other vLLM pod is Ready: {POD_A}")
+    assert all(call[0] != "delete" for call in kubectl.calls)
 
 
 def test_a_kubectl_failure_is_502_with_its_message(api: httpx.Client, kubectl: FakeKubectl) -> None:

@@ -13,6 +13,18 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-22 · P4.6c · green (Kill refuses the last Ready vLLM pod, and says it is killing while the press runs)
+Command: tests first (Claude): `loadgen/tests/test_demo_runner.py` and `demo-controls.spec.ts` red, then green; 10 changes to the new rule lines, all failing a test · the user: `make test`, `make lint`
+Result:
+- `make test` exit 0: 2732 Python tests, the Go packages, 22 training tests, 256 UI specs (23 files); `make lint` exit 0.
+- The runner's kubectl list (card 65's `POD_FIELDS`), run read-only on the live cluster while planning, printed `name<TAB>True<TAB>` for each of the two vLLM pods: an empty deletion time when the pod is not terminating.
+- Changes to the new lines, each failing a test: the Ready check dropped, the deletion check dropped, `and` made `or`, the chosen pod counted as its own fallback, the guard inverted, the 409 made 404 (runner, 6 of 6); the label's reset dropped after an answer and after a refusal, the label never set, the label's condition inverted (UI, 4 of 4).
+Notes:
+- The fix for P4.6b's finding (card 65, the user's choice of the four offered): the host runner refuses a kill when no other vLLM pod is Ready and not terminating, with a 409 the caption shows; nothing is deleted or recorded. The pod chosen may itself be unready. The runner reads the cluster at the press, so a second press 2 s after a kill sees the force-deleted pod gone and the replacement not Ready, and is refused; the UI's pod list can be a poll behind, so the guard is not in the UI.
+- While a Kill press is in flight (~1.2-1.7 s in P4.6b's run) the button reads `Killing <pod>…`.
+- One existing test changed with the user's yes (rule 4): the kill test's expected kubectl list call, as the list now reads readiness; its fake kubectl prints the new form. No other existing assertion changed.
+- Limits: done by tests only, no live check of its own (the user's choice); the refusal has not yet been seen on real pods.
+
 ### 2026-11-21 · P4.6b · green (a step sent again shows it: `retry 1` read on the other pod after a kill; failover-live's log matched the saved calls)
 Command: tests first (Claude): `make test`, `make lint`; 18 changes to the new rule lines, all failing a test · the user, on real after `make down`, `make up`: `make failover-live EXPERIMENT=experiments/failover-live-p4-6b.yaml` (hash 1f5b56754c1d); then `make demo-runner`, `make app-forward`, `make ui PROFILE=real`: a chat question with Kill on its pod, and Start (steady) with a Kill mid-replay. Then Claude, read only: the results JSON, the agent's and the app backend's logs, the run's calls in Redis, the replay's file
 Result:

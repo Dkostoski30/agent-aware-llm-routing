@@ -49,7 +49,7 @@ const NO_ANSWER = 'The app backend did not answer.';
               [disabled]="!view.runner || !pod() || pressing()"
               (click)="kill()"
             >
-              <app-icon name="power" />Kill pod
+              <app-icon name="power" />{{ killing() === null ? 'Kill pod' : 'Killing ' + killing() + '…' }}
             </button>
             <select class="ag-select" aria-label="Pod to kill" (change)="choosePod($event)">
               @for (offer of offered(); track offer.name) {
@@ -115,6 +115,9 @@ export class DemoControls {
   protected readonly chosenPattern = signal<string | null>(null);
   private readonly chosenPod = signal<string | null>(null);
   protected readonly pressing = signal(false);
+  // The pod a Kill press is deleting until the runner answers: the runner lists the pods and then deletes, both with
+  // kubectl, ~1.5 s in which the button showed nothing (P4.6c).
+  protected readonly killing = signal<string | null>(null);
   // A press the runner or the app backend refused, shown in place of the caption until the next read.
   protected readonly refusal = signal<string | null>(null);
   private requests = new Subscription();
@@ -158,6 +161,7 @@ export class DemoControls {
   }
 
   protected kill(): void {
+    this.killing.set(this.pod());
     this.press(DEMO_KILL_API, { pod: this.pod() });
   }
 
@@ -183,11 +187,13 @@ export class DemoControls {
       this.http.post<DemoRunner>(url, body).subscribe({
         next: (runner) => {
           this.pressing.set(false);
+          this.killing.set(null);
           this.refusal.set(null);
           this.view.update((view) => view && { ...view, runner, runner_error: null });
         },
         error: (error: HttpErrorResponse) => {
           this.pressing.set(false);
+          this.killing.set(null);
           const detail = (error.error as { detail?: unknown } | null)?.detail;
           this.refusal.set(typeof detail === 'string' ? detail : NO_ANSWER);
         },
