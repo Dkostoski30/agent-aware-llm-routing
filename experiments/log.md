@@ -13,6 +13,18 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-21 · P4.6a · green (the panel's Start ran a replay and its Kill deleted pods; one kill lost a call that P4.4's retry does not cover)
+Command: tests first (Claude: 2668 Python tests and 248 UI specs, `make lint`; 23 changes to rule lines in the runner, the app backend and the UI, all failing a test, one only after a test was added) · the user, on real after `make down`, `make up`: `make demo-runner`, `make app-forward`, `make ui PROFILE=real` in their own terminals; in the panel Start (steady), then Kill on one pod near the start and on the other mid-replay. Then Claude, read only: the replay's file
+Result:
+- **Start** ran `make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady PROFILE=real OUT=experiments/results/replays/demo-steady-20261121T181356.jsonl`, 18:13:57-18:23:35 UTC: 20 of 20 runs, 46 calls, 1 failed, no `.partial` left; the replay exited 1 and `make` 2.
+- **Kill 1** force-deleted `vllm-6b8f7487d9-gt87b` ~22 s in: run 2's first call (18:14:19) ended in an error chunk inside a 200 stream, `{'message': 'EngineCore encountered an issue...', 'code': 500}`, and was not sent again: P4.4's rule retries a lost connection, a cut stream or a 5xx status, and this was none of them. Its engine died while its HTTP server still answered.
+- **Kill 2** force-deleted `vllm-6b8f7487d9-pdnvs` at ~18:18:16, while the first pod's replacement `6kh9b` was up: run 12's first call was cut mid-reply, retried once 5 s later, and the run finished its 3 steps on `6kh9b`. Calls per pod: `pdnvs` 21, `6kh9b` 24, none 1.
+Notes:
+- Decided after the run (the user, 2026-11-21): a replay that wrote its file is "done" with its lost calls named (`Replay done: 20 of 20 finished, 1 call lost`), "failed" only without its file, as `make` exits 2 either way; demo.v1's replay gains `calls_failed`, counted by the replay's own rule (`failed_calls`). Built after the run, tests only: the user's terminal and panel were from before it.
+- Finding for P4.4b (the user chose a follow-up card, 2026-11-21): the replayer should treat an error chunk with a 5xx code as a 5xx reply, so P4.4's retry covers a pod killed before its stream ends. The agent's own calls are not streamed and got real 500s in P4.4's live check.
+- `make demo-runner` keeps listening after a replay ends, by design (until Ctrl+C); the user took it for stuck. The Makefile comment and its first line say so.
+- Limits: one replay, one seed; the panel's caption during the run was not reported; make up on real keeps 2 fixed pods, so Start shows no scale-up (card 62, out of scope).
+
 ### 2026-11-20 · P4.5 · green (same ranking as on the simulator: on real 1↔2 remaining work scaled no later than the queue, finished alike within spread, and lost 1 run to the deadline against the queue's 10)
 Command: tests first (Claude: `make test` exit 0, 2534 Python tests + Go + 22 training + 225 UI specs, `make lint`; 18 changes to rule lines in `autoscale_compare.py`, 17 failed a test, 1 only after a test was added, 1 equivalent) · the user, in one terminal with the laptop idle (16:40-21:45 local): `make down`, `make up`, `make experiment NAME=autoscale-real-1to2-a` (hash 123818af027f), `-c` (8b08972749ea), `make down`, `make up`, `-b` (04bf4f4f6a8c), `-d` (af8cf634cc21); each file 4 variants on the default picker, real, converted trace, `burst`, seed 6, ~19 min per variant. Then `make autoscale-compare META="<the four .meta.json>"`. Then Claude, read only: the run's log, two autoscale CSVs
 Result:

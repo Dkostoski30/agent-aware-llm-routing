@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -180,6 +180,14 @@ agent-forward:
 # The app backend's API on http://localhost:8081 until Ctrl+C; 8081 since make agent-forward holds 8080 (P2.10b).
 app-forward:
 	kubectl port-forward svc/app 8081:8080
+
+# The cluster panel's demo buttons on the host until Ctrl+C (P4.6a): Start runs make replay on app.demo_controls.trace
+# with the pattern pressed, Kill force-deletes a vLLM pod. The app backend calls it through infra/manifests/demo-runner.yaml
+# with the token make up puts in the Secret demo-runner-token, so start it after make up, and again after the next one.
+# Refuses a profile whose app.demo_controls.enabled is false. Ctrl+C interrupts a running replay too. PYTHONPATH as
+# make replay's: the runner counts lost calls by replay.py's own rule.
+demo-runner:
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.demo_runner --profile $(or $(PROFILE),real)
 
 # The image is already in k3s and the claim already bound, so the restarted pod is Ready in seconds; 180 s is
 # infra/deploy-app.sh's rollout timeout.

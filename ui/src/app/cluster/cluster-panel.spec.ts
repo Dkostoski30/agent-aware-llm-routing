@@ -1,10 +1,20 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { Component, computed, input } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Auth } from '../auth/auth';
 import clusterSchema from '../../../../schemas/cluster.v1.json';
 import { CLUSTER_API, ClusterPod, ClusterView } from './cluster';
 import { ClusterPanel } from './cluster-panel';
+import { DemoControls } from './demo-controls';
+
+/** DemoControls reads GET /demo on its own (P4.6a) and has its own spec; in its place here, a stand-in that shows
+ * only the pods the panel hands it, so these tests see the panel's requests alone. */
+@Component({ selector: 'app-demo-controls', template: '<i class="demo-stub">{{ names() }}</i>' })
+class DemoControlsStub {
+  readonly pods = input.required<ClusterPod[]>();
+  protected readonly names = computed(() => this.pods().map((pod) => pod.name).join(','));
+}
 
 const READY: ClusterPod = { name: 'vllm-568fc4b669-c9kb2', state: 'ready', queue: 3, running: 2 };
 const STARTING: ClusterPod = {
@@ -56,6 +66,10 @@ describe('ClusterPanel', () => {
     TestBed.configureTestingModule({
       providers: [provideHttpClient(), provideHttpClientTesting()],
     });
+    TestBed.overrideComponent(ClusterPanel, {
+      remove: { imports: [DemoControls] },
+      add: { imports: [DemoControlsStub] },
+    });
     http = TestBed.inject(HttpTestingController);
     auth = TestBed.inject(Auth);
     fixture = TestBed.createComponent(ClusterPanel);
@@ -90,6 +104,27 @@ describe('ClusterPanel', () => {
     expect(metrics()).toEqual(['7', '0.80']);
     expect(page.querySelectorAll('.ag-metric.high').length).toBe(1);
     expect(text()).toContain('high from 0.75');
+  });
+
+  it('puts the demo controls below the numbers with the pods of the latest read, and hides them while lost', () => {
+    const demo = () => page.querySelector('.demo-stub');
+    logIn();
+    expect(demo()).toBeNull();
+    answer();
+    expect(demo()?.textContent).toBe(`${READY.name},${STARTING.name}`);
+    expect(page.querySelector('.ag-panel-scroll .demo-stub')).toBeNull();
+    vi.advanceTimersByTime(5_000);
+    http
+      .expectOne(CLUSTER_API)
+      .flush(
+        { detail: 'Prometheus did not answer', poll_seconds: 5 },
+        { status: 503, statusText: 'Service Unavailable' },
+      );
+    fixture.detectChanges();
+    expect(demo()).toBeNull();
+    vi.advanceTimersByTime(5_000);
+    answer({ ...VIEW, pods: [READY] });
+    expect(demo()?.textContent).toBe(READY.name);
   });
 
   it('asks again after the poll interval the answer carries, not sooner', () => {

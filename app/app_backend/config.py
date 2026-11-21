@@ -53,3 +53,35 @@ def load_config(path: Path) -> AppConfig:
         kv_cache_tokens=profile["model"]["kv_cache_tokens"],
         pressure_warn=app["pressure_warn"],
     )
+
+
+@dataclass(frozen=True)
+class DemoPattern:
+    """A replay pattern Start offers, with the runs its replay.patterns entry starts."""
+
+    name: str
+    runs: int
+
+
+@dataclass(frozen=True)
+class DemoConfig:
+    """app.demo_controls (P4.6a): whether the cluster panel shows its demo buttons, and the
+    patterns Start offers, in the profile's order."""
+
+    enabled: bool
+    patterns: tuple[DemoPattern, ...]
+
+
+def load_demo_config(path: Path) -> DemoConfig:
+    """Reads app.demo_controls and each named pattern's runs from replay.patterns; a missing key,
+    or a pattern replay.patterns does not have, raises KeyError."""
+    profile = yaml.safe_load(path.read_text())
+    controls = profile["app"]["demo_controls"]
+    replay_patterns = profile["replay"]["patterns"]
+    return DemoConfig(
+        enabled=controls["enabled"],
+        patterns=tuple(
+            DemoPattern(name=name, runs=replay_patterns[name]["runs"])
+            for name in controls["patterns"]
+        ),
+    )

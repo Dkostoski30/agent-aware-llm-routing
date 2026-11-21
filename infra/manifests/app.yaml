@@ -52,6 +52,15 @@ spec:
             # KEDA objects use too; GET /cluster reads the cluster panel's numbers there (P3.11).
             - name: PROMETHEUS_URL
               value: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+            # The host's demo runner (infra/manifests/demo-runner.yaml) and its token, which the app sends with each
+            # call; read only on a profile with app.demo_controls.enabled (P4.6a). infra/deploy-app.sh makes the Secret.
+            - name: DEMO_RUNNER_URL
+              value: http://demo-runner
+            - name: DEMO_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: demo-runner-token
+                  key: token
           ports:
             - name: http
               containerPort: 8080

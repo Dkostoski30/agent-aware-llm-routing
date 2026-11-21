@@ -4,16 +4,18 @@ import { Subscription } from 'rxjs';
 import { Auth } from '../auth/auth';
 import { CachePressure } from './cache-pressure';
 import { CLUSTER_API, ClusterDown, ClusterView } from './cluster';
+import { DemoControls } from './demo-controls';
 import { PodCard } from './pod-card';
 import { RemainingWork } from './remaining-work';
 
 /** The cluster panel's content (P3.11): the remaining work, the cache pressure (P4.11) and the vLLM pods, from the
  * app backend's GET /cluster, asked again after the poll interval each answer carries, so the UI holds no number of
  * its own. Only a logged-in user asks, since the endpoint answers 401 to anyone else. When the numbers cannot be
- * read, it says so instead of showing zeros or numbers that are no longer true. */
+ * read, it says so instead of showing zeros or numbers that are no longer true. The demo buttons (P4.6a) sit below
+ * the scrolling part, as the design pins them, and only while the pods they offer are the latest read. */
 @Component({
   selector: 'app-cluster-panel',
-  imports: [CachePressure, PodCard, RemainingWork],
+  imports: [CachePressure, DemoControls, PodCard, RemainingWork],
   template: `
     <div class="ag-panel-scroll">
       <div class="ag-panel-head"><h2>Cluster</h2></div>
@@ -34,6 +36,11 @@ import { RemainingWork } from './remaining-work';
         </section>
       }
     </div>
+    @if (view(); as view) {
+      @if (!lost()) {
+        <app-demo-controls [pods]="view.pods" />
+      }
+    }
   `,
   styles: `
     :host {

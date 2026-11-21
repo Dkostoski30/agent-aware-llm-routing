@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "poll_seconds": 5,
+  "patterns": [
+    { "name": "steady", "runs": 20 },
+    { "name": "burst", "runs": 30 }
+  ],
+  "runner": {
+    "replay": {
+      "pattern": "steady",
+      "command": "make replay TRACE=experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl PATTERN=steady PROFILE=real OUT=experiments/results/replays/demo-steady-20261120T210503.jsonl",
+      "started_at": "2026-11-20T21:05:03Z",
+      "state": "running",
+      "runs_total": 20,
+      "runs_finished": 7,
+      "calls_failed": 0,
+      "exit_code": null
+    },
+    "last_kill": { "pod": "vllm-568fc4b669-c9kb2", "at": "2026-11-20T21:07:41Z" }
+  },
+  "runner_error": null
+}

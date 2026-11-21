@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from app_backend.config import load_config
+from app_backend.config import DemoPattern, load_config, load_demo_config
 from app_backend.passwords import hash_password, verify_password
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
@@ -68,3 +68,31 @@ def test_a_missing_key_raises(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump(profile))
     with pytest.raises(KeyError, match="min_password_length"):
         load_config(path)
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_demo_buttons_are_on_in_real_only(profile: str) -> None:
+    """A kill needs a second pod to fail over to, and sim has no app backend (P4.6a); real-plain
+    is real without the adapter, so it follows real."""
+    enabled = load_demo_config(CONFIG_DIR / f"{profile}.yaml").enabled
+    assert enabled is (profile in ("real", "real-plain"))
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_the_demo_patterns_carry_their_replay_runs(profile: str) -> None:
+    """Start's label names the runs the runner's replay will start."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    loaded = yaml.safe_load(path.read_text())
+    assert load_demo_config(path).patterns == tuple(
+        DemoPattern(name=name, runs=loaded["replay"]["patterns"][name]["runs"])
+        for name in loaded["app"]["demo_controls"]["patterns"]
+    )
+
+
+def test_a_demo_pattern_that_is_not_a_replay_pattern_raises(tmp_path: Path) -> None:
+    profile = yaml.safe_load((CONFIG_DIR / "real.yaml").read_text())
+    profile["app"]["demo_controls"]["patterns"] = ["steady", "tidal"]
+    path = tmp_path / "broken.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(KeyError, match="tidal"):
+        load_demo_config(path)

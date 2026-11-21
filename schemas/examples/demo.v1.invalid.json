@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "poll_seconds": 5,
+  "patterns": [{ "name": "steady", "runs": 20 }],
+  "runner": {
+    "replay": {
+      "pattern": "steady",
+      "command": "make replay TRACE=t.jsonl PATTERN=steady PROFILE=real OUT=o.jsonl",
+      "started_at": "2026-11-20T21:05:03Z",
+      "state": "paused",
+      "runs_total": 20,
+      "runs_finished": 7,
+      "calls_failed": 0,
+      "exit_code": null
+    },
+    "last_kill": null
+  },
+  "runner_error": null
+}

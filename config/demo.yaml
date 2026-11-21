@@ -331,3 +331,16 @@ app:
   # fills the ready pods' KV cache on paper, and P4.9's median first token bent there (0.4 s under 0.75, 1.7 s at
   # 1-1.25 on the real-pod replays).
   pressure_warn: 1.0
+  # The cluster panel's two demo buttons (P4.6a): Start replays the recorded demo trace with one of these patterns, Kill
+  # force-deletes a vLLM pod, both run on the host by make demo-runner, which the app backend asks.
+  demo_controls:
+    # Off: one pod (D8), so a kill would leave the chat no pod to fail over to for the 2-3 min a new one loads.
+    enabled: false
+    # Where make demo-runner listens on the node; the app backend reaches it through infra/manifests/demo-runner.yaml.
+    # Any port free on the node beside replay.tracker_port (9400), which the replay the runner starts listens on.
+    runner_port: 9401
+    # The demo scenarios' runs recorded on the real model (P2.2b), the trace experiments/drain-real.yaml replays: its
+    # csv, contracts, support and arithmetic runs are what the chat itself answers.
+    trace: experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl
+    # Names in replay.patterns: steady is the row's 20 tasks, burst the load that spills and queues (P3.6).
+    patterns: [steady, burst]

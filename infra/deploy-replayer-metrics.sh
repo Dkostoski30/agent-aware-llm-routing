@@ -15,12 +15,8 @@ fi
 source "$(dirname "${BASH_SOURCE[0]}")/profile.sh"
 
 port=$(profile_value "$1" .replay.tracker_port)
-# k3s runs one node (P1.0), the WSL VM, and its InternalIP is the VM's address, where make replay listens.
-node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-if [[ -z $node_ip ]]; then
-  echo "deploy-replayer-metrics: the node has no InternalIP" >&2
-  exit 1
-fi
+# The VM's address, where make replay listens.
+node_ip=$(node_ip)
 
 # env() reads the port as a number, strenv() the IP as a string.
 NODE_IP=$node_ip PORT=$port yq '

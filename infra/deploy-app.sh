@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploys the app backend into k3s (P2.10b): builds its image, imports it into k3s's containerd, puts
 # config/PROFILE.yaml into the ConfigMap app-config and applies infra/manifests/app.yaml (claim, Deployment, Service).
+# Before it, the address and the token of the host's demo runner (P4.6a): the Secret demo-runner-token, made once, and
+# infra/manifests/demo-runner.yaml with the node's IP and app.demo_controls.runner_port, on every profile, since the
+# Deployment reads the Secret whether or not the profile shows the buttons.
 # The build steps are infra/deploy-agent.sh's, for the app's files.
 # Idempotent: an image whose tag is already in k3s is not built again, and kubectl apply converges; the claim and its
 # data are left as they are.
@@ -46,6 +49,18 @@ else
   # the 9 GB vLLM import that crashed k3s (P0.7, experiments/log.md).
   docker save "$image" | sudo k3s ctr images import -
 fi
+
+# 32 random bytes, as the session tokens (app_backend/app.py TOKEN_BYTES). Made only if absent, so a running
+# make demo-runner keeps a token that works; make down deletes it with the app.
+if ! kubectl get secret demo-runner-token >/dev/null 2>&1; then
+  kubectl create secret generic demo-runner-token --from-literal=token="$(openssl rand -hex 32)"
+fi
+runner_port=$(profile_value "$1" .app.demo_controls.runner_port)
+node_ip=$(node_ip)
+NODE_IP=$node_ip PORT=$runner_port yq '
+  (select(.kind == "Endpoints") | .subsets[0].addresses[0].ip) = strenv(NODE_IP) |
+  (select(.kind == "Endpoints") | .subsets[0].ports[0].port) = env(PORT)
+' "$REPO_ROOT/infra/manifests/demo-runner.yaml" | kubectl apply -f -
 
 kubectl create configmap app-config --from-file=profile.yaml="$config" --dry-run=client -o yaml | kubectl apply -f -
 config_hash=$(sha256sum "$config" | cut -c1-12)

@@ -1,6 +1,7 @@
 """The app backend's HTTP API: register, login, logout, the logged-in user, health (P2.10a), the
-chats (P3.12a) and their runs' detail, calls and events (P3.12b), both in app_backend/chats.py, and
-the cluster panel's numbers (P3.11, app_backend/cluster.py).
+chats (P3.12a) and their runs' detail, calls and events (P3.12b), both in app_backend/chats.py,
+the cluster panel's numbers (P3.11, app_backend/cluster.py) and its demo buttons (P4.6a,
+app_backend/demo.py).
 
 A login sets a session cookie holding a random token; the database keeps only the token's sha256,
 so a copy of the file holds no usable session. Sessions last app.session_ttl_seconds from login.
@@ -22,9 +23,10 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from app_backend import chats, cluster, db, logs
+from app_backend import chats, cluster, db, demo, logs
 from app_backend.cluster import ClusterReader
-from app_backend.config import AppConfig, load_config
+from app_backend.config import AppConfig, load_config, load_demo_config
+from app_backend.demo import DemoControls, RunnerClient
 from app_backend.passwords import hash_password, verify_password
 from app_backend.runtime import RuntimeClient
 
@@ -73,10 +75,11 @@ def create_app(
     runtime: RuntimeClient,
     prometheus: ClusterReader,
     clock: Clock = time.time,
+    demo_controls: DemoControls | None = None,
 ) -> FastAPI:
     """The API on the SQLite file at db_path, its schema applied first, starting runs on runtime
     and reading the cluster from prometheus. clock gives unix seconds; tests pass a fake one to
-    expire sessions."""
+    expire sessions. demo_controls None is a profile without the demo buttons."""
     db.apply_schema(db_path)
     app = FastAPI(title="app backend")
 
@@ -135,6 +138,7 @@ def create_app(
 
     app.include_router(chats.router(config, runtime, clock, use_conn, Depends(current_user_id)))
     app.include_router(cluster.router(prometheus, config, Depends(current_user_id)))
+    app.include_router(demo.router(demo_controls, config, Depends(current_user_id)))
 
     @app.post("/auth/register", status_code=201)
     def register(credentials: Credentials, conn: Annotated[sqlite3.Connection, use_conn]) -> User:
@@ -220,8 +224,10 @@ def create_app(
 
 def from_env() -> FastAPI:
     """The app as P2.10b's Deployment runs it: the profile, the database file, the agent
-    runtime's URL and Prometheus's URL from the environment."""
-    config = load_config(Path(os.environ["THESIS_CONFIG"]))
+    runtime's URL, Prometheus's URL and, on a profile with the demo buttons, the demo runner's URL
+    and token from the environment."""
+    profile = Path(os.environ["THESIS_CONFIG"])
+    config = load_config(profile)
     agent_url = os.environ["AGENT_URL"]
     http = httpx.Client(base_url=agent_url, timeout=config.runtime_timeout_seconds)
     # A run's event stream lasts as long as the run, with steps minutes apart under load, so its
@@ -233,11 +239,21 @@ def from_env() -> FastAPI:
     prometheus = httpx.Client(
         base_url=os.environ["PROMETHEUS_URL"], timeout=config.cluster_poll_seconds
     )
+    demo_config = load_demo_config(profile)
+    demo_controls = None
+    if demo_config.enabled:
+        runner = httpx.Client(
+            base_url=os.environ["DEMO_RUNNER_URL"], timeout=config.runtime_timeout_seconds
+        )
+        demo_controls = DemoControls(
+            demo_config.patterns, RunnerClient(runner, os.environ["DEMO_RUNNER_TOKEN"])
+        )
     return create_app(
         config,
         Path(os.environ["THESIS_APP_DB"]),
         RuntimeClient(http, events_http),
         ClusterReader(prometheus),
+        demo_controls=demo_controls,
     )
 
 

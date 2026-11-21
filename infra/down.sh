@@ -31,6 +31,11 @@ if systemctl is-active --quiet k3s; then
   # claim app-data and the users and chats on it stay (P2.10b); make reset-app is what removes them.
   kubectl delete deployment/app service/app configmap/app-config --ignore-not-found --wait \
     --timeout "$UNINSTALL_TIMEOUT"
+  # With it, the demo runner's address and token (P4.6a); the next make up makes a new token, so a make demo-runner
+  # still running then must be restarted, and the panel says so.
+  kubectl delete -f "$REPO_ROOT/infra/manifests/demo-runner.yaml" --ignore-not-found --wait \
+    --timeout "$UNINSTALL_TIMEOUT"
+  kubectl delete secret demo-runner-token --ignore-not-found
   # Then the agent runtime and Redis (infra/deploy-agent.sh). Then the Gateway, while its controller still runs to
   # remove the proxy it created.
   kubectl delete -f "$REPO_ROOT/infra/manifests/agent.yaml" -f "$REPO_ROOT/infra/manifests/redis.yaml" \

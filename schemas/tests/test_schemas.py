@@ -22,6 +22,7 @@ SCHEMA_NAMES = [
     "run-events.v1",
     "run-calls.v1",
     "cluster.v1",
+    "demo.v1",
 ]
 REMOVE = object()
 
@@ -390,3 +391,93 @@ def test_cluster_pod_rules(field: str, value: object, accepted: bool) -> None:
     body = valid_example("cluster.v1")
     body["pods"] = [with_change(body["pods"][0], field, value)]
     assert validator_for("cluster.v1").is_valid(body) is accepted
+
+
+DISABLED = {
+    "enabled": False,
+    "poll_seconds": 5,
+    "patterns": [],
+    "runner": None,
+    "runner_error": None,
+}
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("patterns", [], True),
+        ("runner", None, True),
+        ("runner_error", "The demo runner is not running: make demo-runner", True),
+        ("runner_error", "", False),
+        ("runner_error", REMOVE, False),
+        ("runner", REMOVE, False),
+        ("poll_seconds", 0, False),
+        ("enabled", "true", False),
+        ("patterns", [{"name": "steady", "runs": 0}], False),
+        ("patterns", [{"name": "", "runs": 20}], False),
+        ("patterns", [{"name": "steady"}], False),
+        ("runner", {"replay": None}, False),
+        ("runner", {"replay": None, "last_kill": None, "pods": []}, False),
+        ("token", "abc", False),
+    ],
+)
+def test_demo_rules(field: str, value: object, accepted: bool) -> None:
+    body = with_change(valid_example("demo.v1"), field, value)
+    assert validator_for("demo.v1").is_valid(body) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("patterns", [{"name": "steady", "runs": 20}], False),
+        ("runner", {"replay": None, "last_kill": None}, False),
+        ("runner_error", "The demo runner is not running: make demo-runner", False),
+    ],
+)
+def test_demo_disabled_carries_nothing_else(field: str, value: object, accepted: bool) -> None:
+    assert validator_for("demo.v1").is_valid(DISABLED)
+    assert validator_for("demo.v1").is_valid(with_change(DISABLED, field, value)) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("state", "done", True),
+        ("state", "failed", True),
+        ("exit_code", 1, True),
+        ("exit_code", 0, True),
+        ("runs_finished", 0, True),
+        ("calls_failed", 3, True),
+        ("calls_failed", -1, False),
+        ("calls_failed", REMOVE, False),
+        ("state", "paused", False),
+        ("runs_finished", -1, False),
+        ("runs_total", 0, False),
+        ("exit_code", "1", False),
+        ("started_at", "2026-11-20 21:05:03", False),
+        ("started_at", "2026-11-20T21:05:03+01:00", False),
+        ("command", "", False),
+        ("pattern", REMOVE, False),
+        ("exit_code", REMOVE, False),
+        ("out", "demo.jsonl", False),
+    ],
+)
+def test_demo_replay_rules(field: str, value: object, accepted: bool) -> None:
+    body = valid_example("demo.v1")
+    body["runner"]["replay"] = with_change(body["runner"]["replay"], field, value)
+    assert validator_for("demo.v1").is_valid(body) is accepted
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "accepted"),
+    [
+        ("pod", "", False),
+        ("at", "21:07:41", False),
+        ("at", REMOVE, False),
+        ("grace", 0, False),
+    ],
+)
+def test_demo_kill_rules(field: str, value: object, accepted: bool) -> None:
+    body = valid_example("demo.v1")
+    body["runner"]["last_kill"] = with_change(body["runner"]["last_kill"], field, value)
+    assert validator_for("demo.v1").is_valid(body) is accepted

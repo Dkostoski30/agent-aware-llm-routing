@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Dkostoski30/agent-aware-llm-routing/schemas/demo.v1.json",
+  "title": "Demo v1",
+  "description": "Body of GET /demo on the app backend (P4.6a): whether the profile has the cluster panel's demo buttons, the replay patterns Start offers, and what the host's demo runner (make demo-runner) reports. The runner's own GET /status is the runner object below.",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "description": "The profile's app.demo_controls.enabled. When false the UI shows no buttons and nothing else is filled in.",
+      "type": "boolean"
+    },
+    "poll_seconds": {
+      "description": "How long the UI waits before asking again: the profile's Prometheus scrape interval, as cluster.v1's.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "patterns": {
+      "description": "app.demo_controls.patterns in the profile's order, each with the runs its replay.patterns entry starts, which Start's label names.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "runs": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["name", "runs"],
+        "additionalProperties": false
+      }
+    },
+    "runner": {
+      "description": "The runner's GET /status; null when it did not answer, and runner_error says why.",
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/runner" }]
+    },
+    "runner_error": {
+      "description": "One sentence for the UI's caption when runner is null and enabled is true; null otherwise.",
+      "type": ["string", "null"],
+      "minLength": 1
+    }
+  },
+  "required": ["enabled", "poll_seconds", "patterns", "runner", "runner_error"],
+  "additionalProperties": false,
+  "if": { "properties": { "enabled": { "const": false } } },
+  "then": {
+    "properties": {
+      "patterns": { "maxItems": 0 },
+      "runner": { "type": "null" },
+      "runner_error": { "type": "null" }
+    }
+  },
+  "$defs": {
+    "runner": {
+      "type": "object",
+      "properties": {
+        "replay": {
+          "description": "The runner's latest replay since it started; null before the first.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/replay" }]
+        },
+        "last_kill": {
+          "description": "The runner's latest pod kill since it started; null before the first.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/kill" }]
+        }
+      },
+      "required": ["replay", "last_kill"],
+      "additionalProperties": false
+    },
+    "replay": {
+      "type": "object",
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1 },
+        "command": {
+          "description": "The command the runner ran, as a person would type it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": { "$ref": "#/$defs/utc" },
+        "state": {
+          "description": "running until the command exits; then done when the replay wrote its output, which it does after its last run even with calls lost (make exits 2 then, as for a crash), failed when it ended without it.",
+          "enum": ["running", "done", "failed"]
+        },
+        "runs_total": { "type": "integer", "minimum": 1 },
+        "runs_finished": {
+          "description": "Runs the replay has written, finished or failed.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "calls_failed": {
+          "description": "Calls among them with no full reply after any retry (trace.v1 lines without duration_ms).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "exit_code": {
+          "description": "The command's exit code; null while it runs.",
+          "type": ["integer", "null"]
+        }
+      },
+      "required": [
+        "pattern",
+        "command",
+        "started_at",
+        "state",
+        "runs_total",
+        "runs_finished",
+        "calls_failed",
+        "exit_code"
+      ],
+      "additionalProperties": false
+    },
+    "utc": {
+      "description": "UTC to the second, ISO 8601, as the runner writes it. A pattern, since jsonschema checks no format unless asked.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "kill": {
+      "type": "object",
+      "properties": {
+        "pod": { "type": "string", "minLength": 1 },
+        "at": { "$ref": "#/$defs/utc" }
+      },
+      "required": ["pod", "at"],
+      "additionalProperties": false
+    }
+  }
+}

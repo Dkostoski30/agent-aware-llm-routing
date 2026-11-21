@@ -1,0 +1,31 @@
+# The host's demo runner (make demo-runner, P4.6a) as an address in the cluster, so the app backend can pass the
+# cluster panel's demo buttons on to it. As infra/manifests/replayer-metrics.yaml for the replayer (P3.8): the runner is
+# a process on the node, not a pod, so the Service has no selector and this Endpoints object holds the node's IP and
+# app.demo_controls.runner_port, both written by infra/deploy-app.sh. The Service exists whether the runner runs or not;
+# when it does not, the app backend's calls are refused and the panel says to start it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-runner
+  namespace: default
+  labels:
+    app.kubernetes.io/name: demo-runner
+spec:
+  ports:
+    # The app backend calls http://demo-runner; with no selector, traffic goes to the Endpoints' port below.
+    - name: http
+      port: 80
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: demo-runner
+  namespace: default
+  labels:
+    app.kubernetes.io/name: demo-runner
+subsets:
+  - addresses:
+      - ip: set-by-deploy-app
+    ports:
+      - name: http
+        port: 0
