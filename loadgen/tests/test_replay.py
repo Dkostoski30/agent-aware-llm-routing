@@ -1592,6 +1592,76 @@ def test_a_stream_cut_off_mid_reply_is_sent_again() -> None:
     assert len(lines) == 2
 
 
+def error_chunk(code: object) -> bytes:
+    """The chunk vLLM v0.31.0 writes when its stream generator fails, before its [DONE]
+    (entrypoints/openai/chat_completion/serving.py, ErrorResponse in serve/engine/protocol.py)."""
+    message = "EngineCore encountered an issue. See stack trace (above) for the root cause."
+    error = {"message": message, "type": "InternalServerError", "param": None, "code": code}
+    return event({"error": error})
+
+
+def error_stream(*firsts: bytes) -> Callable[[dict[str, Any]], AsyncIterator[bytes]]:
+    """A stream that ends in each of firsts' error chunks in turn, then streams whole replies."""
+    left = list(firsts)
+
+    async def stream(body: dict[str, Any]) -> AsyncIterator[bytes]:
+        yield event(content_chunk("hello"))
+        if left:
+            yield left.pop(0)
+            yield event("[DONE]")
+            return
+        yield usage_chunk(body)
+
+    return stream
+
+
+def test_an_error_chunk_with_a_5xx_code_is_sent_again(capsys: pytest.CaptureFixture[str]) -> None:
+    """A pod whose engine died while its HTTP server still answered (P4.6a's kill 1)."""
+    gateway = FakeGateway(stream=error_stream(error_chunk(500)))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 0
+    assert [line["step"] for line in lines] == [1, 2]
+    assert len(gateway.seen) == 3
+    assert (gateway.seen[1].body, gateway.seen[1].headers) == (
+        gateway.seen[0].body,
+        gateway.seen[0].headers,
+    )
+    out = capsys.readouterr().out
+    assert f"{plan_of()[0].run_id} step 1: retry 1, attempt sent at " in out
+    assert "500" in out
+
+
+def test_out_of_retries_a_5xx_error_chunk_fails_the_call() -> None:
+    gateway = FakeGateway(stream=error_stream(*[error_chunk(503)] * (1 + RETRY.retries)))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1 + RETRY.retries
+
+
+@pytest.mark.parametrize(
+    ("chunk", "kind"),
+    [
+        (error_chunk(400), "HTTPStatusError"),
+        (error_chunk(499), "HTTPStatusError"),
+        (event({"error": {"message": "the model crashed"}}), "ReplyError"),
+        (error_chunk("500"), "ReplyError"),
+        (error_chunk(True), "ReplyError"),
+        (event({"error": "the model crashed"}), "ReplyError"),
+    ],
+    ids=["400", "499", "no code", "code as text", "code as bool", "error not an object"],
+)
+def test_an_error_chunk_that_is_not_a_5xx_is_not_sent_again(
+    chunk: bytes, kind: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A 4xx code is the reply it stands for, which the retry rule does not send again; without an
+    int code the chunk is no reply vLLM writes (card 63)."""
+    gateway = FakeGateway(stream=error_stream(chunk))
+    lines = replay(plan_of(), gateway, retry=RETRY)
+    assert failed_calls(lines) == 1
+    assert len(gateway.seen) == 1
+    assert f"no full reply: {kind}(" in capsys.readouterr().out
+
+
 def test_out_of_retries_the_call_fails_and_ends_its_run(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -167,8 +167,14 @@ async def _lines_of(response: httpx.Response) -> AsyncIterator[bytes]:
 DONE_LINE = b"data: [DONE]"
 
 
-def _chunk_of(line: bytes) -> dict[str, Any] | None:
-    """A server-sent line's JSON; None for what holds none: blank lines and the [DONE] mark."""
+def _chunk_of(line: bytes, request: httpx.Request) -> dict[str, Any] | None:
+    """A server-sent line's JSON; None for what holds none: blank lines and the [DONE] mark. An
+    error chunk with an int code raises httpx.HTTPStatusError of that code on request, as the reply
+    it stands for, so agent_runtime.retry.retryable judges it as it judges a status: vLLM v0.31.0
+    writes one, then its [DONE], when its stream fails after the 200 has gone out, its code being
+    the status it would have answered with (entrypoints/openai/chat_completion/serving.py,
+    serve/exception_handling/error_response.py), and a pod killed while its HTTP server still
+    answers ends its calls so (P4.6a). An error chunk with no such code raises ReplyError."""
     data = line.strip()
     if not data.startswith(b"data: ") or data == DONE_LINE:
         return None
@@ -179,8 +185,17 @@ def _chunk_of(line: bytes) -> dict[str, Any] | None:
     violation = best_match(CHUNK_VALIDATOR.iter_errors(chunk))
     if violation is not None:
         raise ReplyError(f"a chunk of another shape: {violation.message}")
-    if chunk.get("error"):
-        raise ReplyError(f"an error chunk: {chunk['error']}")
+    failure = chunk.get("error")
+    if failure:
+        code = failure.get("code") if isinstance(failure, dict) else None
+        # True is an int to isinstance.
+        if type(code) is int:
+            raise httpx.HTTPStatusError(
+                f"an error chunk: {failure}",
+                request=request,
+                response=httpx.Response(code, request=request),
+            )
+        raise ReplyError(f"an error chunk: {failure}")
     return chunk
 
 
@@ -199,9 +214,10 @@ async def stream_reply(
     so does a stream that ends with neither its token counts nor its [DONE] mark: the gateway ends
     a stream cleanly when its pod dies after the reply has started (failover-576b813b6b4c), so the
     end is the only sign of the cut, and httpx's RemoteProtocolError is what a cut connection
-    raises. The counts come in the last chunk before [DONE], so a stream that has them is whole. A
-    chunk of another shape, a [DONE] with no token counts before it or a reply of another length
-    than max_tokens raises ReplyError."""
+    raises. The counts come in the last chunk before [DONE], so a stream that has them is whole. An
+    error chunk with a code raises httpx.HTTPStatusError too (_chunk_of). A chunk of another shape,
+    an error chunk without a code, a [DONE] with no token counts before it or a reply of another
+    length than max_tokens raises ReplyError."""
     loop = asyncio.get_running_loop()
     first_token: float | None = None
     usage: Mapping[str, Any] | None = None
@@ -211,7 +227,7 @@ async def stream_reply(
         pod = response.headers.get(SIMULATED_POD_HEADER)
         async for line in _lines_of(response):
             done = done or line.strip() == DONE_LINE
-            chunk = _chunk_of(line)
+            chunk = _chunk_of(line, response.request)
             if chunk is None:
                 continue
             if first_token is None and _has_content(chunk):

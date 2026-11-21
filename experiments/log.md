@@ -13,6 +13,16 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-21 · P4.4b · green (the replayer sends a call again when vLLM ends its stream with a 5xx error chunk)
+Command: tests first (Claude): `make test`, `make lint`; 9 changes to the new rule lines in `replay.py`, 8 failing a test
+Result:
+- `make test` exit 0: 2682 Python tests, 22 Go-side, 248 UI specs; `make lint` exit 0. The 9 new replay tests: a 500 error chunk is sent again 5 s later with the same body and headers and the run finishes; 503 on every attempt fails the call after 1 + 2 attempts; a 400 or 499 code is not sent again (printed as `HTTPStatusError`), nor a missing code, a code as text, a code as bool or an error that is not an object (printed as `ReplyError`). Before the change the two 5xx tests failed and the seven others passed.
+- The surviving change passes another request into the error; nothing reads it, so it is the same program.
+Notes:
+- The chunk's shape is vLLM v0.31.0's (source read 2026-11-21): on an exception after the 200 the stream writes `{"error": {"message", "type", "param", "code"}}` then `data: [DONE]`, the code an int, the status it would have answered with (`entrypoints/openai/chat_completion/serving.py`, `serve/engine/protocol.py`, `serve/exception_handling/error_response.py`). The test's chunk is that shape with P4.6a's message.
+- Changed while building (card 63): the plan raised a status error for 500 and up only, which repeated `agent_runtime.retry.retryable`'s threshold; 4 of 10 changes to it survived. Now any int code is the reply it stands for and `retryable` alone decides, so 5xx is sent again and 4xx is not, as decided.
+- Not checked live: the user chose (2026-11-21) to see it in P4.6b's real run with a kill, logged whichever way the kill lands (a cut stream or an error chunk). Until then the rule is held by tests against vLLM's source, not by a killed pod.
+
 ### 2026-11-21 · P4.6a · green (the panel's Start ran a replay and its Kill deleted pods; one kill lost a call that P4.4's retry does not cover)
 Command: tests first (Claude: 2668 Python tests and 248 UI specs, `make lint`; 23 changes to rule lines in the runner, the app backend and the UI, all failing a test, one only after a test was added) · the user, on real after `make down`, `make up`: `make demo-runner`, `make app-forward`, `make ui PROFILE=real` in their own terminals; in the panel Start (steady), then Kill on one pod near the start and on the other mid-replay. Then Claude, read only: the replay's file
 Result:
