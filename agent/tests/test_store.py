@@ -253,3 +253,36 @@ def test_a_call_record_comes_back_from_its_saved_fields() -> None:
         pod=None,
     )
     assert CallRecord.from_fields(call.fields()) == call
+
+
+def test_a_call_sent_again_comes_back_from_its_saved_fields() -> None:
+    call = CallRecord(
+        step=2,
+        ts_start=1_793_600_000_000,
+        duration_ms=812,
+        gap_before_ms=40,
+        expected_steps=3,
+        prompt_tokens=398,
+        completion_tokens=9,
+        cached_tokens=0,
+        pod="vllm-1",
+        retries=1,
+        resumed=True,
+    )
+    assert call.fields()["retries"] == 1
+    assert call.fields()["resumed"] is True
+    assert CallRecord.from_fields(call.fields()) == call
+
+
+def test_a_record_saved_before_p4_6b_reads_as_a_call_sent_once() -> None:
+    """Records saved before the fields existed have neither (P4.6b)."""
+    saved = {
+        "step": 1,
+        "ts_start": 1_793_600_000_000,
+        "duration_ms": 812,
+        "gap_before_ms": 0,
+        "expected_steps": 3,
+    }
+    call = CallRecord.from_fields(saved)
+    assert (call.retries, call.resumed) == (None, None)
+    assert call.fields() == saved

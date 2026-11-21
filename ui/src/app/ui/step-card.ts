@@ -2,11 +2,13 @@ import { Component, input } from '@angular/core';
 import { Served, StepState } from '../runs/run-view';
 
 /** One LLM call of the run, as evidence: its number, the tool the model chose, the arguments and how it was served
- * (StepCard card). Tags in the Tag card's order: pod, cache, latency, then any event. */
+ * (StepCard card). Tags in the Tag card's order: pod, cache, latency, then any event: the call sent again after its
+ * pod died or by a resumed runtime (P4.6b, PodFailureScreen), then the step's state. A call sent again has the
+ * failed border whatever its state, which says what the model and the runtime did with the reply. */
 @Component({
   selector: 'app-step-card',
   template: `
-    <div class="ag-step" [class]="'ag-step--' + state()">
+    <div class="ag-step" [class]="'ag-step--' + state()" [class.ag-step--retried]="sentAgain()">
       <div class="ag-step-top">
         <span class="ag-step-n">{{ n() }}</span>
       </div>
@@ -32,6 +34,12 @@ import { Served, StepState } from '../runs/run-view';
               >
             }
             <span class="ag-tag">{{ how.latency }}</span>
+            @if (how.retries; as retries) {
+              <span class="ag-tag ag-tag--retry">retry {{ retries }}</span>
+            }
+            @if (how.resumed) {
+              <span class="ag-tag ag-tag--retry">resumed</span>
+            }
           }
           @switch (state()) {
             @case ('running') {
@@ -67,4 +75,9 @@ export class StepCard {
   readonly state = input.required<StepState>();
   readonly note = input<string>();
   readonly served = input<Served>();
+
+  protected sentAgain(): boolean {
+    const how = this.served();
+    return how?.retries !== undefined || how?.resumed !== undefined;
+  }
 }

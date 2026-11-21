@@ -256,6 +256,18 @@ describe('stepCards with call records', () => {
     ]);
   });
 
+  it('carries a call sent again after its pod died, and a call a resumed runtime sent (P4.6b)', () => {
+    const [card] = stepCards(view([STEP_1]), [{ ...CALL, retries: 2, resumed: true }]);
+    expect(card.state).toBe('done');
+    expect([card.served?.retries, card.served?.resumed]).toEqual([2, true]);
+  });
+
+  it('carries neither on a call sent once', () => {
+    const [card] = stepCards(view([STEP_1]), [CALL]);
+    expect(card.served).not.toHaveProperty('retries');
+    expect(card.served).not.toHaveProperty('resumed');
+  });
+
   it('keeps a retried step in its state with its badges', () => {
     const [card] = stepCards(view([step(1, [], { error: 'Error: answer with a call' })]), [CALL]);
     expect([card.state, card.served?.latency]).toEqual(['retried', '290 ms']);

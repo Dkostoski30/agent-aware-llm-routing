@@ -103,6 +103,8 @@ def outcome(**changes: Any) -> RunOutcome:
         "steps_before": [STEP_1],
         "steps_after": [STEP_1, STEP_2],
         "call_steps": [1, 2],
+        "retries": 0,
+        "resumed": 0,
     }
     fields.update(changes)
     return RunOutcome(**fields)
@@ -142,7 +144,7 @@ def test_an_outcome_is_read_from_the_runs_api() -> None:
 
 
 def test_a_case_passes_with_its_signal_and_no_problem() -> None:
-    verdict = CaseVerdict("vllm", signals=1, outcomes=[outcome()])
+    verdict = CaseVerdict("vllm", signals=1, outcomes=[outcome(retries=1)])
     assert verdict.passed and not verdict.void
     assert case_lines(verdict)[-1] == "vllm: passed, 1 of 1 runs done, 1 correct"
 
@@ -166,3 +168,52 @@ def test_the_cluster_must_run_the_files_profile() -> None:
     check_profile("real", "a: 1\n", "a: 1\n")
     with pytest.raises(LiveError, match="make up PROFILE=real"):
         check_profile("real", "a: 2\n", "a: 1\n")
+
+
+def test_an_outcome_counts_the_retries_and_the_resumed_calls_of_its_records() -> None:
+    run = {"status": "done", "error": None, "answer": "56", "steps": [STEP_1, STEP_2]}
+    calls = {
+        "run_id": "run-a",
+        "calls": [
+            {"step": 1},
+            {"step": 2, "retries": 2, "resumed": True},
+            {"step": 3, "retries": 1},
+        ],
+    }
+    result = outcome_of("run-a", "summary", 1, [STEP_1], run, calls, correct=True)
+    assert (result.retries, result.resumed) == (3, 1)
+
+
+@pytest.mark.parametrize(
+    ("case", "outcomes"),
+    [
+        ("vllm", [outcome(retries=2)]),
+        ("vllm", [outcome(retries=1), outcome(run_id="run-b", retries=1)]),
+        ("agent", [outcome(resumed=1), outcome(run_id="run-b", resumed=1)]),
+        # Each case counts its own signal: a retry in the agent case is not a resume.
+        ("agent", [outcome(resumed=1, retries=1), outcome(run_id="run-b", resumed=1)]),
+    ],
+)
+def test_a_case_passes_when_its_call_records_carry_every_signal(
+    case: str, outcomes: list[RunOutcome]
+) -> None:
+    verdict = CaseVerdict(case, signals=2, outcomes=outcomes)
+    assert verdict.passed
+
+
+@pytest.mark.parametrize(
+    ("case", "outcomes", "says"),
+    [
+        ("vllm", [outcome(retries=1)], "llm call retried lines: 2, call records' retries: 1"),
+        ("vllm", [outcome(retries=3)], "llm call retried lines: 2, call records' retries: 3"),
+        ("agent", [outcome(resumed=1)], "run resumed lines: 2, call records' resumed: 1"),
+        ("agent", [outcome(retries=2)], "run resumed lines: 2, call records' resumed: 0"),
+    ],
+)
+def test_a_case_whose_call_records_miss_its_signal_fails_and_says_so(
+    case: str, outcomes: list[RunOutcome], says: str
+) -> None:
+    verdict = CaseVerdict(case, signals=2, outcomes=outcomes)
+    assert not verdict.passed and not verdict.void
+    assert verdict.problems == [says]
+    assert f"    {says}" in case_lines(verdict)

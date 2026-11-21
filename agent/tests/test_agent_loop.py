@@ -617,7 +617,8 @@ USAGE = {
     "prompt_tokens_details": {"cached_tokens": 112},
 }
 POD = "vllm-6f9c8d7b5-x2kqp"
-# Every field of a call record; the reply's measurements are left out when it lacks them.
+# Every field of the record of a call sent once by the runtime that started its run; the reply's
+# measurements are left out when it lacks them, retries and resumed always (P4.6b).
 RECORD_FIELDS = {
     "step",
     "ts_start",
@@ -1058,6 +1059,28 @@ async def test_a_retried_calls_record_is_the_attempt_that_answered(mode: ToolCho
     ]
 
 
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_retried_calls_record_counts_the_times_it_was_sent_again(mode: ToolChoice) -> None:
+    """The step view tags it "retry N" (P4.6b); a call sent once has no retries field."""
+    failures: dict[int, httpx.Response | httpx.HTTPError] = {
+        1: httpx.ConnectError("refused"),
+        2: gateway_503(),
+    }
+    llm = FlakyLLM([calls(calc("7*8")), final(mode, "56")], failures)
+    result, _ = await run(mode, llm, retry=RETRY)
+    assert [c.retries for c in result.calls] == [None, 2]
+    assert "retries" not in result.calls[0].fields()
+    assert result.calls[1].fields()["retries"] == 2
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_retried_call_is_not_marked_resumed(mode: ToolChoice) -> None:
+    llm = FlakyLLM([final(mode, "56")], {0: gateway_503()})
+    result, _ = await run(mode, llm, retry=RETRY)
+    [call] = result.calls
+    assert (call.retries, call.resumed) == (1, None)
+
+
 # Resuming a run a dead runtime left (P4.4): what it saved after step 1, a calculator call.
 SAVED_CALL = CallRecord(
     step=1,
@@ -1083,9 +1106,13 @@ def saved_after_step_1(invalid_calls: int = 0) -> SavedRun:
 
 
 async def resume(
-    mode: ToolChoice, llm: ScriptedLLM, saved: SavedRun, clock: FakeClock | None = None
+    mode: ToolChoice,
+    llm: ScriptedLLM,
+    saved: SavedRun,
+    clock: FakeClock | None = None,
+    retry: RetryPolicy = NO_RETRY,
 ) -> RunResult:
-    config = make_config(mode)
+    config = replace(make_config(mode), retry=retry)
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(llm.handle), base_url="http://gateway"
     ) as http:
@@ -1181,6 +1208,41 @@ async def test_a_resumed_calls_gap_runs_from_the_last_saved_call(mode: ToolChoic
     saved = replace(saved_after_step_1(), step=2, calls=[earlier, later])
     result = await resume(mode, TimedLLM([final(mode, "56")], clock), saved, clock)
     assert result.calls[2].gap_before_ms == WALL_START_MS - (later.ts_start + later.duration_ms)
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_the_first_call_a_resumed_run_sends_is_marked_resumed(mode: ToolChoice) -> None:
+    """The step view tags it "resumed" (P4.6b): a new runtime sent it after the old one died. The
+    saved record is kept as it was, and later calls are not marked."""
+    llm = ScriptedLLM([calls(calc("56+3")), final(mode, "59")])
+    result = await resume(mode, llm, saved_after_step_1())
+    assert result.status == "done"
+    assert result.calls[0] == SAVED_CALL
+    assert [c.resumed for c in result.calls] == [None, True, None]
+    assert result.calls[1].fields()["resumed"] is True
+    assert "resumed" not in result.calls[2].fields()
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_run_resumed_before_its_first_reply_marks_step_1(mode: ToolChoice) -> None:
+    saved = SavedRun(messages=saved_after_step_1().messages[:2], step=0, invalid_calls=0, calls=[])
+    result = await resume(mode, ScriptedLLM([final(mode, "56")]), saved)
+    [call] = result.calls
+    assert (call.step, call.resumed) == (1, True)
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_resumed_call_sent_again_is_marked_both(mode: ToolChoice) -> None:
+    """The new runtime's first call met a dead vLLM pod too: both events are on its record."""
+    llm = FlakyLLM([final(mode, "56")], {0: gateway_503()})
+    result = await resume(mode, llm, saved_after_step_1(), retry=RETRY)
+    assert [(c.retries, c.resumed) for c in result.calls] == [(None, None), (1, True)]
+
+
+@pytest.mark.parametrize("mode", MODES)
+async def test_a_run_that_was_not_resumed_has_no_call_marked_resumed(mode: ToolChoice) -> None:
+    result, _ = await run(mode, ScriptedLLM([calls(calc("7*8")), final(mode, "56")]))
+    assert [c.resumed for c in result.calls] == [None, None]
 
 
 # The context the run holds in the tracker (P4.10): its latest reply's usage.prompt_tokens.

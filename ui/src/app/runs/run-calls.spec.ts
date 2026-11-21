@@ -14,6 +14,8 @@ const CALL: Required<RunCall> = {
   completion_tokens: 9,
   cached_tokens: 352,
   pod: 'vllm-5c9565db76-6bq8s',
+  retries: 1,
+  resumed: true,
 };
 
 describe('RunCalls', () => {

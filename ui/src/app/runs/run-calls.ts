@@ -13,6 +13,10 @@ export interface RunCall {
   completion_tokens?: number;
   cached_tokens?: number;
   pod?: string;
+  // Sent again this many times because its pod died (P4.4); left out when it was sent once (P4.6b).
+  retries?: number;
+  // The first call a new agent runtime sent for a run it resumed from Redis (P4.4, P4.6b).
+  resumed?: true;
 }
 
 /** A run's call records from the agent runtime, passed on by the app backend (P3.12b), through the dev server's

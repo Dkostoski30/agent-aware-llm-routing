@@ -32,8 +32,8 @@ class RunRecord:
 
 @dataclass(frozen=True)
 class CallRecord:
-    """One LLM call that got a reply (P2.2a), named as in schemas/trace.v1.json where it has the
-    field."""
+    """One LLM call that got a reply (P2.2a), named as in schemas/trace.v1.json and
+    schemas/run-calls.v1.json."""
 
     # The call's x-step.
     step: int
@@ -52,10 +52,16 @@ class CallRecord:
     cached_tokens: int | None
     # The reply's system_fingerprint, which the vLLM chart sets to the pod's name; None without one.
     pod: str | None
+    # How many times the step was sent again before this reply because its pod died
+    # (agent.llm_retries, P4.4); None when it was sent once, so a call sent once and a record saved
+    # before P4.6b look the same.
+    retries: int | None = None
+    # True on the first call a runtime sent for a run it resumed from Redis (P4.4); None otherwise.
+    resumed: Literal[True] | None = None
 
-    def fields(self) -> dict[str, int | str]:
+    def fields(self) -> dict[str, int | str | bool]:
         """The record as it is saved and logged: a measurement the reply lacked is left out, so it
-        never reads as 0."""
+        never reads as 0, and so are retries and resumed on a call they do not describe."""
         return {name: value for name, value in asdict(self).items() if value is not None}
 
     @classmethod

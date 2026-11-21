@@ -144,11 +144,11 @@ async def _send(
     headers: dict[str, str],
     seed: int | None,
     clock: Clock,
-) -> tuple[ChatReply, int, float]:
+) -> tuple[ChatReply, int, float, int]:
     """The step's call, sent again with the same history and x-step when its pod died
     (agent.llm_retries, P4.4), with the wall-clock and the monotonic start of the attempt that got
-    the reply. A failed attempt adds nothing to the history, so the step view keeps one entry per
-    x-step (P2.6)."""
+    the reply, and how many times it was sent again. A failed attempt adds nothing to the history,
+    so the step view keeps one entry per x-step (P2.6)."""
     starts: list[tuple[int, float]] = []
 
     async def attempt() -> ChatReply:
@@ -161,7 +161,7 @@ async def _send(
 
     reply = await send_with_retries(attempt, run.config.retry, retried)
     ts_start, started_ms = starts[-1]
-    return reply, ts_start, started_ms
+    return reply, ts_start, started_ms, len(starts) - 1
 
 
 def _calls_that_ran(
@@ -233,6 +233,8 @@ async def run_task(
     expected_steps = config.expected_steps_default
     # When the last reply arrived, on clock.monotonic_ms(); None until the first one.
     last_reply_ms = _last_reply_ms(run.calls, clock)
+    # Until a resumed run's first reply: its call record says a new runtime sent it (P4.6b).
+    resuming = saved is not None
     if saved is None:
         run.log(logging.INFO, "run started", tool_choice=config.tool_choice)
     else:
@@ -250,7 +252,9 @@ async def run_task(
         if tracker is not None:
             tracker.stepped(run_id, run.step)
         try:
-            reply, ts_start, started_ms = await _send(run, llm, definitions, headers, seed, clock)
+            reply, ts_start, started_ms, retries = await _send(
+                run, llm, definitions, headers, seed, clock
+            )
         except (httpx.HTTPError, LLMResponseError) as error:
             # No reply, so no call record; run.step still counts the call and the error says why:
             # the last attempt's, after any retries, which the "llm call retried" lines count.
@@ -266,7 +270,10 @@ async def run_task(
             completion_tokens=reply.completion_tokens,
             cached_tokens=reply.cached_tokens,
             pod=reply.pod,
+            retries=retries or None,
+            resumed=True if resuming else None,
         )
+        resuming = False
         last_reply_ms = replied_ms
         run.calls.append(call_record)
         if tracker is not None and reply.prompt_tokens is not None:

@@ -150,6 +150,26 @@ def test_a_record_as_the_agent_saves_it_makes_a_valid_line() -> None:
     assert line["cached_tokens"] == 0
 
 
+def test_a_record_of_a_call_sent_again_makes_a_valid_line() -> None:
+    """A retried call of a resumed run keeps both marks in the trace (P4.6b)."""
+    record = CallRecord(
+        step=2,
+        ts_start=1793606515407,
+        duration_ms=25708,
+        gap_before_ms=31000,
+        expected_steps=2,
+        prompt_tokens=358,
+        completion_tokens=21,
+        cached_tokens=0,
+        pod="vllm-5c9565db76-6bq8s",
+        retries=1,
+        resumed=True,
+    )
+    [line] = trace_lines(RUN_ID, "csv", [json.loads(json.dumps(record.fields()))])
+    check_line(trace_validator(), line)
+    assert (line["retries"], line["resumed"]) == (1, True)
+
+
 # trace.v1's contract: a line that does not fit stops the recording.
 
 

@@ -34,6 +34,9 @@ export interface Served {
   // hit: at least one token came from the prefix cache; text says how much of the prompt, detail the exact counts.
   cache?: { text: string; detail: string; hit: boolean };
   latency: string;
+  // The call was sent again (P4.6b): as the record has them, left out when it does not.
+  retries?: number;
+  resumed?: true;
 }
 
 /** The inputs of one StepCard. served is absent on a step whose call record has not arrived, or that has none. */
@@ -90,11 +93,14 @@ function landedCard(step: SavedStep, call: RunCall | undefined): StepCardData {
 }
 
 function served(call: RunCall): Served {
-  return {
+  const how: Served = {
     pod: call.pod ? { short: shortPod(call.pod), full: call.pod } : undefined,
     cache: cacheBadge(call),
     latency: formatMs(call.duration_ms),
   };
+  if (call.retries !== undefined) how.retries = call.retries;
+  if (call.resumed !== undefined) how.resumed = call.resumed;
+  return how;
 }
 
 function cacheBadge({ prompt_tokens: prompt, cached_tokens: cached }: RunCall): Served['cache'] {

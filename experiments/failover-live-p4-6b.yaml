@@ -1,0 +1,21 @@
+# P4.6b: P4.4's failover-live (experiments/failover-live.yaml) again, its settings unchanged, so the case's log lines
+# are checked against the call records' retries (vllm) and resumed calls (agent) (docs/task-cards/64-P4.6b-retry-tag.md).
+# A file of its own, so P4.4's committed results stay as they are. Run with make failover-live
+# EXPERIMENT=experiments/failover-live-p4-6b.yaml after make down and make up (real). Results carry this file's hash
+# (D11).
+profile: real
+# The plugin with affinity, so the vLLM pod killed is the one most runs are pinned to; the profile's after.
+routing:
+  plugin: true
+  affinity: true
+# The go/no-go's questions and CSV on the real profile (P1.7), each a run the 0.6B with the adapter answers in 2-3
+# steps; scored as there, counted here.
+go_no_go: real-go-no-go.yaml
+# One seed: the 5 questions started at once are the load, 2-3 runs per pod. A first guess.
+seeds: [1]
+# About one call into the runs, so each has a step saved and a call in flight: a call took ~2-6 s on 2 real pods with
+# the adapter (P2.8a), and 5 runs at once queue. A first guess.
+kill_after_seconds: 10
+# How long the vllm case waits for a pod holding a live pin: longer than one call, so a pod with a pin is found.
+wait_for_calls_seconds: 30
+cases: [vllm, agent]

@@ -13,6 +13,21 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-21 · P4.6b · green (a step sent again shows it: `retry 1` read on the other pod after a kill; failover-live's log matched the saved calls)
+Command: tests first (Claude): `make test`, `make lint`; 18 changes to the new rule lines, all failing a test · the user, on real after `make down`, `make up`: `make failover-live EXPERIMENT=experiments/failover-live-p4-6b.yaml` (hash 1f5b56754c1d); then `make demo-runner`, `make app-forward`, `make ui PROFILE=real`: a chat question with Kill on its pod, and Start (steady) with a Kill mid-replay. Then Claude, read only: the results JSON, the agent's and the app backend's logs, the run's calls in Redis, the replay's file
+Result:
+- `make test` exit 0: 2726 Python tests, 22 Go-side, 254 UI specs; `make lint` exit 0. Changes to the new lines in the loop, both schemas, `failover_live.py`, the call-to-badge mapping and the step card: 12 of 12 Python and 6 of 6 UI failed a test.
+- **failover-live, vllm case**: `vllm-6b8f7487d9-nv8q6` killed (4 live pins, the other pod 1); 5 of 5 runs done and correct; 4 "llm call retried" lines, all on step 1 and all a 503 from the gateway, against 4 retries on the saved calls, one per run on the killed pod; the run on the other pod had none.
+- **failover-live, agent case**: `agent-6fdfb47c4b-fkmv6` killed; 5 of 5 done and correct; 2 "run resumed" lines against 2 calls marked resumed, one each on `run-e707dc996dc9` and `run-eb4fcda26fb9`. Both cases passed with the new check.
+- **The tag in the browser**: chat run `run-e5aa8df88572`, step 1 answered on `vllm-6b8f7487d9-mfmkn`; Kill on `mfmkn`; step 2's first attempt got a 503, the retry 5 s later was answered on `vllm-6b8f7487d9-888zh`, and its saved call holds `"retries": 1`. The expanded answer read `vllm-888zh · 0% cached · 33.9 s · retry 1` on step 2, and `error` on step 1 (the model called `group_by` twice with the same arguments in one reply): each tag on its own step. The red border is not in the pasted text.
+- **P4.4b's live check** (card 63): replay `demo-steady-20261121T195702`, Kill on `vllm-6b8f7487d9-6r99q`: steps 1 of runs 2 and 3 were cut mid-reply (`RemoteProtocolError`), sent again 5 s later, got a 503 (no free pod yet), then were answered on the third attempt on `vllm-6b8f7487d9-c2shb`. The replay stopped at 11 of 20 runs (its `.partial` last written 20:01:29 UTC, the runner restarted before the chat check), 26 calls, none without a reply.
+Notes:
+- The kill landed as cut streams, not as an error chunk, so P4.4b's error-chunk path is still held by tests against vLLM's source only, as card 63 allowed.
+- Finding for P4.6a's buttons (not fixed here, rule 1): a Kill press shows nothing for ~1.5 s (the runner lists the pods, then deletes, both with kubectl: POST /demo/kill took 1655 and 1239 ms), then the select moves to the pod that is left and Kill is enabled again. A second press at 19:52:15 UTC killed `qtx5q` 2 s after `9mclc`; with no pod left the chat run's step got 503 on all 3 attempts (~10 s) and the run failed, which is P4.4's rule, as replacements take 2-3 min. The user reloaded the page after it; why is not looked into. Options for a later card: Kill refuses the last Ready pod; Kill shows "killing" until the pod is gone.
+- The agent case resumed 2 of 5 runs; the other 3 have neither a resume line nor a resumed call, consistent with each other. That their step 2 was finished by the old pod in the ~3 s it keeps running after a force delete (P4.4's limit) fits, and is not checked.
+- Two existing tests changed, data only, with the user's yes (card 64): failover-live's passing case now carries the retry its log line counts, and the UI's run-calls contract fixture holds the two new fields.
+- Limits: one seed; one chat run through one kill; `resumed` is seen in Redis and the check, not in the browser (no button kills the agent).
+
 ### 2026-11-21 · P4.4b · green (the replayer sends a call again when vLLM ends its stream with a 5xx error chunk)
 Command: tests first (Claude): `make test`, `make lint`; 9 changes to the new rule lines in `replay.py`, 8 failing a test
 Result:

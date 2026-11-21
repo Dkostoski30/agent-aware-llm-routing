@@ -7,10 +7,11 @@ then a pod is force-deleted with no grace (a plain delete would drain it, P4.3):
   runtime's calls on it die and it sends them again (agent.llm_retries);
 - agent: the agent runtime's own pod, so a new runtime starts and resumes the runs from Redis.
 Each run is then followed to its end. A case passes when every run ended done, no step it saved
-before the kill changed, and its calls are steps 1..n each once; it is void without a retry in the
-agent's log (vllm) or a run resumed (agent). Answers are scored as go/no-go scores them and counted,
-not judged (P4.7 judges them). The agent cannot run on the simulator, whose replies are no tool
-calls, so the check runs on real pods.
+before the kill changed, and its calls are steps 1..n each once, and the agent's log lines of the
+case's signal match its runs' call records (P4.6b): the retries on them (vllm), the calls marked
+resumed (agent); it is void without a retry in the agent's log (vllm) or a run resumed (agent).
+Answers are scored as go/no-go scores them and counted, not judged (P4.7 judges them). The agent
+cannot run on the simulator, whose replies are no tool calls, so the check runs on real pods.
 
 The picker runs the file's rules for the check (affinity, so runs are pinned and the vllm case's
 pod holds some) and the profile's afterwards, whatever happened. The agent sends no end of run with
@@ -49,6 +50,9 @@ PROFILE = "real"
 RETRIED = "llm call retried"
 RESUMED = "run resumed"
 SIGNALS = {"vllm": RETRIED, "agent": RESUMED}
+# The RunOutcome field that counts each signal on the runs' call records (P4.6b): the retries
+# summed, or the calls marked resumed.
+MARKS = {"vllm": "retries", "agent": "resumed"}
 # One request to the agent's API, which answers from Redis without waiting for the model.
 REQUEST_TIMEOUT_SECONDS = 10
 # How often a run's status, and the new agent pod, are read; a call takes seconds.
@@ -147,6 +151,9 @@ class RunOutcome:
     steps_after: list[dict[str, Any]]
     # The x-step of each call record at its end (GET /runs/{id}/calls), in order.
     call_steps: list[int]
+    # Over those call records (P4.6b): the retries summed, and how many are marked resumed.
+    retries: int
+    resumed: int
 
 
 def outcome_of(
@@ -169,6 +176,8 @@ def outcome_of(
         steps_before=steps_before,
         steps_after=run["steps"],
         call_steps=[call["step"] for call in calls["calls"]],
+        retries=sum(call.get("retries", 0) for call in calls["calls"]),
+        resumed=sum(call.get("resumed") is True for call in calls["calls"]),
     )
 
 
@@ -192,8 +201,21 @@ class CaseVerdict:
     outcomes: list[RunOutcome]
 
     @property
+    def marks(self) -> int:
+        """The case's signal as its runs' call records count it (MARKS)."""
+        return sum(getattr(outcome, MARKS[self.case]) for outcome in self.outcomes)
+
+    @property
     def problems(self) -> list[str]:
-        return [problem for outcome in self.outcomes for problem in run_problems(outcome)]
+        problems = [problem for outcome in self.outcomes for problem in run_problems(outcome)]
+        # Each retry or resume the log has must be on the saved call it sent, which the step view
+        # tags (P4.6b).
+        if self.marks != self.signals:
+            problems.append(
+                f"{SIGNALS[self.case]} lines: {self.signals}, call records' "
+                f"{MARKS[self.case]}: {self.marks}"
+            )
+        return problems
 
     @property
     def void(self) -> bool:
@@ -389,6 +411,7 @@ def main() -> int:
                     {
                         "case": v.case,
                         "signals": v.signals,
+                        "marks": v.marks,
                         "passed": v.passed,
                         "void": v.void,
                         "problems": v.problems,

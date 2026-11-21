@@ -137,6 +137,17 @@ def test_header_rules(field: str, value: object, accepted: bool) -> None:
         ("ttft_ms", -1, False),
         ("duration_ms", -1, False),
         ("latency_ms", 10, False),
+        # A call sent again (P4.6b): the field is there only when it says something.
+        ("retries", 1, True),
+        ("retries", 3, True),
+        ("resumed", True, True),
+        ("retries", 0, False),
+        ("retries", 1.5, False),
+        ("retries", "1", False),
+        ("retries", None, False),
+        ("resumed", False, False),
+        ("resumed", "true", False),
+        ("resumed", None, False),
     ],
 )
 def test_trace_rules(field: str, value: object, accepted: bool) -> None:
@@ -332,6 +343,17 @@ def test_run_calls_rules(field: str, value: object, accepted: bool) -> None:
         ("pod", "", False),
         ("pod", None, False),
         ("latency_ms", 10, False),
+        # A call sent again (P4.6b): the field is there only when it says something.
+        ("retries", 1, True),
+        ("retries", 3, True),
+        ("resumed", True, True),
+        ("retries", 0, False),
+        ("retries", 1.5, False),
+        ("retries", "1", False),
+        ("retries", None, False),
+        ("resumed", False, False),
+        ("resumed", "true", False),
+        ("resumed", None, False),
     ],
 )
 def test_run_calls_call_rules(field: str, value: object, accepted: bool) -> None:

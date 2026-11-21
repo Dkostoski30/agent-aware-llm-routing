@@ -71,6 +71,15 @@
       "description": "Name of the pod that served the call.",
       "type": "string",
       "minLength": 1
+    },
+    "retries": {
+      "description": "How many times the agent sent the call again, with the same history and x-step, before this reply because its pod died (P4.4, P4.6b). Left out when it was sent once; the replayer leaves it out of its own lines.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "resumed": {
+      "description": "On the first call a new agent runtime sent for a run it resumed from Redis after the old one died (P4.4, P4.6b). Left out on every other call; the replayer leaves it out of its own lines.",
+      "const": true
     }
   },
   "required": [
