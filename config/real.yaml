@@ -25,6 +25,12 @@ model:
   # rule off every call is 0, so waiting calls still go first come, first served; only the preemption victim changes,
   # the latest arrival instead of the last scheduled call, against what P2.8 calibrated on fcfs (experiments/log.md).
   scheduling_policy: priority
+  # How vLLM runs the model's steps (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md). eager is --enforce-eager,
+  # kept since P0.3: CUDA graphs cost VRAM and startup time, and two pods share the 4GB GPU. compiled (torch.compile)
+  # and decode_only (full graphs for decode batches, no torch.compile) also take capture_sizes, the batch sizes graphs
+  # are captured for; only make cuda-graphs runs them, and no profile does until its numbers are decided on.
+  cuda_graphs:
+    mode: eager
   # The P1.7 LoRA adapter, trained on generated tool-call trajectories (make finetune, experiments/finetune-train.yaml).
   # vLLM serves it next to the base model, and the agent names it in every request. Without this section the pods
   # serve the plain model (docs/task-cards/19-P1.7-fine-tune-tool-calls.md).

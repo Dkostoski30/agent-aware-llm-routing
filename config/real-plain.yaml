@@ -26,6 +26,12 @@ model:
   # rule off every call is 0, so waiting calls still go first come, first served; only the preemption victim changes,
   # the latest arrival instead of the last scheduled call, against what P2.8 calibrated on fcfs (experiments/log.md).
   scheduling_policy: priority
+  # How vLLM runs the model's steps (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md). eager is --enforce-eager,
+  # kept since P0.3: CUDA graphs cost VRAM and startup time, and two pods share the 4GB GPU. compiled (torch.compile)
+  # and decode_only (full graphs for decode batches, no torch.compile) also take capture_sizes, the batch sizes graphs
+  # are captured for; only make cuda-graphs runs them, and no profile does until its numbers are decided on.
+  cuda_graphs:
+    mode: eager
 # The most pods that fit on one 4GB GPU; enough for routing between pods and 1<->2 scaling (D5).
 replicas: 2
 # Kubernetes pod settings for the vLLM chart (P0.7).

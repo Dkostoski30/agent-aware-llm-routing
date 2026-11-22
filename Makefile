@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -398,3 +398,11 @@ failover-live:
 # rerun skips finished files and redoes the others from their start.
 calibrate:
 	PYTHONPATH=agent:loadgen:sim uv run --locked python -m calibrator.calibrate experiments/calibrate.yaml
+
+# The CUDA-graphs spike (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md): real at 1 and 2 pods and demo at 1, each
+# with every variant of experiments/cuda-graphs.yaml, calls straight to the pods as make calibrate's. Needs make up (real,
+# not sim); deploys real again at the end. About 2 h, and refuses to start unless Windows is on Performance with AC
+# sleep and hibernate off. Writes experiments/results/cuda-graphs-<hash>-{cells,starts}.csv and .meta.json; a rerun
+# after a finished run does nothing.
+cuda-graphs:
+	PYTHONPATH=agent:loadgen:sim uv run --locked python -m calibrator.cuda_graphs experiments/cuda-graphs.yaml

@@ -1,5 +1,7 @@
 # P1.6b: practical go/no-go on the demo model (PLAN.md P1.6, D10, D11). Run with make go-no-go after
 # make up PROFILE=demo; the result CSV in results/ carries this file's hash.
+# Run again in P4.13b (docs/task-cards/67-P4.13b-adopt-cuda-graphs.md) on compiled CUDA graphs; earlier results ran
+# eager.
 # The cluster's profile; the script checks that the agent runs its model and switches agent.tool_choice in it.
 profile: demo
 # The CSV attached to every run. 36 rows: 3 months x 4 regions x 3 products, revenue = units x a fixed unit price.

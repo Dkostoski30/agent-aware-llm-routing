@@ -4,6 +4,8 @@
 # The two models, each the profile make vllm-deploy deploys for it: with the P1.7 adapter, and the same pods without it
 # (P1.7 saw runs ~2x slower with --enable-lora). Which one config/sim.yaml is calibrated on is decided with the numbers
 # (P2.8b).
+# Run again in P4.13b (docs/task-cards/67-P4.13b-adopt-cuda-graphs.md), after the profiles moved from eager to compiled
+# CUDA graphs: the eager tables, hash 5553d79b34d7, stay in sim/ as measured.
 profiles:
   lora: real
   plain: real-plain

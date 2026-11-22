@@ -13,6 +13,42 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-22 · P4.13 · green (CUDA graphs: 16x faster per token on real at 1 pod, 10x at 2, 4x on demo; all variants fit)
+Command: tests first (Claude): `infra/checks/test_cuda_graphs_chart.py` and `sim/tests/test_cuda_graphs.py` red, then green; 15 changes to the driver, 14 failing a test (the 15th, an unneeded rule, removed) · the user, on real after `make down`, `make up`: `make cuda-graphs` (hash 02617bd616c5), 00:00-01:05 UTC, two earlier tries stopped in the host check before anything changed (below)
+Result: every variant fit and answered every call; real was deployed again at the end. 1,024-token prompt, partial cache (752 cached), 64 tokens, 20 calls per cell; per-token and TTFT p50, ms. Each row is from the same night, so compare within a row first:
+
+| Profile, pods, calls in flight | eager | graphs (torch.compile) | graphs-nocompile (`FULL_DECODE_ONLY`) | P2.8c / P2.8a table, eager |
+|---|---|---|---|---|
+| real, 1 pod, 1 | 200.9 (TTFT 397) | 12.7 (205) | 12.3 (208) | 154.4 (306) |
+| real, 1 pod, 2 | 202.1 (452) | 13.2 (363) | 13.7 (458) | 153.1 (390) |
+| real, 2 pods, 1 (each pod) | 342.7 / 267.2 | 28.1 / 27.6 | 13.4 / 56.0 | 309.8 / 309.1 |
+| real, 2 pods, 2 (each pod) | 260.9 / 276.1 | 29.3 / 29.8 | 14.2 / 61.0 | 312.1 / 306.3 |
+| demo (1.7B), 1 pod, 1 | 63.7 (161) | 16.5 (105) | 17.1 (101) | — (plain 0.6B: 56.3) |
+| demo (1.7B), 1 pod, 2 | 68.5 (244) | 17.6 (190) | 17.5 (181) | — (plain 0.6B: 58.2) |
+
+Starts (one each). "First answer" is created to Ready plus Ready to the first warm-up reply; VRAM is nvidia-smi's whole GPU once every pod was warm, the Windows desktop included:
+
+| Profile, start | eager: Ready / first answer / first TTFT | graphs | graphs-nocompile | VRAM used of 4,096 MiB (eager / graphs / nocompile) |
+|---|---|---|---|---|
+| real, first pod alone | 127 s / 159 s / 17.0 s | 228 s / 232 s / 0.4 s | 166 s / 170 s / 0.5 s | 2,148 / 2,209 / 2,188 |
+| real, second pod added | 141 s / 186 s / 23.8 s | 296 s / 305 s / 1.4 s | 198 s / 209 s / 1.6 s | 3,846 / 3,857 / 3,809 |
+| demo, one pod | 158 s / 174 s / 9.9 s | 162 s / 165 s / 0.5 s | 157 s / 160 s / 0.7 s | 3,724 / 3,173 / 3,177 |
+
+- vLLM's own lines: graph capture took 10-12 s and 0.04 GiB (graphs) or 0.02 GiB (nocompile) per real pod, and 1-2 s and 0.00 GiB on demo (2 sizes captured, against 4 with LoRA). The KV cache stayed 4,384 tokens (real) and 7,312 (demo) in every variant, and model loading took 0.77 and 1.92 GiB.
+- graphs captured `PIECEWISE` and `FULL` graphs; graphs-nocompile only `FULL` ones. In eager vLLM printed "Enforce eager set, disabling torch.compile, CUDAGraphs, and JIT kernel warmup", the likely reason an eager pod's first call took 10-24 s and a graph pod's 0.4-1.6 s.
+- Eager had stalls the graph modes did not: TTFT p95 12,761 ms (real, 1 pod, 2 in flight), 19,282 ms (real, 2 pods) and 8,708 ms (demo); the highest p95 in a graph mode was 3,821 ms.
+- Meta: clock drift −0.00004 (±0.0002); 0 clock jumps in every cell.
+Notes:
+- **Why calls were slow (cuda-graphs-spike, 2026-11-18):** mostly `--enforce-eager` with the adapter. With graphs the 0.6B with LoRA (12.7 ms) is faster than the 1.7B without it (16.5 ms); eager, LoRA cost 3x (P2.8a: lora 154, plain 56). The launch overhead of LoRA's extra kernels under WSL is the likely cause; not measured apart.
+- **Fits twice:** two graph pods used 3,857 MiB of the GPU against eager's 3,846. The graphs cost tens of MB because capture was limited to batch sizes 1 and 2.
+- **Start time:** torch.compile adds ~100-155 s to a real pod's Ready (no compile cache is kept between starts), graphs-nocompile ~40-57 s. Counted to the first answer, the gap shrinks to +73/+119 s and +11/+22 s, since eager's first call is slow. On demo the 150 s readiness delay hides any difference (all three Ready at 157-162 s), and real's 120 s delay may hide part of eager's: start differences there are an upper bound.
+- **Two pods share the GPU unevenly without torch.compile:** in graphs-nocompile the first pod ran at 13-14 ms and the added one at 56-61 ms, and the first pod's p95 at 1 in flight was 209 ms. Summed throughput is about the same as graphs' even 28-30 ms per pod. Cause not looked into; the eager pair was uneven too (343 / 267).
+- **Host slower tonight:** eager at 1 pod was 201 ms against the table's 154 at the same cell, so the absolute numbers here do not replace P2.8's, and the ratios within one night are the result.
+- **Not measured, by the user's choice (card 66):** whether answers stay correct with graphs (no go/no-go, no held-out). Outputs here had a fixed length (`ignore_eos`).
+- No profile changed: real, real-plain and demo still run `mode: eager`. Adopting a mode is the user's decision. Real's would ripple: `config/sim.yaml` is calibrated on eager pods (P2.8b), and the Phase 3-4 real results ran eager.
+- Two earlier tries stopped before the cluster was touched: the first was interrupted in `check_journal_readable` (`journalctl -b 0 -q -n 1`, which took 6.6 s when timed later); the second failed reading Windows' clock (`powershell.exe`: WSL's `UtilAcceptVsock: accept4 failed 110`, an interop timeout). Both worked when timed by hand afterwards; no code changed. The user ran `make down`, `make up` before the run that wrote these files.
+- Built as planned except the key's shape: `model.cuda_graphs.mode` of `eager`, `compiled`, `decode_only` in place of card 66's `{enabled, compile}` (card 66 says why). The chart renders byte-identical args in every profile.
+
 ### 2026-11-22 · P4.6c · green (Kill refuses the last Ready vLLM pod, and says it is killing while the press runs)
 Command: tests first (Claude): `loadgen/tests/test_demo_runner.py` and `demo-controls.spec.ts` red, then green; 10 changes to the new rule lines, all failing a test · the user: `make test`, `make lint`
 Result:

@@ -1,0 +1,10 @@
+profile,variant,case,pod,created_to_ready_s,ready_to_first_answer_s,first_ttft_ms,warmup_calls,model_load_gib,model_load_s,graph_capture_s,graph_capture_gib,kv_cache_tokens,vram_used_mib,vram_total_mib
+real,eager,deployed,vllm-6b8f7487d9-dx77v,127.0,32.1,16959,2,0.77,10.6,,,4384,2148,4096
+real,eager,added,vllm-6b8f7487d9-gnwtc,141.0,45.2,23800,2,0.77,18.4,,,4384,3846,4096
+real,graphs,deployed,vllm-56d44d7674-rkfm4,228.0,3.7,404,1,0.77,12.1,11,0.04,4384,2209,4096
+real,graphs,added,vllm-56d44d7674-dq8hh,296.0,9.0,1448,2,0.77,18.8,12,0.04,4384,3857,4096
+real,graphs-nocompile,deployed,vllm-d94d54784-c4psx,166.0,3.8,517,1,0.77,13.8,10,0.02,4384,2188,4096
+real,graphs-nocompile,added,vllm-d94d54784-zcnsf,198.0,10.5,1646,2,0.77,17.4,12,0.02,4384,3809,4096
+demo,eager,deployed,vllm-66646c768c-zppd5,158.0,16.0,9906,2,1.92,10.3,,,7312,3724,4096
+demo,graphs,deployed,vllm-7dd7dfdc7b-k99wf,162.0,3.4,538,1,1.92,11.3,2,0.0,7312,3173,4096
+demo,graphs-nocompile,deployed,vllm-84664d975d-gr7jn,157.0,3.4,654,1,1.92,12.5,1,0.0,7312,3177,4096

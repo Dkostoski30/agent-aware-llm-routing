@@ -14,6 +14,27 @@
 {{- if not (and (or (kindIs "float64" $quiet) (kindIs "int64" $quiet)) (ge (float64 $quiet) 0.0) (eq (float64 $quiet) (floor $quiet))) }}
 {{- fail (printf "drain.quiet_seconds from the profile must be a whole number of seconds, 0 or more, got %v" $quiet) }}
 {{- end }}
+{{- /* How vLLM runs the model's steps (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md). */}}
+{{- $graphs := required "model.cuda_graphs from the profile" .Values.model.cuda_graphs }}
+{{- if not (has $graphs.mode (list "eager" "compiled" "decode_only")) }}
+{{- fail (printf "model.cuda_graphs.mode from the profile must be eager, compiled or decode_only, got %v" $graphs.mode) }}
+{{- end }}
+{{- /* Read only off eager: helm upgrade --reuse-values merges maps, so eager may keep an earlier mode's sizes. */}}
+{{- $sizes := list }}
+{{- if ne $graphs.mode "eager" }}
+{{- $sizes = $graphs.capture_sizes }}
+{{- $sizesError := printf "model.cuda_graphs.capture_sizes from the profile must be ascending whole numbers from 1, got %v" $sizes }}
+{{- if not (and (kindIs "slice" $sizes) (gt (len $sizes) 0)) }}
+{{- fail $sizesError }}
+{{- end }}
+{{- $last := 0.0 }}
+{{- range $sizes }}
+{{- if not (and (or (kindIs "float64" .) (kindIs "int64" .)) (eq (float64 .) (floor .)) (gt (float64 .) $last)) }}
+{{- fail $sizesError }}
+{{- end }}
+{{- $last = float64 . }}
+{{- end }}
+{{- end }}
 {{- $image := "" }}
 {{- if $drain.enabled }}
 {{- $image = required "drainImage, the picker's image that carries the waiter, set by make vllm-deploy or make sim-deploy" .Values.drainImage }}
@@ -75,7 +96,19 @@ spec:
             - --scheduling-policy={{ required "model.scheduling_policy from the profile" .Values.model.scheduling_policy }}
             - --enable-auto-tool-choice
             - --enable-prefix-caching
+            {{- if eq $graphs.mode "eager" }}
             - --enforce-eager
+            {{- else }}
+            {{- /* Graphs only for these batch sizes, the calls in flight on a pod: each size captured costs VRAM. */}}
+            - --cudagraph-capture-sizes
+            {{- range $sizes }}
+            - {{ int64 . | quote }}
+            {{- end }}
+            {{- if eq $graphs.mode "decode_only" }}
+            {{- /* No torch.compile (mode 0): full graphs for batches of decodes only, every other step eager. */}}
+            - '--compilation-config={"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY"}'
+            {{- end }}
+            {{- end }}
             # usage.prompt_tokens_details.cached_tokens in every reply: the prefix-cache hit of each call (P2.2a).
             - --enable-prompt-tokens-details
             # Every reply's system_fingerprint is this pod's name, so the agent records which pod served each call

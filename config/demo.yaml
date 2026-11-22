@@ -20,6 +20,12 @@ model:
   tool_call_parser: hermes
   # Same as "real" (P4.1): the priority rule needs it, and with the rule off every call is 0, first come, first served.
   scheduling_policy: priority
+  # How vLLM runs the model's steps (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md). eager is --enforce-eager,
+  # kept since P0.3: CUDA graphs cost VRAM and startup time, and two pods share the 4GB GPU. compiled (torch.compile)
+  # and decode_only (full graphs for decode batches, no torch.compile) also take capture_sizes, the batch sizes graphs
+  # are captured for; only make cuda-graphs runs them, and no profile does until its numbers are decided on.
+  cuda_graphs:
+    mode: eager
 # Only one 1.7B pod fits on the 4GB GPU (D8).
 replicas: 1
 # Kubernetes pod settings for the vLLM chart (P0.7).

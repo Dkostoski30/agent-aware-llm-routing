@@ -1,0 +1,56 @@
+# make cuda-graphs (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md): a measuring-only spike on whether vLLM pods
+# generate faster with CUDA graphs than with --enforce-eager, whether they still fit in VRAM, and how much longer a pod
+# takes to start. Streaming calls go straight to the pods, as make calibrate's do, so its numbers compare with P2.8a's.
+# Results go to experiments/results/ stamped with this file's hash (D11); no profile changes.
+# The profiles measured and the pod counts each is measured at: real (the 0.6B with the adapter) alone and as two pods
+# sharing the GPU, where P2.8a measured 150 and 311 ms per token; demo (the 1.7B), the one pod P4.7 runs on.
+profiles:
+  real: [1, 2]
+  demo: [1]
+# Each one is model.cuda_graphs for every pod of the profile, in this order (the chart's modes, card 66). eager is what
+# every profile runs today. Graphs are captured for batch sizes 1 and 2 only, the calls in flight on a pod in the cells
+# below; each size captured costs VRAM.
+variants:
+  - name: eager
+    cuda_graphs:
+      mode: eager
+  - name: graphs
+    cuda_graphs:
+      mode: compiled
+      capture_sizes: [1, 2]
+  - name: graphs-nocompile
+    cuda_graphs:
+      mode: decode_only
+      capture_sizes: [1, 2]
+# Calls in flight on each pod: 1, and 2, the largest batch captured.
+concurrency: [1, 2]
+# One prompt length: P2.5's warmed calls were about this long, and it is a row of P2.8a's table.
+prompt_tokens: [1024]
+cache:
+  # An agent step: the start of its prompt was sent just before, the rest is new (experiments/calibrate.yaml).
+  modes: [partial]
+  # As in experiments/calibrate.yaml, so the cells are the same as P2.8a's.
+  partial_share: 0.75
+# Every reply's length (ignore_eos): 63 gaps between tokens for the per-token time, as in experiments/calibrate.yaml.
+completion_tokens: 64
+# As in experiments/calibrate.yaml: p95 is the 19th of 20 calls, not the slowest one.
+calls_per_cell: 20
+# After every pod start, calls that stay out of the cells until one is fast; the same rule as experiments/calibrate.yaml.
+warmup:
+  prompt_tokens: 1024
+  # Under this, the pod counts as warm: above P2.5's warmed calls (278-490 ms), below P2.3's fourth and fifth.
+  settled_ttft_ms: 1000
+  # A pod still slow after this many is recorded as not fitting; P2.3's settled on the sixth.
+  max_calls: 10
+# make cuda-graphs refuses to start on another host setting, as make calibrate does: a change of power mode moved
+# generation speed by 15% in P2.5, and a run of ~2 h stops if Windows sleeps.
+host:
+  # Windows' Performance plan, the one versions.md names.
+  power_scheme: 27fa6203-3987-4dcc-918d-748559d549ec
+  # powercfg's SUB_SLEEP settings that must be 0 (never) on AC: sleep after, hibernate after.
+  sleep_settings: [STANDBYIDLE, HIBERNATEIDLE]
+# Any fixed value: the same seed gives the same prompt words.
+seed: 1
+# Bounds one call, not a latency target, as in experiments/calibrate.yaml: the 1.7B and two shared pods are slower than
+# one 0.6B pod, and P2.3's slowest call took 106 s on a slowed host.
+call_timeout_seconds: 300

@@ -2,6 +2,8 @@
 # adapter is served on the 0.6B (docs/task-cards/19-P1.7-fine-tune-tool-calls.md). Everything but the profile is the
 # demo file's, which test_go_no_go checks. Run with make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml after
 # make up; the result CSV in results/ carries this file's hash.
+# Run again in P4.13b (docs/task-cards/67-P4.13b-adopt-cuda-graphs.md) on compiled CUDA graphs; earlier results ran
+# eager.
 # The cluster's profile; the script checks that the agent runs its model and switches agent.tool_choice in it.
 profile: real
 # The CSV attached to every run. 36 rows: 3 months x 4 regions x 3 products, revenue = units x a fixed unit price.
