@@ -28,6 +28,9 @@ class RunRecord:
     updated_ms: int
     # The run request's seed, which a resumed run keeps sending (P4.4); None when it had none.
     seed: int | None
+    # The chat history's messages after the system prompt in the saved messages (P4.8): the step
+    # view skips them. 0 on a run without history, and on one saved before P4.8.
+    history_messages: int = 0
 
 
 @dataclass(frozen=True)
@@ -161,6 +164,8 @@ class RedisStore:
             values[name] = int(values[name])
         if values["seed"] is not None:
             values["seed"] = int(values["seed"])
+        # A run saved before P4.8 has no such field, and no history.
+        values["history_messages"] = int(values["history_messages"] or 0)
         return RunRecord(**values), json.loads(messages)
 
     async def get_calls(self, run_id: str) -> list[dict[str, Any]]:

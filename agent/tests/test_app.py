@@ -21,6 +21,7 @@ import httpx
 import pytest
 from agent_runtime.app import create_app, run_events
 from agent_runtime.config import AgentConfig, Sampling
+from agent_runtime.history import VllmCounter
 from agent_runtime.retry import NO_RETRY
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RunRecord, RunStatus, RunStore
@@ -30,6 +31,12 @@ from jsonschema import Draft202012Validator
 RUN_REQUEST_SCHEMA = Path(__file__).resolve().parents[2] / "schemas" / "run-request.v1.json"
 TASK = "What is 7 times 8 plus 3?"
 EXPECTED_STEPS = 3
+# arithmetic's expected steps once step 1 has picked it, unlike the default's 3 (D13).
+ARITHMETIC_STEPS = 2
+SCENARIO_PROMPT = "Which scenario is the question above?"
+OUT_OF_SCOPE_REPLY = "I can only help with arithmetic, CSV files, orders and contracts."
+# In the words the test's /tokenize counts.
+HISTORY_BUDGET = 12
 SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
 MAX_FILE_BYTES = len(SALES_CSV)
 SALES_FILE = {"id": "sales", "name": "sales.csv", "content": SALES_CSV}
@@ -63,6 +70,15 @@ def make_config(end_of_run: bool = False) -> AgentConfig:
         diff_context_words=3,
         events_poll_seconds=0.01,
         end_of_run=end_of_run,
+        scenario_prompt=SCENARIO_PROMPT,
+        out_of_scope_reply=OUT_OF_SCOPE_REPLY,
+        scenario_expected_steps={
+            "csv": 4,
+            "contracts": 5,
+            "support": 6,
+            "arithmetic": ARITHMETIC_STEPS,
+        },
+        history_budget_tokens=HISTORY_BUDGET,
     )
 
 
@@ -146,7 +162,9 @@ class Service:
     """The app with a scripted LLM (or one failure for every call), a MemoryStore and a picker that
     records each end of run with the run's status saved at that moment (P3.3). picker_failure is the
     picker's answer to every end of run, or the exception its connection raises. Each LLM call also
-    notes what the run tracker read as it arrived (P3.8)."""
+    notes what the run tracker read as it arrived (P3.8). Step 1's request (structured outputs) is
+    answered with scenario and kept in picks, so requests holds the steps after it (D13). /tokenize
+    counts words, or answers tokenize_failure (P4.8)."""
 
     def __init__(
         self,
@@ -155,11 +173,17 @@ class Service:
         end_of_run: bool = False,
         picker_failure: httpx.Response | httpx.HTTPError | None = None,
         store: MemoryStore | None = None,
+        scenario: str = "arithmetic",
+        tokenize_failure: httpx.Response | None = None,
     ):
         self.replies = list(replies)
         self.failure = failure
         self.picker_failure = picker_failure
+        self.scenario = scenario
+        self.tokenize_failure = tokenize_failure
         self.requests: list[httpx.Request] = []
+        self.picks: list[httpx.Request] = []
+        self.counted: list[dict[str, Any]] = []
         # (method, path, the saved status of the run when the picker heard of its end)
         self.ends: list[tuple[str, str, str | None]] = []
         self.store = MemoryStore() if store is None else store
@@ -172,10 +196,23 @@ class Service:
         picker = httpx.AsyncClient(
             transport=httpx.MockTransport(self.handle_end), base_url="http://picker"
         )
-        schema = json.loads(RUN_REQUEST_SCHEMA.read_text())
-        self.client = TestClient(
-            create_app(make_config(end_of_run), self.store, http, picker, schema, self.tracker)
+        tokenizer = httpx.AsyncClient(
+            transport=httpx.MockTransport(self.handle_tokenize), base_url="http://vllm"
         )
+        counter = VllmCounter(tokenizer, "test-model")
+        schema = json.loads(RUN_REQUEST_SCHEMA.read_text())
+        config = make_config(end_of_run)
+        self.client = TestClient(
+            create_app(config, self.store, http, picker, schema, self.tracker, counter)
+        )
+
+    def handle_tokenize(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        self.counted.append(body)
+        if self.tokenize_failure is not None:
+            return self.tokenize_failure
+        words = sum(len((m.get("content") or "").split()) for m in body["messages"])
+        return httpx.Response(200, json={"count": words, "max_model_len": 4096, "tokens": []})
 
     def handle_end(self, request: httpx.Request) -> httpx.Response:
         saved = self.store.saves[-1][0].status if self.store.saves else None
@@ -187,11 +224,16 @@ class Service:
         return httpx.Response(204)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(request)
         self.tracked.append((self.tracker.remaining_work(), self.tracker.active_runs()))
         if self.failure is not None:
+            self.requests.append(request)
             return self.failure
-        message = self.replies.pop(0)
+        if "structured_outputs" in json.loads(request.content):
+            self.picks.append(request)
+            message = text(self.scenario)
+        else:
+            self.requests.append(request)
+            message = self.replies.pop(0)
         choice = {
             "message": message,
             "finish_reason": "tool_calls" if message["tool_calls"] else "stop",
@@ -214,7 +256,9 @@ def test_post_starts_a_run_and_get_reads_it_back() -> None:
     run = response.json()
     assert (run["run_id"], run["status"], run["task"]) == (run_id, "done", TASK)
     assert (run["answer"], run["error"], run["invalid_calls"]) == ("59", None, 0)
-    assert len(run["steps"]) == 3
+    # Step 1's pick is a step of the run too (D13).
+    assert len(run["steps"]) == 4
+    assert (run["steps"][0]["content"], run["expected_steps"]) == ("arithmetic", ARITHMETIC_STEPS)
     assert [request.headers["x-run-id"] for request in service.requests] == [run_id] * 3
     assert json.loads(service.requests[0].content)["seed"] == 7
 
@@ -288,12 +332,12 @@ def test_files_are_saved_with_the_run_and_reach_the_tools() -> None:
         "content": None,
         "tool_calls": [{"id": "call-1", "function": call}],
     }
-    service = Service([group, text("South")])
+    service = Service([group, text("South")], scenario="csv")
     run_id = service.start({"task": TASK, "files": [SALES_FILE]})
     assert service.store.files == {run_id: [SALES_FILE]}
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["answer"]) == ("done", "South")
-    result = run["steps"][0]["tool_calls"][0]["result"]
+    result = run["steps"][1]["tool_calls"][0]["result"]
     assert result["rows"][0] == {"group": "South", "sum": 380.0}
 
 
@@ -304,23 +348,15 @@ def test_text_documents_are_saved_with_the_run_and_reach_the_document_tools() ->
         "content": None,
         "tool_calls": [{"id": "call-1", "function": call}],
     }
-    service = Service([read, text("One clause: fees.")])
+    service = Service([read, text("One clause: fees.")], scenario="contracts")
     run_id = service.start({"task": TASK, "files": [SALES_FILE, TERMS_FILE]})
     assert service.store.files == {run_id: [SALES_FILE, TERMS_FILE]}
     tools = [tool["function"]["name"] for tool in json.loads(service.requests[0].content)["tools"]]
-    # No calculator on a run with files (P2.1a-3).
-    assert tools == [
-        "csv_summary",
-        "group_by",
-        "compare",
-        "read_document",
-        "extract_clauses",
-        # Every text file also brings get_policy (card 21, P2.1a-2), until P4.8's scenario step.
-        "get_policy",
-    ]
+    # The contracts scenario's tools only (D13); one document has nothing to diff with.
+    assert tools == ["read_document", "extract_clauses"]
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["answer"]) == ("done", "One clause: fees.")
-    result = run["steps"][0]["tool_calls"][0]["result"]
+    result = run["steps"][1]["tool_calls"][0]["result"]
     assert result["clauses"] == [{"clause": "fees", "title": "Fees", "word_count": 2}]
 
 
@@ -343,19 +379,26 @@ def test_history_is_saved_after_every_step() -> None:
     service = Service([calc("7*8"), calc("56+3"), text("59")])
     run_id = service.start({"task": TASK})
     saved = [
-        (record.status, record.step, record.invalid_calls, record.answer, len(messages))
+        (
+            record.status,
+            record.step,
+            record.invalid_calls,
+            record.expected_steps,
+            record.answer,
+            len(messages),
+        )
         for record, messages in service.store.saves
     ]
+    # The pick is saved as step 1 with the scenario's expected steps (D13).
     assert saved == [
-        ("running", 0, 0, None, 2),
-        ("running", 1, 0, None, 4),
-        ("running", 2, 0, None, 6),
-        ("done", 3, 0, "59", 7),
+        ("running", 0, 0, EXPECTED_STEPS, None, 2),
+        ("running", 1, 0, ARITHMETIC_STEPS, None, 3),
+        ("running", 2, 0, ARITHMETIC_STEPS, None, 5),
+        ("running", 3, 0, ARITHMETIC_STEPS, None, 7),
+        ("done", 4, 0, ARITHMETIC_STEPS, "59", 8),
     ]
     records = [record for record, _ in service.store.saves]
-    assert {(r.run_id, r.task, r.expected_steps) for r in records} == {
-        (run_id, TASK, EXPECTED_STEPS)
-    }
+    assert {(r.run_id, r.task) for r in records} == {(run_id, TASK)}
     assert len({record.created_ms for record in records}) == 1
     updated = [record.updated_ms for record in records]
     assert updated == sorted(updated)
@@ -368,7 +411,7 @@ def test_calls_are_saved_with_every_step() -> None:
     service = Service([calc("7*8"), calc("56+3"), text("59")])
     service.start({"task": TASK})
     saved = [[call.step for call in calls] for calls in service.store.calls]
-    assert saved == [[], [1], [1, 2], [1, 2, 3]]
+    assert saved == [[], [1], [1, 2], [1, 2, 3], [1, 2, 3, 4]]
 
 
 def test_failed_run_is_saved_with_its_error() -> None:
@@ -404,13 +447,13 @@ def test_with_the_plugin_off_no_end_of_run_is_sent() -> None:
 
 
 def test_the_tracker_counts_a_run_from_its_first_call_to_its_end() -> None:
-    """P3.8: each call is counted as sent, by its x-step; the third call is past EXPECTED_STEPS 3's
-    work but still counts 1."""
+    """P3.8: each call is counted as sent, by its x-step; after the pick by arithmetic's expected
+    steps (D13), the calls past them still counting 1."""
     service = Service([calc("7*8"), calc("56+3"), text("59")])
     service.start({"task": TASK})
-    steps = [int(request.headers["x-step"]) for request in service.requests]
-    assert steps == [1, 2, 3]
-    assert service.tracked == [(EXPECTED_STEPS - 1, 1), (EXPECTED_STEPS - 2, 1), (1, 1)]
+    steps = [int(request.headers["x-step"]) for request in [*service.picks, *service.requests]]
+    assert steps == [1, 2, 3, 4]
+    assert service.tracked == [(EXPECTED_STEPS - 1, 1), (1, 1), (1, 1), (1, 1)]
     assert (service.tracker.remaining_work(), service.tracker.active_runs()) == (0, 0)
 
 
@@ -427,7 +470,7 @@ def test_a_run_that_crashes_leaves_the_tracker() -> None:
     service = Service([calc("7*8"), text("56")], store=FailingStore(saves_left=1))
     with pytest.raises(StoreDown):
         service.client.post("/runs", json={"task": TASK})
-    assert len(service.requests) == 1
+    assert (len(service.picks), len(service.requests)) == (1, 0)
     assert service.tracker.active_runs() == 0
 
 
@@ -509,8 +552,9 @@ def test_steps_show_invalid_calls_and_rejected_answers() -> None:
     run_id = service.start({"task": TASK})
     run = service.client.get(f"/runs/{run_id}").json()
     assert (run["status"], run["invalid_calls"]) == ("done", 2)
-    steps = run["steps"]
-    assert [step["step"] for step in steps] == [1, 2, 3, 4]
+    pick, *steps = run["steps"]
+    assert (pick["step"], pick["content"], pick["error"]) == (1, "arithmetic", None)
+    assert [step["step"] for step in steps] == [2, 3, 4, 5]
     first = steps[0]["tool_calls"][0]
     assert first["arguments"] == {"expression": "2^3"}
     assert "does not match" in first["result"]["error"]
@@ -692,10 +736,10 @@ def test_finished_run_streams_its_steps_and_answer_then_closes() -> None:
     service = Service([calc("7*8"), calc("56+3"), text("59")])
     run_id = service.start({"task": TASK})
     events = stream(service, run_id)
-    assert kinds(events) == ["run", "step 1", "step 2", "step 3", "end"]
+    assert kinds(events) == ["run", "step 1", "step 2", "step 3", "step 4", "end"]
     assert {data["run_id"] for _, data in events} == {run_id}
     end = events[-1][1]
-    assert (end["status"], end["answer"], end["steps"]) == ("done", "59", 3)
+    assert (end["status"], end["answer"], end["steps"]) == ("done", "59", 4)
     assert stream(service, run_id) == events
 
 
@@ -704,8 +748,9 @@ def test_invalid_calls_reach_the_stream() -> None:
     service = Service([calc("2^3"), broken, calc("7*8"), text("56")])
     events = stream(service, service.start({"task": TASK}))
     steps = [data for name, data in events if name == "step"]
-    assert "does not match" in steps[0]["tool_calls"][0]["result"]["error"]
-    assert "could not be parsed" in steps[1]["error"]
+    assert steps[0]["content"] == "arithmetic"
+    assert "does not match" in steps[1]["tool_calls"][0]["result"]["error"]
+    assert "could not be parsed" in steps[2]["error"]
     assert (events[-1][1]["answer"], events[-1][1]["invalid_calls"]) == ("56", 2)
 
 
@@ -718,7 +763,7 @@ def test_arguments_that_are_not_json_reach_the_stream_as_text() -> None:
     }
     service = Service([broken, text("3")])
     events = stream(service, service.start({"task": TASK}))
-    [first] = events[1][1]["tool_calls"]
+    [first] = events[2][1]["tool_calls"]
     assert first["arguments"] == '{"op": "add"'
     assert "error" in first["result"]
 
@@ -772,8 +817,8 @@ def read_calls(service: Service, run_id: str) -> list[dict[str, Any]]:
 def test_calls_are_the_records_the_run_saved_in_step_order() -> None:
     service = ServedService([calc("7*8"), text("56")])
     run_id = service.start({"task": TASK})
-    [first, second] = read_calls(service, run_id)
-    assert [first["step"], second["step"]] == [1, 2]
+    [first, second, third] = read_calls(service, run_id)
+    assert [first["step"], second["step"], third["step"]] == [1, 2, 3]
     assert (first["prompt_tokens"], first["completion_tokens"], first["cached_tokens"]) == (
         398,
         9,
@@ -784,13 +829,15 @@ def test_calls_are_the_records_the_run_saved_in_step_order() -> None:
         EXPECTED_STEPS,
         0,
     )
-    assert [first, second] == [call.fields() for call in service.store.calls[-1]]
+    assert second["expected_steps"] == ARITHMETIC_STEPS
+    assert [first, second, third] == [call.fields() for call in service.store.calls[-1]]
 
 
 def test_calls_leave_out_a_measurement_the_reply_did_not_have() -> None:
     service = Service([text("56")])
-    [call] = read_calls(service, service.start({"task": TASK}))
-    assert set(call) == {"step", "ts_start", "duration_ms", "gap_before_ms", "expected_steps"}
+    calls = read_calls(service, service.start({"task": TASK}))
+    fields = {"step", "ts_start", "duration_ms", "gap_before_ms", "expected_steps"}
+    assert [set(call) for call in calls] == [fields, fields]
 
 
 def test_calls_of_a_run_whose_first_call_got_no_reply_are_empty() -> None:
@@ -817,6 +864,10 @@ CALL_1 = CallRecord(
     cached_tokens=None,
     pod=None,
 )
+CALL_2 = replace(CALL_1, step=2, ts_start=CREATED_MS + 70, expected_steps=ARITHMETIC_STEPS)
+# STEP_1 as P4.8's runtime saves it: step 1 picked arithmetic, step 2 multiplied.
+PICKED: dict[str, Any] = {"role": "assistant", "content": "arithmetic", "scenario": True}
+STEP_2_PICKED = [*STEP_0, PICKED, *STEP_1[2:]]
 
 
 def ended(store: MemoryStore, run_id: str) -> RunRecord:
@@ -832,17 +883,20 @@ def ended(store: MemoryStore, run_id: str) -> RunRecord:
 
 def test_a_runtime_that_starts_resumes_the_runs_a_dead_one_left() -> None:
     store = MemoryStore()
-    store.left_by_a_dead_runtime(saved_record(1), STEP_1, [CALL_1])
+    saved = replace(saved_record(2), expected_steps=ARITHMETIC_STEPS)
+    store.left_by_a_dead_runtime(saved, STEP_2_PICKED, [CALL_1, CALL_2])
     service = Service([calc("56+3"), text("59")], end_of_run=True, store=store)
     with service.client:
         record = ended(store, RUN_ID)
-    assert (record.status, record.answer, record.step) == ("done", "59", 3)
-    assert [request.headers["x-step"] for request in service.requests] == ["2", "3"]
+    assert (record.status, record.answer, record.step) == ("done", "59", 4)
+    # The saved pick holds: no new one, and the prompt leaves it out.
+    assert service.picks == []
+    assert [request.headers["x-step"] for request in service.requests] == ["3", "4"]
     assert json.loads(service.requests[0].content)["messages"] == STEP_1
-    assert [call.step for call in store.calls[-1]] == [1, 2, 3]
-    assert store.calls[-1][0] == CALL_1
+    assert [call.step for call in store.calls[-1]] == [1, 2, 3, 4]
+    assert store.calls[-1][:2] == [CALL_1, CALL_2]
     # Counted from its resume to its end, and its end sent to the picker after the final save.
-    assert service.tracked[0] == (EXPECTED_STEPS - 2, 1)
+    assert service.tracked[0] == (1, 1)
     assert service.tracker.active_runs() == 0
     assert service.ends == [("POST", f"/runs/{RUN_ID}/end", "done")]
 
@@ -852,9 +906,10 @@ def test_a_resumed_run_keeps_its_seed_and_its_files() -> None:
     record = replace(saved_record(0), seed=11)
     store.left_by_a_dead_runtime(record, STEP_0, [])
     store.files[RUN_ID] = [SALES_FILE]
-    service = Service([text("South")], store=store)
+    service = Service([text("South")], store=store, scenario="csv")
     with service.client:
         ended(store, RUN_ID)
+    assert json.loads(service.picks[0].content)["seed"] == 11
     body = json.loads(service.requests[0].content)
     assert body["seed"] == 11
     tools = [tool["function"]["name"] for tool in body["tools"]]
@@ -867,7 +922,7 @@ def test_only_runs_saved_as_running_are_resumed() -> None:
     service = Service([], store=store)
     with service.client:
         time.sleep(0.1)
-    assert service.requests == []
+    assert service.picks == service.requests == []
     assert len(store.saves) == 1
 
 
@@ -882,7 +937,7 @@ def test_a_resumed_run_whose_files_the_profile_now_refuses_fails_with_why() -> N
     assert record.status == "failed"
     assert record.error is not None
     assert record.error.startswith("files of the resumed run: ")
-    assert service.requests == []
+    assert service.picks == service.requests == []
     assert service.tracker.active_runs() == 0
 
 
@@ -890,3 +945,86 @@ def test_a_new_run_saves_its_seed() -> None:
     service = Service([text("59")])
     run_id = service.start({"task": TASK, "seed": 7})
     assert {record.seed for record, _ in service.store.saves if record.run_id == run_id} == {7}
+
+
+# The chat's history in the run request (D13, P4.8). /tokenize counts words here, against
+# HISTORY_BUDGET's 12.
+TURN_1 = {"question": "What is two times three?", "answer": "It is six."}
+TURN_2 = {"question": "And two times four?", "answer": "Eight."}
+
+
+def turn(question: str, answer: str) -> list[dict[str, str]]:
+    return [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+
+
+def test_the_history_that_fits_goes_between_the_system_prompt_and_the_task() -> None:
+    service = Service([text("59")])
+    run_id = service.start({"task": TASK, "history": [TURN_1, TURN_2]})
+    # 8 + 5 words are over 12 after the second turn, so the first is dropped.
+    expected = [
+        {"role": "system", "content": "You are a calculator agent."},
+        *turn(**TURN_2),
+        {"role": "user", "content": TASK},
+    ]
+    assert service.store.saves[0][1] == expected
+    assert json.loads(service.requests[0].content)["messages"] == expected
+    assert json.loads(service.picks[0].content)["messages"][:-1] == expected
+    assert service.client.get(f"/runs/{run_id}").json()["status"] == "done"
+
+
+def test_each_turn_is_counted_without_a_generation_prompt() -> None:
+    service = Service([text("59")])
+    service.start({"task": TASK, "history": [TURN_1, TURN_2]})
+    turns = [body for body in service.counted if not body["add_generation_prompt"]]
+    assert [body["messages"] for body in turns] == [turn(**TURN_1), turn(**TURN_2)]
+
+
+def test_a_history_that_cannot_be_counted_fails_the_request_before_the_run() -> None:
+    service = Service([text("59")], tokenize_failure=httpx.Response(503, text="no pod"))
+    response = service.client.post("/runs", json={"task": TASK, "history": [TURN_1]})
+    assert response.status_code == 502
+    assert "history not counted" in response.json()["detail"]
+    assert (service.store.saves, service.store.files) == ([], {})
+    assert service.tracker.active_runs() == 0
+
+
+@pytest.mark.parametrize(
+    "history",
+    [[{"question": "Hi?"}], [{"question": "", "answer": "x"}], [{**TURN_1, "role": "user"}]],
+    ids=["no-answer", "empty-question", "extra-field"],
+)
+def test_a_history_turn_that_is_not_a_question_and_answer_is_rejected(
+    history: list[dict[str, str]],
+) -> None:
+    service = Service([text("59")])
+    response = service.client.post("/runs", json={"task": TASK, "history": history})
+    assert response.status_code == 422
+    assert service.store.saves == []
+
+
+def test_an_out_of_scope_run_ends_at_step_1_with_the_fixed_reply() -> None:
+    service = Service([], scenario="out_of_scope", end_of_run=True)
+    run_id = service.start({"task": "Write me a poem about the sea."})
+    run = service.client.get(f"/runs/{run_id}").json()
+    assert (run["status"], run["answer"]) == ("done", OUT_OF_SCOPE_REPLY)
+    assert [step["content"] for step in run["steps"]] == ["out_of_scope"]
+    assert all(step["tool_calls"] == [] for step in run["steps"])
+    assert service.requests == []
+    assert service.ends == [("POST", f"/runs/{run_id}/end", "done")]
+
+
+def test_the_steps_are_the_run_s_own_not_its_history() -> None:
+    """The saved messages start with the history; the step view and its events skip them, so step
+    n is still x-step n and its call record (P2.6)."""
+    service = Service([calc("7*8"), text("56")])
+    run_id = service.start({"task": TASK, "history": [TURN_2]})
+    run = service.client.get(f"/runs/{run_id}").json()
+    assert [(step["step"], step["content"]) for step in run["steps"]] == [
+        (1, "arithmetic"),
+        (2, None),
+        (3, "56"),
+    ]
+    assert all(step["error"] is None for step in run["steps"])
+    events = stream(service, run_id)
+    assert kinds(events) == ["run", "step 1", "step 2", "step 3", "end"]
+    assert [call["step"] for call in read_calls(service, run_id)] == [1, 2, 3]

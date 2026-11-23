@@ -78,11 +78,22 @@ export function savedStepCards(steps: SavedStep[], calls: RunCall[] = []): StepC
   return steps.map((step) => landedCard(step, callOfStep.get(step.step)));
 }
 
+// Step 1 of a run picks its scenario (D13, P4.8): no tool call, and one of these words as its reply
+// (agent_runtime/config.py, SCENARIOS). A run saved before P4.8 has no pick; its step 1 shows as a
+// pick only if it answered with a bare scenario name.
+const SCENARIOS = ['csv', 'contracts', 'support', 'arithmetic', 'out_of_scope'];
+
+function pickedScenario(step: SavedStep): string | undefined {
+  const picked = step.step === 1 && step.tool_calls.length === 0 ? step.content : null;
+  return picked !== null && SCENARIOS.includes(picked) ? picked : undefined;
+}
+
 function landedCard(step: SavedStep, call: RunCall | undefined): StepCardData {
+  const scenario = pickedScenario(step);
   const card: StepCardData = {
     n: step.step,
-    tool: toolLabel(step.tool_calls),
-    args: step.tool_calls.map((toolCall) => argsText(toolCall.arguments)).join(', '),
+    tool: scenario === undefined ? toolLabel(step.tool_calls) : 'Scenario',
+    args: scenario ?? step.tool_calls.map((toolCall) => argsText(toolCall.arguments)).join(', '),
     state: 'done',
     served: call && served(call),
   };

@@ -1,5 +1,6 @@
 """One non-streaming chat completion through the gateway (D6)."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,8 +56,13 @@ class LLMClient:
         tools: list[dict[str, Any]],
         headers: dict[str, str],
         seed: int | None,
+        choices: Sequence[str] | None = None,
     ) -> ChatReply:
         """Returns choices[0] of the answer with its token counts and pod.
+
+        With choices, the reply is one of them: vLLM's structured outputs (D13's step 1). A
+        call without tools sends neither tools nor tool_choice, which vLLM refuses without tools in
+        required mode.
 
         A non-2xx answer or a timeout raises httpx.HTTPError, a body that is not a chat completion
         (a usage field of the wrong type included) LLMResponseError. httpx applies
@@ -67,8 +73,6 @@ class LLMClient:
         body: dict[str, Any] = {
             "model": self._config.model_name,
             "messages": messages,
-            "tools": tools,
-            "tool_choice": self._config.tool_choice,
             # Non-streaming, so a call that fails can simply be sent again (D6).
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": False},
@@ -76,6 +80,11 @@ class LLMClient:
             "top_p": sampling.top_p,
             "top_k": sampling.top_k,
         }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = self._config.tool_choice
+        if choices is not None:
+            body["structured_outputs"] = {"choice": list(choices)}
         if seed is not None:
             body["seed"] = seed
         response = await self._http.post(

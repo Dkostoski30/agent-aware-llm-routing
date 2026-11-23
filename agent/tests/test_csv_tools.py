@@ -28,8 +28,8 @@ from agent_runtime.tools import (
     FINAL_ANSWER,
     InvalidCallError,
     check_call,
-    offered_tools,
     run_tool,
+    scenario_tools,
 )
 
 SALES_CSV = (Path(__file__).parent / "fixtures" / "sales.csv").read_text()
@@ -474,12 +474,12 @@ def two_tables() -> list[Table]:
         ("required", [CSV_SUMMARY, GROUP_BY, COMPARE, FINAL_ANSWER]),
     ],
 )
-def test_offered_tools_per_mode(mode: ToolChoice, names: list[str]) -> None:
-    assert list(offered_tools(mode, two_tables())) == names
+def test_the_csv_scenarios_tools_per_mode(mode: ToolChoice, names: list[str]) -> None:
+    assert list(scenario_tools("csv", mode, two_tables(), [])) == names
 
 
 def test_per_run_schemas_list_exactly_the_runs_files_and_columns() -> None:
-    tools = offered_tools("auto", two_tables())
+    tools = scenario_tools("csv", "auto", two_tables(), [])
     files = ["sales", "staff"]
     columns = ["region", "product", "units", "revenue", "team", "headcount"]
     for name in (CSV_SUMMARY, GROUP_BY, COMPARE):
@@ -506,8 +506,8 @@ def test_per_run_schemas_list_exactly_the_runs_files_and_columns() -> None:
     ("mode", "names"),
     [("auto", [CALCULATOR]), ("required", [CALCULATOR, FINAL_ANSWER])],
 )
-def test_a_run_without_files_offers_no_csv_tools(mode: ToolChoice, names: list[str]) -> None:
-    assert list(offered_tools(mode, [])) == names
+def test_the_arithmetic_scenario_offers_the_calculator(mode: ToolChoice, names: list[str]) -> None:
+    assert list(scenario_tools("arithmetic", mode, [], [])) == names
 
 
 @pytest.mark.parametrize(
@@ -533,7 +533,7 @@ def test_call_outside_the_enums_is_rejected_with_the_allowed_values(
     arguments: dict[str, Any], error_parts: list[str]
 ) -> None:
     with pytest.raises(InvalidCallError) as raised:
-        check_call(GROUP_BY, json.dumps(arguments), offered_tools("auto", two_tables()))
+        check_call(GROUP_BY, json.dumps(arguments), scenario_tools("csv", "auto", two_tables(), []))
     for part in error_parts:
         assert part in str(raised.value)
 

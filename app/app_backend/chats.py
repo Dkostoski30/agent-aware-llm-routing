@@ -1,10 +1,11 @@
 """Chats, messages and attachments (P3.12a, D7, D13): one message starts one agent run.
 
 A message's run gets the files of this message and then the chat's earlier ones, newest first, up
-to agent.max_files, so a follow-up question can use a CSV attached before. The app saves the reply
-as an assistant row holding the run's id as soon as the run starts; GET /chats/{id} finishes
-unfinished rows by asking the runtime. There is no background task, so a restarted app pod loses
-nothing and the SQLite file has one writer (D7).
+to agent.max_files, so a follow-up question can use a CSV attached before, and the chat's earlier
+turns that ended done, which the agent runtime cuts to its token budget (D13). The app saves the
+reply as an assistant row holding the run's id as soon as the run starts; GET /chats/{id} and the
+next message finish unfinished rows by asking the runtime. There is no background task, so a
+restarted app pod loses nothing and the SQLite file has one writer (D7).
 
 The runtime is called before anything is written: Python's sqlite3 opens a transaction only at the
 first INSERT or UPDATE, so no write lock is held while the app waits on the network.
@@ -14,9 +15,10 @@ and run-events.v1 hold here too; the browser has no login at the runtime, so it 
 passes them on only to the user whose chat started the run.
 """
 
+import itertools
 import logging
 import sqlite3
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Sequence
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -140,10 +142,12 @@ def run_request(
     message: NewMessage,
     files: list[RunFile],
     max_files: int,
+    ended: Sequence[tuple[str, str | None, int]] = (),
 ) -> dict[str, Any]:
     """The run-request.v1 body: the message's task and seed, its files (renamed where taken), then
-    the chat's earlier ones, newest first, max_files in all. A message without files or seed
-    sends none, like a run request without them."""
+    the chat's earlier ones, newest first, max_files in all, and the chat's history
+    (chat_history, with ended). A message without files, seed or history sends none, like a run
+    request without them."""
     earlier = conn.execute(
         "SELECT file_id, name, type, content FROM attachments WHERE chat_id = ?"
         " ORDER BY message_id DESC, id LIMIT ?",
@@ -158,7 +162,33 @@ def run_request(
         request["seed"] = message.seed
     if run_files:
         request["files"] = run_files
+    history = chat_history(conn, chat_id, ended)
+    if history:
+        request["history"] = history
     return request
+
+
+def chat_history(
+    conn: sqlite3.Connection, chat_id: int, ended: Sequence[tuple[str, str | None, int]] = ()
+) -> list[dict[str, str]]:
+    """The chat's turns whose run ended done, oldest first, each the user's message and the run's
+    answer (run-request.v1's history, D13). ended is finished_rows' (status, text, message id) of
+    rows not saved yet, read as if they were. save_message writes a user row and its assistant row
+    one after the other, so a turn is an assistant row and the row before it; a failed or running
+    turn has no final answer and is left out."""
+    endings = {message_id: (status, text) for status, text, message_id in ended}
+    rows = [
+        (role, *endings.get(message_id, (status, text)))
+        for message_id, role, text, status in conn.execute(
+            "SELECT id, role, text, status FROM messages WHERE chat_id = ? ORDER BY id",
+            (chat_id,),
+        )
+    ]
+    return [
+        {"question": question[2], "answer": answer[2]}
+        for question, answer in itertools.pairwise(rows)
+        if (question[0], answer[0], answer[1]) == ("user", "assistant", "done")
+    ]
 
 
 def save_message(
@@ -344,16 +374,22 @@ def router(
             )
         ]
 
-    @chats.get("/chats/{chat_id}")
-    def read_chat(chat_id: int, user_id: UserId, conn: Conn) -> ChatWithMessages:
-        chat = owned_chat(conn, chat_id, user_id)
+    def ended_rows(conn: sqlite3.Connection, chat_id: int) -> list[tuple[str, str | None, int]]:
+        """finished_rows of the chat's running rows: it only reads, so no write lock is held while
+        it asks the runtime."""
         running = conn.execute(
             "SELECT id, run_id FROM messages WHERE chat_id = ? AND status = 'running' ORDER BY id",
             (chat_id,),
         ).fetchall()
-        conn.executemany(
-            "UPDATE messages SET status = ?, text = ? WHERE id = ?", finished_rows(runtime, running)
-        )
+        return finished_rows(runtime, running)
+
+    def save_ended(conn: sqlite3.Connection, ended: list[tuple[str, str | None, int]]) -> None:
+        conn.executemany("UPDATE messages SET status = ?, text = ? WHERE id = ?", ended)
+
+    @chats.get("/chats/{chat_id}")
+    def read_chat(chat_id: int, user_id: UserId, conn: Conn) -> ChatWithMessages:
+        chat = owned_chat(conn, chat_id, user_id)
+        save_ended(conn, ended_rows(conn, chat_id))
         return ChatWithMessages(**chat.model_dump(), messages=chat_messages(conn, chat_id))
 
     @chats.post("/chats/{chat_id}/messages", status_code=202, response_model=Sent)
@@ -375,7 +411,10 @@ def router(
             file_id = unique_id(file.id, taken)
             taken.add(file_id)
             files.append(file.model_copy(update={"id": file_id}))
-        request = run_request(conn, chat_id, body, files, config.max_files)
+        # A run that ended since the chat was last read has its answer in the history too; the rows
+        # are saved after the runtime answers, as every write here is.
+        ended = ended_rows(conn, chat_id)
+        request = run_request(conn, chat_id, body, files, config.max_files, ended)
         try:
             run_id = runtime.start_run(request)
         except RunRefused as refused:
@@ -384,11 +423,13 @@ def router(
             raise HTTPException(status_code=422, detail=str(refused)) from refused
         except RuntimeUnavailable as error:
             logs.log(logger, logging.WARNING, "runtime unavailable", error=str(error))
+            save_ended(conn, ended)
             save_message(
                 conn, chat_id, body.task, files, ("failed", RUNTIME_UNREACHABLE, None), clock()
             )
             # A response, not an exception, so the request's transaction commits the rows.
             return JSONResponse(status_code=502, content={"detail": RUNTIME_UNREACHABLE})
+        save_ended(conn, ended)
         user_message_id, assistant_message_id = save_message(
             conn, chat_id, body.task, files, ("running", "", run_id), clock()
         )

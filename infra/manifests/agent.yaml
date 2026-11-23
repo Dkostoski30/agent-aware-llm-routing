@@ -43,6 +43,10 @@ spec:
               value: http://vllm-pool-epp.default.svc.cluster.local:9010
             - name: REDIS_URL
               value: redis://redis.default.svc.cluster.local:6379/0
+            # The vLLM pods' own Service (infra/charts/vllm), for /tokenize (P4.8): the Gateway routes only /v1,
+            # and the picker must not see these requests as calls.
+            - name: TOKENIZE_URL
+              value: http://vllm.default.svc.cluster.local:8000
           ports:
             - name: http
               containerPort: 8080

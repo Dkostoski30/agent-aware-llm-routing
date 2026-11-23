@@ -40,17 +40,21 @@ Call = tuple[str, dict[str, Any], dict[str, Any] | None]
 
 
 def run(answer: str | None, calls: list[Call], status: str = "done") -> dict[str, Any]:
-    """A GET /runs/{id} body: one step per tool call."""
+    """A GET /runs/{id} body: step 1's scenario pick (D13, P4.8), then one step per tool call."""
+    pick = {"step": 1, "content": "csv", "tool_calls": []}
     return {
         "status": status,
         "answer": answer,
         "invalid_calls": 0,
         "steps": [
-            {
-                "step": i + 1,
-                "tool_calls": [{"name": name, "arguments": arguments, "result": result}],
-            }
-            for i, (name, arguments, result) in enumerate(calls)
+            pick,
+            *(
+                {
+                    "step": i + 2,
+                    "tool_calls": [{"name": name, "arguments": arguments, "result": result}],
+                }
+                for i, (name, arguments, result) in enumerate(calls)
+            ),
         ],
     }
 
@@ -248,6 +252,16 @@ def test_the_compare_question_rejects_the_wrong_direction(answer: str, correct: 
         # A failed run may have stopped before final_answer in either mode.
         (run(None, [GROUP_BY_OK], status="failed"), None),
         (run(None, [GROUP_BY_OK], status="timeout"), None),
+        # An out-of-scope run ends at step 1's pick, the same in both modes (D13, P4.8).
+        (
+            {
+                "status": "done",
+                "answer": "I can only help with arithmetic.",
+                "invalid_calls": 0,
+                "steps": [{"step": 1, "content": "out_of_scope", "tool_calls": []}],
+            },
+            None,
+        ),
     ],
 )
 def test_served_mode(body: dict[str, Any], mode: str | None) -> None:

@@ -13,6 +13,28 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-23 · P4.8 · green on demo (routing step and chat history work; real's current adapter picks out_of_scope until P4.8b retrains it)
+Command: Claude: card 69, tests first (`agent/tests/test_scenarios.py`, `test_history.py`, loop, app and store tests, `app/tests/test_chats.py`, `experiments/tests/`); `uv run --locked pytest` (3,307 passed, P4.13c's `test_kv_capacity[validate-sim-2pods.yaml]` deselected, below); after the chat fixes, `uv run --locked pytest agent app experiments` (1,300 passed) and the UI's `run-view.spec.ts` (47 passed) · the user: `make up PROFILE=demo`, `make go-no-go`; `make up`, a chat on real through `make app-forward` and `make ui PROFILE=real`; again on demo · Claude, on the real pods' Service: one pick call per question and seed with `structured_outputs.choice`, 10 questions x 2 seeds, adapter and base model, a script in the session's scratchpad
+Result:
+- **Demo go/no-go** (`demo-go-no-go-832673627066-10ff2bb380fa.csv`): 8/10 in each mode, 0 invalid calls. The same four `two-step` rows failed as in P4.13b's run (`...-e988b1e54a57.csv`), with the same answers word for word. Every run took one more step. So the 1.7B picked `csv` in all 20 runs, and steps 2..n sent the prompts they sent before P4.8. P4.8's demo bar is P4.13b's result, not 9/10 (the user, 2026-11-23): demo was at 8/10 before P4.8.
+- **Chat on demo**, a CSV attached, two messages: step 1 read `Scenario · csv` in both runs. The second run's steps were its own, numbered 1-4. Step 1's cached share was 0% in the first run and 59% in the second: the second turn's prompt starts with the first's.
+- **The pick on real:** vLLM v0.31.0 takes `structured_outputs.choice` with the LoRA adapter, but the current adapter picks wrong.
+
+| Model | Scenario prompt | Right picks |
+|---|---|---|
+| 0.6B + adapter `5554fcf81b09` | as in `config/` | 4/20 |
+| 0.6B + adapter | + "Reply with the scenario's name only." | 14/20 |
+| 0.6B base | as in `config/` | 16/20 |
+| 0.6B base | + the line | 14/20 |
+
+Asked freely, the adapter answers in a sentence ("The last question ... belongs to the attached CSV files"), so the forced first token lands on `out`. Kept as it is (the user, 2026-11-23). P4.8b's retrain teaches the bare word, and real's chat answers out of scope until then.
+Notes:
+- Decisions (the user, card 69): one card; `arithmetic` joins D13's list; the run's files narrow the list, `out_of_scope` always on it; the history cut is replayed from the first turn on every run, so it only moves with a drop; the real adapter is retrained, moved to P4.8b with the re-record so it runs overnight; after the chat on real, an orders CSV allows `csv` too and the step view shows step 1 as `Scenario`.
+- Found in the user's chat on real and fixed: the saved messages start with the history, and the step view showed its answers as steps, each later question as a step's error, with the badges on the wrong cards. `RunRecord.history_messages` now tells the step view how many to skip.
+- Changed while coding: a pick outside the list fails the run at once (only a server that ignores structured outputs can send one). History turns are `{question, answer}` pairs. The history share is training-only, so P4.8b's held-out still pairs with P2.1b's. Each call's prompt is counted with `/tokenize` before it is sent, so P4.10's one-call lag is gone. `history_budget_tokens` is 2,600: 4,096 less the demo trace's longest call, 1,419.
+- Answers on demo are the untrained 1.7B's, with odd tool choices ("row with highest avg value" became the mean revenue per value of `units`), for P4.7 to measure.
+- Found, not fixed (P4.13c's commit, rule 1): `test_kv_capacity` fails on `experiments/validate-sim-2pods.yaml`, which has no top-level `profile`; `make lint` fails on `loadgen/load_generator/experiment.py:189` (line length) and `loadgen/tests/test_experiment.py:3417` (format). `loadgen/load_generator/record.py`'s `Task` still says the runtime has no scenario until P4.8, for P4.8b.
+
 ### 2026-11-23 · P4.13c · green (P4.13b's 2-pod stall not reproduced in three replays; the 2-pod pair still misses the simulator's tolerance, as the 1-pod pair does)
 Command: Claude: card 68, tests first (`loadgen/tests/test_experiment.py`): the Windows GPU log (`typeperf.exe` beside nvidia-smi on every real run) and a variant's `start` (`together`, `one_at_a_time`) · the user: `make test`, `make lint`, `make down`, `make up`, `make experiment NAME=two-pod-stall` (hash 959ccdc9db3d); `make test`, `make lint`, `make experiment NAME=validate-sim-2pods` (hash 05f6428bd00c, stopped at sim-2pods' run 29 of 40) · Claude: the 2-pod verdict scored with the runner's functions:
 `PYTHONPATH=agent:loadgen uv run --locked python -c` with `call_rows(...)` on `validate-sim-2pods-05f6428bd00c-real-2pods.jsonl` (`start_times(pattern, seed)`, KV 4384, 5 runs discarded), then `metrics(variant_rows(rows)["real-2pods"], summarise(rows)["real-2pods"])` against the `sim` column of `sim/validation-f27264e942ba.csv`'s real-2pods rows, with `relative_error`

@@ -12,6 +12,13 @@ from agent_runtime.retry import RetryPolicy, retry_policy
 # each call.
 ToolChoice = Literal["required", "auto"]
 
+# What step 1 picks (D13): later steps see only the picked scenario's tools
+# (agent_runtime/tools.py), and out_of_scope ends the run with agent.out_of_scope_reply. arithmetic
+# joined D13's list on 2026-11-23 (P4.8), so a question without files keeps the calculator.
+Scenario = Literal["csv", "contracts", "support", "arithmetic", "out_of_scope"]
+SCENARIOS: tuple[Scenario, ...] = get_args(Scenario)
+OUT_OF_SCOPE: Scenario = "out_of_scope"
+
 
 @dataclass(frozen=True)
 class Sampling:
@@ -50,6 +57,13 @@ class AgentConfig:
     # Whether a run's end is sent to the picker, POST /runs/{id}/end (P3.3, D1): routing.plugin,
     # since only the plugin serves it.
     end_of_run: bool
+    # Step 1 (D13, P4.8): the instruction after the task, the reply that ends an out_of_scope run,
+    # and the x-expected-steps of each other scenario once it is picked (expected_steps_by_type).
+    scenario_prompt: str
+    out_of_scope_reply: str
+    scenario_expected_steps: dict[Scenario, int]
+    # The chat's earlier turns a run's prompt may hold, in tokens (agent_runtime/history.py).
+    history_budget_tokens: int
 
 
 def load_config(path: Path) -> AgentConfig:
@@ -89,4 +103,13 @@ def load_config(path: Path) -> AgentConfig:
         diff_context_words=agent["diff_context_words"],
         events_poll_seconds=agent["events_poll_seconds"],
         end_of_run=plugin,
+        scenario_prompt=agent["scenario_prompt"],
+        out_of_scope_reply=agent["out_of_scope_reply"],
+        # A missing scenario raises KeyError with its name.
+        scenario_expected_steps={
+            scenario: agent["expected_steps_by_type"][scenario]
+            for scenario in SCENARIOS
+            if scenario != OUT_OF_SCOPE
+        },
+        history_budget_tokens=agent["history_budget_tokens"],
     )

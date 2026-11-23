@@ -119,6 +119,19 @@ describe('stepCards', () => {
     expect([second.tool, second.args]).toEqual(['Text reply', '']);
   });
 
+  it("names step 1's scenario pick, which D13 shows read-only on the run (P4.8)", () => {
+    const pick = step(1, [], { content: 'csv' });
+    const [first] = stepCards(view([pick], end(1)));
+    expect([first.tool, first.args, first.state]).toEqual(['Scenario', 'csv', 'done']);
+  });
+
+  it('keeps a later text reply that reads like a scenario a text reply', () => {
+    const [, second] = stepCards(
+      view([step(1, [], { content: 'csv' }), step(2, [], { content: 'csv' })], end(2)),
+    );
+    expect([second.tool, second.args]).toEqual(['Text reply', '']);
+  });
+
   it('marks a step the runtime sent an error back for, with the error as its note', () => {
     const invalid = step(1, [
       {
@@ -276,7 +289,12 @@ describe('stepCards with call records', () => {
 
 describe('savedStepCards', () => {
   // As GET /runs/{id} answers a step: no run_id or expected_steps, which only the events carry.
-  const saved = ({ step, content, tool_calls, error }: RunStep) => ({ step, content, tool_calls, error });
+  const saved = ({ step, content, tool_calls, error }: RunStep) => ({
+    step,
+    content,
+    tool_calls,
+    error,
+  });
   const CALL: RunCall = {
     step: 2,
     ts_start: 1_793_600_000_000,
@@ -291,7 +309,9 @@ describe('savedStepCards', () => {
   it('draws a saved step as the ended run draws the same step', () => {
     const failed = step(2, [{ name: 'compare', arguments: {}, result: { error: 'not a group' } }]);
     const steps = [STEP_1, failed, step(3, [], { content: '56' })];
-    expect(savedStepCards(steps.map(saved), [CALL])).toEqual(stepCards(view(steps, end(3)), [CALL]));
+    expect(savedStepCards(steps.map(saved), [CALL])).toEqual(
+      stepCards(view(steps, end(3)), [CALL]),
+    );
   });
 
   it('has no card for a step not yet taken, since a saved run has no estimate to fill', () => {

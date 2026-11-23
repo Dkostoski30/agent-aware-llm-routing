@@ -251,8 +251,9 @@ def is_correct(
 
 def served_mode(run: Mapping[str, Any]) -> str | None:
     """The D10 mode of the agent that answered a run: a done run ended with final_answer in
-    required mode and with a text answer in auto mode. None for a run that did not end done."""
-    if run["status"] != "done":
+    required mode and with a text answer in auto mode. None for a run that did not end done, and
+    for one that ended at step 1: only an out_of_scope pick does, the same in both modes (D13)."""
+    if run["status"] != "done" or len(run["steps"]) == 1:
         return None
     calls = (call["name"] for step in run["steps"] for call in step["tool_calls"])
     return REQUIRED if FINAL_ANSWER in calls else AUTO

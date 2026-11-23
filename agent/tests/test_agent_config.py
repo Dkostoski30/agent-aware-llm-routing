@@ -122,3 +122,35 @@ def test_a_negative_retry_count_is_rejected(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump(profile))
     with pytest.raises(ValueError, match="llm_retries"):
         load_config(path)
+
+
+PROFILES = ["real", "real-plain", "sim", "demo"]
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_profile_sets_the_scenario_step_and_the_history_budget(profile: str) -> None:
+    """D13, P4.8: the routing instruction, the fixed out-of-scope reply, a positive budget below
+    the context, and the expected steps of every scenario a run can go on with."""
+    path = CONFIG_DIR / f"{profile}.yaml"
+    config = load_config(path)
+    assert config.scenario_prompt.strip()
+    assert config.out_of_scope_reply.strip()
+    max_model_len = yaml.safe_load(path.read_text())["model"]["max_model_len"]
+    assert 0 < config.history_budget_tokens < max_model_len
+    assert set(config.scenario_expected_steps) == {"csv", "contracts", "support", "arithmetic"}
+    assert all(steps >= 1 for steps in config.scenario_expected_steps.values())
+
+
+def test_every_profile_sends_the_same_scenario_step() -> None:
+    """Recorded traces (real, sim) carry what the demo sends, as with the system prompt."""
+    configs = [load_config(CONFIG_DIR / f"{p}.yaml") for p in PROFILES]
+    assert len({(c.scenario_prompt, c.out_of_scope_reply) for c in configs}) == 1
+
+
+def test_a_scenario_without_expected_steps_is_rejected(tmp_path: Path) -> None:
+    profile = yaml.safe_load((CONFIG_DIR / "real.yaml").read_text())
+    del profile["agent"]["expected_steps_by_type"]["contracts"]
+    path = tmp_path / "profile.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    with pytest.raises(KeyError, match="contracts"):
+        load_config(path)

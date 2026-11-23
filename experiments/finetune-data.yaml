@@ -88,13 +88,17 @@ contracts:
   # Clauses whose value the second version changes, inclusive; the fixture changes 1.
   changed: [1, 2]
 # Share of off-topic questions that come with files attached: a CSV, a support set or a contract pair, so the model
-# sees the off-topic reply next to every scenario's tools. Arithmetic questions never come with one: the runtime
-# offers the calculator only on runs without files (P2.1a-3).
+# learns to pick out_of_scope whatever the files (D13, P4.8; before, it learned the reply next to every scenario's
+# tools). Arithmetic questions never come with one: the runtime offers the calculator only on runs without files
+# (P2.1a-3). An off-topic question's answer is agent.out_of_scope_reply in the profile, which the runtime sends when
+# step 1 picks out_of_scope.
 with_file_share: 0.5
-# The final answer of an off-topic question, word for word, with no tool call (P1.6e's sentence, decided with the user
-# 2026-10-28; orders and contracts added in P2.1b, 2026-11-01). The system prompt does not contain it: the model learns
-# it from the training data.
-off_topic_reply: I can only do arithmetic and answer questions about attached CSV files, orders and contracts.
+# Earlier chat turns before a question (D13, P4.8): other questions of the split with their answers, so the adapter
+# has seen prompts with a history. Training only: the held-out set stays single-turn, so make heldout pairs it with
+# P2.1b's run question by question. A quarter and 1-3 turns are first guesses.
+history:
+  share: 0.25
+  turns: [1, 3]
 # Names per split. The two splits share none, and none is a name from experiments/data/sales.csv (its file ID, columns
 # or groups), so no held-out column, group or topic appears in training, and the go/no-go's file stays unseen.
 pools:

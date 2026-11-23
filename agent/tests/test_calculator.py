@@ -13,7 +13,8 @@ from agent_runtime.tools import (
     InvalidCallError,
     calculator,
     check_call,
-    offered_tools,
+    scenario_tools,
+    scenarios,
 )
 
 BOTH_TOOLS = {name: PARAMETERS[name] for name in (CALCULATOR, FINAL_ANSWER)}
@@ -162,7 +163,9 @@ def test_the_calculator_is_offered_only_on_runs_without_files() -> None:
     (P1.6f, folded into P2.1a-3)."""
     table = parse_file("sales", "sales.csv", "region,revenue\nNorth,1\n")
     document = parse_document("terms", "terms.txt", "## Fees\nTen.\n")
-    assert CALCULATOR in offered_tools("auto", [])
-    assert CALCULATOR not in offered_tools("auto", [table])
-    assert CALCULATOR not in offered_tools("auto", [], [document])
-    assert list(offered_tools("required", [])) == [CALCULATOR, FINAL_ANSWER]
+    assert "arithmetic" in scenarios([], [])
+    assert "arithmetic" not in scenarios([table], [])
+    assert "arithmetic" not in scenarios([], [document])
+    assert list(scenario_tools("arithmetic", "required", [], [])) == [CALCULATOR, FINAL_ANSWER]
+    picks = scenarios([table], [document])
+    assert all(CALCULATOR not in scenario_tools(s, "auto", [table], [document]) for s in picks)

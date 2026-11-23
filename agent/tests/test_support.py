@@ -16,7 +16,7 @@ from agent_runtime.support import (
     get_order,
     get_policy,
 )
-from agent_runtime.tools import InvalidCallError, check_call, offered_tools
+from agent_runtime.tools import InvalidCallError, check_call, scenario_tools
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MAX_CHARS = 1600
@@ -181,33 +181,29 @@ def sales() -> Table:
 def test_support_tools_are_offered_by_file_type(
     tables: list[Table], documents: list[Document], support_tools: list[str]
 ) -> None:
-    offered = list(offered_tools("auto", tables, documents))
-    assert [name for name in offered if name in (GET_ORDER, GET_POLICY, DRAFT_REPLY)] == (
-        support_tools
-    )
+    assert list(scenario_tools("support", "auto", tables, documents)) == support_tools
 
 
 @pytest.mark.parametrize("mode", ["auto", "required"])
-def test_an_orders_csv_gets_no_csv_tools(mode: ToolChoice) -> None:
+def test_a_support_pick_sees_no_csv_or_document_tools(mode: ToolChoice) -> None:
     """The demo model answered "Order 1042 arrived damaged" with group_by(status, "damaged") on
-    the orders file, twice, whatever the prompt said (P2.1a-2 demo runs, 2026-11-01); a CSV with an
-    order_id column is the support scenario's, so until P4.8's scenario step it gets only the
-    support tools. Text files keep the contracts tools."""
-    offered = list(offered_tools(mode, [orders()], [policies()]))
-    assert CSV_SUMMARY not in offered
-    assert offered.index(EXTRACT_CLAUSES) < offered.index(GET_ORDER)
-    assert READ_DOCUMENT in offered
+    the orders file, twice, whatever the prompt said (P2.1a-2 demo runs, 2026-11-01). Since P4.8 a
+    support pick sees the support tools alone, so an orders CSV can feed the CSV tools on a csv
+    pick (the user, 2026-11-23)."""
+    offered = list(scenario_tools("support", mode, [orders()], [policies()]))
+    assert not {CSV_SUMMARY, GROUP_BY, READ_DOCUMENT, EXTRACT_CLAUSES} & set(offered)
 
 
-def test_the_csv_tools_list_only_the_files_without_order_id() -> None:
-    tools = offered_tools("auto", [orders(), sales()], [])
-    assert tools[CSV_SUMMARY]["properties"]["file"]["enum"] == ["sales"]
-    assert tools[GROUP_BY]["properties"]["by"]["enum"] == ["region", "revenue"]
-    assert tools[GET_ORDER]["properties"]["file"]["enum"] == ["orders"]
+def test_the_csv_tools_list_every_csv_an_orders_csv_too() -> None:
+    tools = scenario_tools("csv", "auto", [orders(), sales()], [])
+    assert tools[CSV_SUMMARY]["properties"]["file"]["enum"] == ["orders", "sales"]
+    assert "order_id" in tools[GROUP_BY]["properties"]["by"]["enum"]
+    support = scenario_tools("support", "auto", [orders(), sales()], [])
+    assert support[GET_ORDER]["properties"]["file"]["enum"] == ["orders"]
 
 
 def test_per_run_schemas_list_exactly_the_runs_files_and_topics() -> None:
-    tools = offered_tools("auto", [orders(), sales()], [policies(), contract()])
+    tools = scenario_tools("support", "auto", [orders(), sales()], [policies(), contract()])
     texts = ["policies", "contract-2025"]
     topics = [
         "returns",
@@ -240,7 +236,7 @@ def test_per_run_schemas_list_exactly_the_runs_files_and_topics() -> None:
 
 
 def test_auto_topic_outside_the_enum_is_rejected_with_the_allowed_values() -> None:
-    tools = offered_tools("auto", [orders()], [policies()])
+    tools = scenario_tools("support", "auto", [orders()], [policies()])
     arguments = {"file": "policies", "topic": "Damaged"}
     with pytest.raises(InvalidCallError) as raised:
         check_call(GET_POLICY, json.dumps(arguments), tools)

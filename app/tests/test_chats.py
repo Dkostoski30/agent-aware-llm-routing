@@ -705,3 +705,55 @@ async def test_a_dropped_stream_is_closed(runtime: FakeRuntime) -> None:
     finally:
         logs.REQUEST_ID.reset(context)
     assert response.is_closed
+
+
+# The chat's history in the run request (D13, P4.8): its earlier turns that ended done.
+
+
+def test_a_later_message_sends_the_earlier_questions_with_their_answers(
+    ana: TestClient, runtime: FakeRuntime
+) -> None:
+    chat_id = new_chat(ana)
+    first = send(ana, chat_id, "7 times 8?").json()["run_id"]
+    runtime.finish(first, "56")
+    second = send(ana, chat_id, "and plus 3?").json()["run_id"]
+    runtime.finish(second, "59")
+    send(ana, chat_id, "and times 2?")
+    assert runtime.posted[0] == {"task": "7 times 8?"}
+    assert runtime.posted[1]["history"] == [{"question": "7 times 8?", "answer": "56"}]
+    assert runtime.posted[2]["history"] == [
+        {"question": "7 times 8?", "answer": "56"},
+        {"question": "and plus 3?", "answer": "59"},
+    ]
+    Draft202012Validator(json.loads(RUN_REQUEST_SCHEMA.read_text())).validate(runtime.posted[2])
+
+
+def test_a_run_that_ended_since_the_last_read_is_in_the_history(
+    ana: TestClient, runtime: FakeRuntime
+) -> None:
+    """Rows are finished on read (P3.12a); a message sent before any read finishes them too."""
+    chat_id = new_chat(ana)
+    first = send(ana, chat_id, "7 times 8?").json()["run_id"]
+    runtime.finish(first, "56")
+    send(ana, chat_id, "and plus 3?")
+    assert runtime.posted[1]["history"] == [{"question": "7 times 8?", "answer": "56"}]
+    assert messages(ana, chat_id)[1]["status"] == "done"
+
+
+def test_turns_without_a_final_answer_are_left_out(ana: TestClient, runtime: FakeRuntime) -> None:
+    chat_id = new_chat(ana)
+    failed = send(ana, chat_id, "total?").json()["run_id"]
+    runtime.fail(failed, "the model made 3 invalid calls")
+    send(ana, chat_id, "still running")
+    runtime.mode = "down"
+    send(ana, chat_id, "unreachable")
+    runtime.mode = "up"
+    send(ana, chat_id, "now?")
+    assert "history" not in runtime.posted[-1]
+
+
+def test_another_chats_turns_are_not_in_the_history(ana: TestClient, runtime: FakeRuntime) -> None:
+    other = new_chat(ana)
+    runtime.finish(send(ana, other, "7 times 8?").json()["run_id"], "56")
+    send(ana, new_chat(ana), "2 + 2?")
+    assert runtime.posted[-1] == {"task": "2 + 2?"}

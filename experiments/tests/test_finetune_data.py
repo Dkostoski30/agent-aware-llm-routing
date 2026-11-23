@@ -20,8 +20,9 @@ import yaml
 from agent_runtime.config import AgentConfig, ToolChoice, load_config
 from agent_runtime.csv_tools import Table
 from agent_runtime.documents import Document, read_run_files
-from agent_runtime.tools import FINAL_ANSWER, offered_tools, run_call, tool_definitions
-from finetune_data import KINDS, Planned, generate, plan, record, replies
+from agent_runtime.history import turn_messages
+from agent_runtime.tools import FINAL_ANSWER, run_call, scenario_tools, scenarios, tool_definitions
+from finetune_data import KINDS, SCENARIO_OF, Planned, generate, plan, record, replies
 from go_no_go import Question, expected_value, is_correct
 
 EXPERIMENTS = Path(__file__).resolve().parents[1]
@@ -275,15 +276,18 @@ def test_held_out_arithmetic_and_off_topic_questions_are_not_in_training() -> No
 def test_off_topic_questions_get_the_sentence_and_call_no_tool(split: str) -> None:
     for planned in small_plan(split):
         if planned.kind == "off-topic":
-            assert planned.answer == SPEC["off_topic_reply"]
+            assert planned.answer == CONFIG.out_of_scope_reply
             assert planned.calls == []
             assert planned.expected_calls == []
+            assert planned.scenario == "out_of_scope"
 
 
 @pytest.mark.parametrize("mode", ["required", "auto"])
 def test_a_trajectory_is_the_runtime_s_own_run(mode: ToolChoice) -> None:
     """Each recorded example is what run_task sent the model at that step, and the run ends done
-    with the planned answer, no invalid call, and every tool result equal to run_tool's."""
+    with the planned answer, no invalid call, and every tool result equal to run_tool's. The first
+    example is step 1's pick (D13, P4.8): no tools, the routing instruction last, the kind's
+    scenario as the reply; the steps after it see the scenario's tools and not the pick."""
     config = replace(CONFIG, tool_choice=mode)
     for planned in small_plan("train"):
         examples, result = asyncio.run(record(planned, config))
@@ -291,14 +295,27 @@ def test_a_trajectory_is_the_runtime_s_own_run(mode: ToolChoice) -> None:
         assert result.answer == planned.answer
         assert result.invalid_calls == 0
         tables, documents = run_files(planned)
-        tools = tool_definitions(offered_tools(mode, tables, documents))
-        assert all(example["tools"] == tools for example in examples)
-        assert examples[0]["messages"] == [
+        history = [message for turn in planned.history for message in turn_messages(turn)]
+        prompt = [
             {"role": "system", "content": CONFIG.system_prompt},
+            *history,
             {"role": "user", "content": planned.text},
         ]
+        pick, *steps = examples
+        assert planned.scenario in scenarios(tables, documents)
+        assert (pick["tools"], pick["reply"]) == (
+            [],
+            {"role": "assistant", "content": planned.scenario},
+        )
+        assert pick["messages"] == [*prompt, {"role": "user", "content": CONFIG.scenario_prompt}]
+        if planned.scenario == "out_of_scope":
+            assert steps == []
+            continue
+        tools = tool_definitions(scenario_tools(planned.scenario, mode, tables, documents))
+        assert all(example["tools"] == tools for example in steps)
+        assert steps[0]["messages"] == prompt
         # Every example's history is the previous one's plus its reply and the tool results.
-        for before, after in itertools.pairwise(examples):
+        for before, after in itertools.pairwise(steps):
             assert after["messages"][: len(before["messages"]) + 1] == [
                 *before["messages"],
                 before["reply"],
@@ -376,9 +393,10 @@ def test_reply_and_clause_diff_make_two_calls_in_their_first_reply(mode: ToolCho
             continue
         examples, result = asyncio.run(record(planned, config))
         assert result.status == "done", (planned, result.error)
-        first = examples[0]["reply"]["tool_calls"]
+        # examples[0] is step 1's pick.
+        first = examples[1]["reply"]["tool_calls"]
         assert [call["function"]["name"] for call in first] == TWO_CALLS_FIRST[planned.kind]
-        assert len(examples) == 3
+        assert len(examples) == 4
         if planned.kind == "clause-diff":
             files = [json.loads(call["function"]["arguments"])["file"] for call in first]
             _, arguments = planned.calls[-1]
@@ -504,3 +522,37 @@ def test_every_scenario_kind_runs_on_its_own_files() -> None:
     for planned in small_plan("train"):
         if planned.kind != "off-topic":
             assert scenario(planned.files) == want.get(planned.kind, "csv"), planned
+
+
+def test_every_kind_picks_its_scenario() -> None:
+    assert {
+        **dict.fromkeys(("summary", "group-total", "group-mean", "compare", "two-step"), "csv"),
+        **dict.fromkeys(("reply", "order-status", "policy"), "support"),
+        **dict.fromkeys(("clause-diff", "clause-text"), "contracts"),
+        "arithmetic": "arithmetic",
+        "off-topic": "out_of_scope",
+    } == SCENARIO_OF
+    assert set(SCENARIO_OF) == set(KINDS)
+
+
+def test_a_share_of_the_training_questions_come_after_earlier_turns() -> None:
+    """At the real sizes: about history.share of them, each with history.turns turns taken from
+    the other training questions and their answers; the held-out set has none."""
+    planned = plan(SPEC, "train", TOLERANCE, CONFIG)
+    with_history = [p for p in planned if p.history]
+    share = len(with_history) / len(planned)
+    assert abs(share - SPEC["history"]["share"]) < 0.05
+    low, high = SPEC["history"]["turns"]
+    asked = {(p.text, p.answer) for p in planned}
+    for question in with_history:
+        assert low <= len(question.history) <= high
+        assert all((t["question"], t["answer"]) in asked for t in question.history)
+    assert all(p.history == [] for p in plan(SPEC, "heldout", TOLERANCE, CONFIG))
+
+
+def test_history_leaves_the_questions_and_files_as_they_were() -> None:
+    """Its own random stream: without it, every question and file is the same."""
+    without = {**SMALL, "history": {**SPEC["history"], "share": 0}}
+    assert [replace(p, history=[]) for p in small_plan("train")] == plan(
+        without, "train", TOLERANCE, CONFIG
+    )

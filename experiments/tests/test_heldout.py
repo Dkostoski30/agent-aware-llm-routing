@@ -4,6 +4,7 @@ per mode and kind, and the result file's name."""
 import asyncio
 import csv
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +107,7 @@ def test_result_csv_has_every_saved_row_before_it_is_closed(tmp_path: Path) -> N
 
 def test_run_mode_saves_each_row_before_the_next_run() -> None:
     """The second run's request fails; the first run's row was already saved."""
-    reply = SPEC["off_topic_reply"]
+    reply = load_config(PROFILE).out_of_scope_reply
     questions = [
         Heldout(
             Question(
@@ -200,6 +201,7 @@ class FailingLLM(LLMClient):
         tools: list[dict[str, Any]],
         headers: dict[str, str],
         seed: int | None,
+        choices: Sequence[str] | None = None,
     ) -> ChatReply:
         if isinstance(self._failure, httpx.HTTPError):
             raise self._failure

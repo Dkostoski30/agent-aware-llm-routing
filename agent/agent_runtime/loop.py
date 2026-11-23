@@ -1,18 +1,19 @@
 """Runs one task as a chain of LLM calls with the D1 headers, in either D10 mode, and records each
-call (P2.2a)."""
+call (P2.2a). Step 1 picks the task's scenario, and later steps see only its tools (D13, P4.8)."""
 
 import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import httpx
 
-from agent_runtime.config import AgentConfig
+from agent_runtime.config import OUT_OF_SCOPE, AgentConfig, Scenario
 from agent_runtime.csv_tools import Table
 from agent_runtime.documents import Document
+from agent_runtime.history import CountError, TokenCounter
 from agent_runtime.llm import ChatReply, LLMClient, LLMResponseError
 from agent_runtime.retry import send_with_retries
 from agent_runtime.run_tracker import RunTracker
@@ -21,8 +22,9 @@ from agent_runtime.tools import (
     FINAL_ANSWER,
     InvalidCallError,
     check_call,
-    offered_tools,
     run_call,
+    scenario_tools,
+    scenarios,
     tool_definitions,
 )
 
@@ -42,9 +44,15 @@ REPEATED_CALL = (
     "result, or give the final answer"
 )
 
-# Awaited with (step, invalid_calls, messages, calls) after every step that leaves the run going, so
-# the service can save the history and the call records before the next call (D7).
-StepCallback = Callable[[int, int, list[dict[str, Any]], list[CallRecord]], Awaitable[None]]
+# Marks the saved assistant message that holds step 1's pick (D13): the step view shows it as step
+# 1, and the later steps' prompts leave it out (_Run.prompt), so they read the system prompt, the
+# tools, the history and the task, as the adapter was trained on.
+SCENARIO_KEY = "scenario"
+
+# Awaited with (step, invalid_calls, expected_steps, messages, calls) after every step that leaves
+# the run going, so the service can save the history and the call records before the next call
+# (D7); expected_steps changes once step 1 has picked the scenario (D13).
+StepCallback = Callable[[int, int, int, list[dict[str, Any]], list[CallRecord]], Awaitable[None]]
 
 
 class Clock(Protocol):
@@ -77,6 +85,8 @@ class RunResult:
     error: str | None
     steps: int
     invalid_calls: int
+    # The x-expected-steps the run ended on: its scenario's, once step 1 picked one.
+    expected_steps: int
     messages: list[dict[str, Any]]
     # One per LLM call that got a reply, invalid and cut-off replies included (P2.2a).
     calls: list[CallRecord]
@@ -93,25 +103,58 @@ class SavedRun:
     calls: list[CallRecord]
 
 
-def initial_messages(task: str, config: AgentConfig) -> list[dict[str, Any]]:
-    """The history a run starts from: the system prompt and the task."""
+def initial_messages(
+    task: str, config: AgentConfig, history: Sequence[Mapping[str, str]] = ()
+) -> list[dict[str, Any]]:
+    """The history a run starts from: the system prompt, the chat's earlier turns kept
+    (agent_runtime/history.py), then the task. The system prompt and the turns come first, so the
+    prompt's prefix is the same on every step of the run and from one turn to the next (D13)."""
     return [
         {"role": "system", "content": config.system_prompt},
+        *(dict(message) for message in history),
         {"role": "user", "content": task},
     ]
+
+
+def picked_scenario(messages: Sequence[Mapping[str, Any]]) -> Scenario | None:
+    """The scenario step 1 picked, from the saved messages; None before step 1 has answered."""
+    for message in messages:
+        if message.get(SCENARIO_KEY):
+            return cast(Scenario, message["content"])
+    return None
 
 
 class _Run:
     """State of one run while the loop works on it."""
 
-    def __init__(self, run_id: str, task: str, config: AgentConfig, saved: SavedRun | None) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        task: str,
+        config: AgentConfig,
+        saved: SavedRun | None,
+        history: Sequence[Mapping[str, str]],
+    ) -> None:
         self.run_id = run_id
         self.config = config
-        self.messages = initial_messages(task, config) if saved is None else list(saved.messages)
+        self.messages = (
+            initial_messages(task, config, history) if saved is None else list(saved.messages)
+        )
         # Number of LLM calls sent so far; 0 on the lines logged before the first call.
         self.step = 0 if saved is None else saved.step
         self.invalid_calls = 0 if saved is None else saved.invalid_calls
         self.calls: list[CallRecord] = [] if saved is None else list(saved.calls)
+        self.scenario = picked_scenario(self.messages)
+        # What a run sends until it knows its scenario (D13).
+        self.expected_steps = (
+            config.expected_steps_default
+            if self.scenario is None or self.scenario == OUT_OF_SCOPE
+            else config.scenario_expected_steps[self.scenario]
+        )
+
+    def prompt(self) -> list[dict[str, Any]]:
+        """The messages the next call sends: the history without step 1's pick."""
+        return [message for message in self.messages if SCENARIO_KEY not in message]
 
     def log(self, level: int, message: str, **fields: Any) -> None:
         logger.log(level, message, extra={"run-id": self.run_id, "step": self.step, **fields})
@@ -132,28 +175,50 @@ class _Run:
             error=error,
             steps=self.step,
             invalid_calls=self.invalid_calls,
+            expected_steps=self.expected_steps,
             messages=self.messages,
             calls=self.calls,
         )
 
 
+@dataclass(frozen=True)
+class Tracking:
+    """The run tracker the run reports to (P3.8) and the counter of each call's prompt, which the
+    tracker hears before the call is sent (P4.10, P4.8)."""
+
+    tracker: RunTracker
+    counter: TokenCounter
+
+
 async def _send(
     run: _Run,
     llm: LLMClient,
+    prompt: list[dict[str, Any]],
     definitions: list[dict[str, Any]],
+    choice: Sequence[str] | None,
     headers: dict[str, str],
     seed: int | None,
     clock: Clock,
+    tracking: Tracking | None,
 ) -> tuple[ChatReply, int, float, int]:
     """The step's call, sent again with the same history and x-step when its pod died
     (agent.llm_retries, P4.4), with the wall-clock and the monotonic start of the attempt that got
     the reply, and how many times it was sent again. A failed attempt adds nothing to the history,
-    so the step view keeps one entry per x-step (P2.6)."""
+    so the step view keeps one entry per x-step (P2.6). With tracking, each attempt first counts
+    its prompt for thesis_context_tokens; the count goes to the same pods, so a pod that died fails
+    it as it fails the call, and the same rule sends both again."""
     starts: list[tuple[int, float]] = []
+    # Every attempt, one that failed on its count included: retries counts them all.
+    attempts = 0
 
     async def attempt() -> ChatReply:
+        nonlocal attempts
+        attempts += 1
+        if tracking is not None:
+            tokens = await tracking.counter.count(prompt, definitions, add_generation_prompt=True)
+            tracking.tracker.context(run.run_id, tokens)
         starts.append((clock.wall_ms(), clock.monotonic_ms()))
-        return await llm.chat(run.messages, definitions, headers, seed)
+        return await llm.chat(prompt, definitions, headers, seed, choice)
 
     def retried(number: int, error: httpx.HTTPError) -> None:
         reason = f"{type(error).__name__}: {error}"
@@ -161,7 +226,7 @@ async def _send(
 
     reply = await send_with_retries(attempt, run.config.retry, retried)
     ts_start, started_ms = starts[-1]
-    return reply, ts_start, started_ms, len(starts) - 1
+    return reply, ts_start, started_ms, attempts - 1
 
 
 def _calls_that_ran(
@@ -214,23 +279,34 @@ async def run_task(
     tables: Sequence[Table] = (),
     documents: Sequence[Document] = (),
     clock: Clock = SYSTEM_CLOCK,
-    tracker: RunTracker | None = None,
+    tracking: Tracking | None = None,
     saved: SavedRun | None = None,
+    history: Sequence[Mapping[str, str]] = (),
 ) -> RunResult:
     """tables and documents are the run request's files, already read
-    (documents.read_run_files); clock times the calls (a test passes a fake one). tracker, when
-    given, has started the run and hears each call's x-step as it is sent (P3.8) and each reply's
-    prompt tokens (P4.10); the caller ends the run there. saved continues a run a dead runtime left
-    (P4.4): the step it was on is sent again with its x-step, from the history saved before it."""
-    run = _Run(run_id, task, config, saved)
-    tools = offered_tools(config.tool_choice, tables, documents)
+    (documents.read_run_files); history the chat's earlier turns kept, as messages
+    (history.kept_history); clock times the calls (a test passes a fake one). tracking, when
+    given, has a tracker that started the run and hears each call's x-step and prompt tokens as it
+    is sent (P3.8, P4.10) and the scenario's expected steps once step 1 picked it (D13); the caller
+    ends the run there. saved continues a run a dead runtime left (P4.4): the step it was on is
+    sent again with its x-step, from the history saved before it.
+
+    Step 1 sends no tools: its prompt ends with agent.scenario_prompt, and vLLM's structured
+    outputs keep the reply to the scenarios the files can feed (tools.scenarios). out_of_scope
+    ends the run with agent.out_of_scope_reply; any other scenario gives the later steps its tools.
+    A reply outside the list fails the run, since vLLM's choice cannot give one: only a server
+    that ignores structured outputs can, as the simulator does."""
+    run = _Run(run_id, task, config, saved, history)
+    choices = scenarios(tables, documents)
+    tools: dict[str, dict[str, Any]] = {}
+    if run.scenario is not None:
+        tools = scenario_tools(run.scenario, config.tool_choice, tables, documents)
     definitions = tool_definitions(tools)
     tables_by_id = {table.id: table for table in tables}
     documents_by_id = {document.id: document for document in documents}
     # (tool, arguments as sorted JSON) of every call that ran, for REPEATED_CALL.
     ran = _calls_that_ran(run.messages, tools)
     max_invalid = f"{config.max_invalid_calls} invalid calls (agent.max_invalid_calls)"
-    expected_steps = config.expected_steps_default
     # When the last reply arrived, on clock.monotonic_ms(); None until the first one.
     last_reply_ms = _last_reply_ms(run.calls, clock)
     # Until a resumed run's first reply: its call record says a new runtime sent it (P4.6b).
@@ -240,22 +316,34 @@ async def run_task(
     else:
         run.log(logging.INFO, "run resumed", tool_choice=config.tool_choice)
         held = _last_count(run.calls)
-        if tracker is not None and held is not None:
-            tracker.context(run_id, held)
+        if tracking is not None and held is not None:
+            tracking.tracker.context(run_id, held)
     while run.step < config.max_steps:
         run.step += 1
         headers = {
             "x-run-id": run_id,
             "x-step": str(run.step),
-            "x-expected-steps": str(expected_steps),
+            "x-expected-steps": str(run.expected_steps),
         }
-        if tracker is not None:
-            tracker.stepped(run_id, run.step)
+        if tracking is not None:
+            tracking.tracker.stepped(run_id, run.step)
+        picking = run.scenario is None
+        prompt = run.prompt()
+        if picking:
+            prompt.append({"role": "user", "content": config.scenario_prompt})
         try:
             reply, ts_start, started_ms, retries = await _send(
-                run, llm, definitions, headers, seed, clock
+                run,
+                llm,
+                prompt,
+                definitions,
+                choices if picking else None,
+                headers,
+                seed,
+                clock,
+                tracking,
             )
-        except (httpx.HTTPError, LLMResponseError) as error:
+        except (httpx.HTTPError, LLMResponseError, CountError) as error:
             # No reply, so no call record; run.step still counts the call and the error says why:
             # the last attempt's, after any retries, which the "llm call retried" lines count.
             return run.finish(error=f"LLM call failed: {type(error).__name__}: {error}")
@@ -265,7 +353,7 @@ async def run_task(
             ts_start=ts_start,
             duration_ms=round(replied_ms - started_ms),
             gap_before_ms=0 if last_reply_ms is None else round(started_ms - last_reply_ms),
-            expected_steps=expected_steps,
+            expected_steps=run.expected_steps,
             prompt_tokens=reply.prompt_tokens,
             completion_tokens=reply.completion_tokens,
             cached_tokens=reply.cached_tokens,
@@ -276,9 +364,38 @@ async def run_task(
         resuming = False
         last_reply_ms = replied_ms
         run.calls.append(call_record)
-        if tracker is not None and reply.prompt_tokens is not None:
-            tracker.context(run_id, reply.prompt_tokens)
         message = reply.message
+        if picking:
+            picked = message.get("content") or ""
+            run.log(
+                logging.INFO,
+                "llm call",
+                scenario=picked,
+                finish_reason=reply.finish_reason,
+                **call_record.fields(),
+            )
+            if picked not in choices:
+                return run.finish(
+                    error=f"step {run.step} picked {picked!r}, not one of {', '.join(choices)}"
+                )
+            run.messages.append({"role": "assistant", "content": picked, SCENARIO_KEY: True})
+            if picked == OUT_OF_SCOPE:
+                return run.finish(answer=config.out_of_scope_reply)
+            run.scenario = cast(Scenario, picked)
+            run.expected_steps = config.scenario_expected_steps[run.scenario]
+            if tracking is not None:
+                tracking.tracker.expected_changed(run_id, run.expected_steps)
+            tools = scenario_tools(run.scenario, config.tool_choice, tables, documents)
+            definitions = tool_definitions(tools)
+            if on_step is not None:
+                await on_step(
+                    run.step,
+                    run.invalid_calls,
+                    run.expected_steps,
+                    list(run.messages),
+                    list(run.calls),
+                )
+            continue
         tool_calls: list[dict[str, Any]] = message.get("tool_calls") or []
         # Only what the next call needs; the other fields vLLM returns stay out of the history.
         assistant: dict[str, Any] = {"role": "assistant", "content": message.get("content")}
@@ -346,5 +463,11 @@ async def run_task(
             run.messages.append(_tool_message(call["id"], result))
         if on_step is not None:
             # Copies: the loop keeps appending to both lists while the callback's caller holds them.
-            await on_step(run.step, run.invalid_calls, list(run.messages), list(run.calls))
+            await on_step(
+                run.step,
+                run.invalid_calls,
+                run.expected_steps,
+                list(run.messages),
+                list(run.calls),
+            )
     return run.finish(error=f"{config.max_steps} calls without an answer (agent.max_steps)")

@@ -11,7 +11,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
 from agent_runtime import csv_tools, documents, support
-from agent_runtime.config import AgentConfig, ToolChoice
+from agent_runtime.config import OUT_OF_SCOPE, SCENARIOS, AgentConfig, Scenario, ToolChoice
 from agent_runtime.csv_tools import COMPARE, CSV_SUMMARY, GROUP_BY, Table, ToolError
 from agent_runtime.documents import Document
 
@@ -72,32 +72,47 @@ class InvalidCallError(Exception):
     """A tool call the runtime refuses to run; the message goes back to the model."""
 
 
-def offered_tools(
-    tool_choice: ToolChoice, tables: Sequence[Table], texts: Sequence[Document] = ()
+def scenarios(tables: Sequence[Table], texts: Sequence[Document]) -> list[Scenario]:
+    """The scenarios step 1 may pick, in SCENARIOS order (D13, decided 2026-11-23): those the run's
+    files can feed, and out_of_scope always. arithmetic only without files: with files the demo
+    model added up every group's group_by total with the calculator (P1.6d, P1.6f, P2.1a-3). csv
+    with any CSV, contracts with a text document, support with an orders CSV, which get_order and
+    draft_reply need."""
+    available: dict[Scenario, bool] = {
+        "arithmetic": not tables and not texts,
+        "csv": bool(tables),
+        "contracts": bool(texts),
+        "support": bool(support.order_tables(tables)),
+        OUT_OF_SCOPE: True,
+    }
+    return [scenario for scenario in SCENARIOS if available[scenario]]
+
+
+def scenario_tools(
+    scenario: Scenario,
+    tool_choice: ToolChoice,
+    tables: Sequence[Table],
+    texts: Sequence[Document],
 ) -> dict[str, dict[str, Any]]:
-    """The tools a run offers, name -> JSON schema of the arguments, in the order the model sees
-    them, until P4.8 adds the scenario step (D13). A run without files gets the calculator; a run
-    with files only its files' tools: the CSV tools, the document tools, and the support tools
-    their files' share of them (an orders CSV, a policies document). With files the demo model
-    added up every group's group_by total with the calculator (P1.6d), so it is not offered there
-    (P1.6f, P2.1a-3). An orders CSV (one with an order_id column) gets no CSV tools: the demo
-    model answered a support question with group_by on it whatever the prompt said (P2.1a-2 demo
-    runs, 2026-11-01).
-    """
+    """The tools the steps after step 1 offer, name -> JSON schema of the arguments, in the order
+    the model sees them: the picked scenario's on the files that feed it, and final_answer, which
+    ends the run in required mode (in auto mode a plain text answer does, D10). out_of_scope has
+    none: its run ends at step 1.
+
+    csv's tools take every CSV, an orders CSV too (the user, 2026-11-23). P2.1a-2 had kept them
+    from an orders CSV, since the demo model answered support questions with group_by on it; a
+    support pick now sees the support tools only. The support tools come in their files' share
+    (support.parameters): get_order with an orders CSV, get_policy with a text document."""
     tools: dict[str, dict[str, Any]] = {}
-    if not tables and not texts:
+    if scenario == "arithmetic":
         tools[CALCULATOR] = PARAMETERS[CALCULATOR]
-    orders = {table.id for table in support.order_tables(tables)}
-    analysed = [table for table in tables if table.id not in orders]
-    # Without files of a type its file enum would be empty: its tools could never be called, and in
-    # required mode vLLM would have to build a grammar from an enum with no values (D10).
-    if analysed:
-        tools.update(csv_tools.parameters(analysed))
-    if texts:
+    elif scenario == "csv":
+        tools.update(csv_tools.parameters(tables))
+    elif scenario == "contracts":
         tools.update(documents.parameters(texts))
-    tools.update(support.parameters(tables, texts))
-    # final_answer ends the run in required mode; in auto mode a plain text answer does (D10).
-    if tool_choice == "required":
+    elif scenario == "support":
+        tools.update(support.parameters(tables, texts))
+    if scenario != OUT_OF_SCOPE and tool_choice == "required":
         tools[FINAL_ANSWER] = PARAMETERS[FINAL_ANSWER]
     return tools
 

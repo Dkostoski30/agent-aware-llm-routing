@@ -279,8 +279,9 @@ agent:
   expected_steps_default: 2
   # Each task type's median calls per run, rounded up (D1, loadgen/load_generator/expected_steps.py), over the traces in
   # experiments/results/traces/: record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl for the first four,
-  # convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl for the others. A test fails if these differ. The runtime sends them once P4.8 knows
-  # the scenario; make convert writes them into its traces now.
+  # convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl for the others. A test fails if these differ. The runtime sends its
+  # scenario's from step 2, once step 1 has picked it (D13, P4.8); make convert writes them into its traces. The demo
+  # trace's runs have no pick, so the first four are one call short until P4.8b records it again.
   expected_steps_by_type:
     csv: 2
     contracts: 3
@@ -292,6 +293,22 @@ agent:
     tau2_retail: 10
     tau2_telecom: 12
     bfcl: 9
+  # Step 1 of every run (D13, P4.8): the last message of its prompt, after the task. vLLM's structured outputs keep the
+  # reply to the scenarios the run's files can feed (agent_runtime/tools.py, scenarios), so the text only says what
+  # each means. The same text in every profile, as the system prompt.
+  scenario_prompt: |
+    Which scenario does the last question belong to? csv: a question about attached CSV files. contracts: a question
+    about attached contracts or documents. support: a customer asking about one of their orders. arithmetic:
+    arithmetic without attached files. out_of_scope: anything else.
+  # The answer of a run whose step 1 picked out_of_scope, word for word, with no tool call (P1.6e's sentence, decided
+  # with the user 2026-10-28; orders and contracts added in P2.1b). Moved here from experiments/finetune-data.yaml in
+  # P4.8, so the runtime sends the sentence the adapter is trained on.
+  out_of_scope_reply: I can only do arithmetic and answer questions about attached CSV files, orders and contracts.
+  # The chat's earlier turns a run's prompt may hold, in tokens (D13, agent_runtime/history.py): model.max_model_len
+  # less the longest call of the demo trace above (record-demo-e1044feb534c-...: a support run's step 3, 1,277 prompt
+  # and 142 reply tokens), so a run never overflows because of its history. 4,096 - 1,419 = 2,677, rounded down.
+  # Step 1's prompt has no tools, so it is shorter than any later step's. P4.8b checks it on the re-recorded trace.
+  history_budget_tokens: 2600
   # Bounds a stuck call, not a latency target: P0.4 measured p95 9.5 s with 4 requests in flight per replica. Under
   # load a call that is still answering can come close (P2.3's slowest took 106 s on a slowed host, 41 s otherwise),
   # and the replayer holds the whole call to it, so an overloaded pod's longest calls fail first, which P3.4's and
@@ -381,7 +398,8 @@ app:
   # still works; false only to open the app over plain HTTP under another host name.
   cookie_secure: true
   # How long the app waits for the agent runtime's POST /runs and GET /runs/{id} (P3.12a). Both answer from Redis
-  # without waiting on the model, so httpx's default of 5 s, which the agent's call to the picker also uses, is far
+  # without waiting on the model, POST /runs after counting the chat's history with /tokenize, one short request per
+  # turn to the pods' API server (P4.8). httpx's default of 5 s, which the agent's call to the picker also uses, is far
   # above them; past it the message gets a failed reply (502) or a read leaves the reply running.
   runtime_timeout_seconds: 5
   # The cluster panel shows the cache pressure in the warning colour from here up (P4.11): at 1 the active runs' context

@@ -286,3 +286,21 @@ def test_a_record_saved_before_p4_6b_reads_as_a_call_sent_once() -> None:
     call = CallRecord.from_fields(saved)
     assert (call.retries, call.resumed) == (None, None)
     assert call.fields() == saved
+
+
+async def test_get_reads_back_how_many_history_messages_the_run_starts_with() -> None:
+    """The step view skips them (P4.8)."""
+    redis = FakeRedis()
+    run = replace(record(), history_messages=4)
+    saved_hash(redis, run)
+    found = await RedisStore(cast(Redis, redis), TTL_SECONDS).get(RUN_ID)
+    assert found == (run, [])
+
+
+async def test_a_run_saved_before_p4_8_has_no_history_messages() -> None:
+    redis = FakeRedis()
+    saved_hash(redis, record())
+    del redis.hashes[f"thesis:run:{RUN_ID}"]["history_messages"]
+    found = await RedisStore(cast(Redis, redis), TTL_SECONDS).get(RUN_ID)
+    assert found is not None
+    assert found[0].history_messages == 0

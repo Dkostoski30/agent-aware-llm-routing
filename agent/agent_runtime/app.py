@@ -2,7 +2,8 @@
 records, health (P1.3a-2, P1.4b-1, P2.6b). With the picker's plugin on, a run's end goes to the
 picker once the run is saved (P3.3). The run tracker counts each run from its acceptance to its end,
 and GET /metrics serves its remaining work to Prometheus (D2, P3.8). A runtime that starts resumes
-every run the store holds as running, which a dead one left (P4.4)."""
+every run the store holds as running, which a dead one left (P4.4). A run request's chat history is
+cut to agent.history_budget_tokens before the run starts (D13, P4.8)."""
 
 import asyncio
 import contextlib
@@ -28,8 +29,9 @@ from agent_runtime import logs
 from agent_runtime.config import AgentConfig, load_config
 from agent_runtime.csv_tools import FileError, Table
 from agent_runtime.documents import Document, read_run_files
+from agent_runtime.history import CountError, TokenCounter, VllmCounter, kept_history
 from agent_runtime.llm import LLMClient
-from agent_runtime.loop import SYSTEM_CLOCK, SavedRun, initial_messages, run_task
+from agent_runtime.loop import SYSTEM_CLOCK, SavedRun, Tracking, initial_messages, run_task
 from agent_runtime.run_tracker import METRICS_CONTENT_TYPE, RunTracker
 from agent_runtime.store import CallRecord, RedisStore, RunRecord, RunStore
 
@@ -61,15 +63,16 @@ def _arguments(raw: str) -> Any:
         return raw
 
 
-def steps_view(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One entry per assistant message, i.e. per LLM call that answered, so entry n is x-step n.
+def steps_view(messages: list[dict[str, Any]], history_messages: int) -> list[dict[str, Any]]:
+    """One entry per assistant message after the system prompt and the history_messages of the
+    chat's history (P4.8), i.e. per LLM call of the run that answered, so entry n is x-step n.
 
     Each holds the reply's text, its tool calls with their results, and the error the runtime sent
     back when it rejected the reply (D10).
     """
     steps: list[dict[str, Any]] = []
     calls_by_id: dict[str, dict[str, Any]] = {}
-    for message in messages:
+    for message in messages[1 + history_messages :]:
         if message["role"] == "assistant":
             calls_by_id = {
                 call["id"]: {
@@ -117,7 +120,7 @@ async def run_events(
     sent = 0
     while found is not None:
         record, messages = found
-        steps = steps_view(messages)
+        steps = steps_view(messages, record.history_messages)
         for step in steps[sent:]:
             fields = {"run_id": record.run_id, "expected_steps": record.expected_steps, **step}
             yield ServerSentEvent(event="step", data=fields)
@@ -145,21 +148,34 @@ def create_app(
     picker: httpx.AsyncClient,
     run_request_schema: dict[str, Any],
     tracker: RunTracker,
+    counter: TokenCounter,
 ) -> FastAPI:
     llm = LLMClient(http, config)
     validator = Draft202012Validator(run_request_schema)
+    tracking = Tracking(tracker, counter)
 
     async def execute(
         record: RunRecord,
         tables: list[Table],
         documents: list[Document],
         saved: SavedRun | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> None:
+        """history: a new run's kept chat history, as messages; a resumed run has it in saved."""
+
         async def save_step(
-            step: int, invalid_calls: int, messages: list[dict[str, Any]], calls: list[CallRecord]
+            step: int,
+            invalid_calls: int,
+            expected_steps: int,
+            messages: list[dict[str, Any]],
+            calls: list[CallRecord],
         ) -> None:
             updated = replace(
-                record, step=step, invalid_calls=invalid_calls, updated_ms=SYSTEM_CLOCK.wall_ms()
+                record,
+                step=step,
+                invalid_calls=invalid_calls,
+                expected_steps=expected_steps,
+                updated_ms=SYSTEM_CLOCK.wall_ms(),
             )
             await store.save(updated, messages, calls)
 
@@ -175,14 +191,16 @@ def create_app(
                 save_step,
                 tables,
                 documents,
-                tracker=tracker,
+                tracking=tracking,
                 saved=saved,
+                history=history or [],
             )
             final = replace(
                 record,
                 status=result.status,
                 step=result.steps,
                 invalid_calls=result.invalid_calls,
+                expected_steps=result.expected_steps,
                 answer=result.answer,
                 error=result.error,
                 updated_ms=SYSTEM_CLOCK.wall_ms(),
@@ -247,6 +265,14 @@ def create_app(
             tables, documents = read_run_files(files, config.max_files, config.max_file_bytes)
         except FileError as error:
             raise HTTPException(422, f"files: {error}") from error
+        try:
+            history = await kept_history(
+                body.get("history", []), counter, config.history_budget_tokens
+            )
+        except (httpx.HTTPError, CountError) as error:
+            # Nothing is saved yet, so the app's message fails as when the runtime is unreachable.
+            reason = f"history not counted: {type(error).__name__}: {error}"
+            raise HTTPException(502, reason) from error
         now = SYSTEM_CLOCK.wall_ms()
         record = RunRecord(
             run_id=f"run-{secrets.token_hex(6)}",
@@ -260,15 +286,16 @@ def create_app(
             created_ms=now,
             updated_ms=now,
             seed=body.get("seed"),
+            history_messages=len(history),
         )
         # Saved before 202, so a GET right after it finds the run instead of a 404. The files first,
         # so a saved run always has its files (P4.4 failover reads both). No calls yet.
         await store.save_files(record.run_id, files)
-        await store.save(record, initial_messages(record.task, config), [])
-        # Counted from here, before its first call: the run's work has arrived (D2). Every agent run
-        # sends agent.expected_steps_default until P4.8 knows its scenario (D13).
+        await store.save(record, initial_messages(record.task, config, history), [])
+        # Counted from here, before its first call: the run's work has arrived (D2). It counts
+        # agent.expected_steps_default until step 1 has picked its scenario (D13).
         tracker.started(record.run_id, record.expected_steps)
-        background.add_task(execute, record, tables, documents)
+        background.add_task(execute, record, tables, documents, history=history)
         return {"run_id": record.run_id}
 
     @app.get("/runs/{run_id}")
@@ -285,7 +312,7 @@ def create_app(
             "error": record.error,
             "expected_steps": record.expected_steps,
             "invalid_calls": record.invalid_calls,
-            "steps": steps_view(messages),
+            "steps": steps_view(messages, record.history_messages),
         }
 
     async def known_run(run_id: str) -> None:
@@ -331,9 +358,15 @@ def from_env() -> FastAPI:
     http = httpx.AsyncClient(base_url=os.environ["GATEWAY_URL"])
     # httpx's default timeout, 5 s: the picker answers at once, and a missed end is left to the TTL.
     picker = httpx.AsyncClient(base_url=os.environ["PICKER_URL"])
+    # The vLLM pods' own Service (agent_runtime/history.py), with the calls' deadline: /tokenize is
+    # answered by the same pods' API server.
+    tokenizer = httpx.AsyncClient(
+        base_url=os.environ["TOKENIZE_URL"], timeout=config.llm_timeout_seconds
+    )
     store = RedisStore(redis, config.history_ttl_seconds)
     schema = json.loads(schema_path.read_text())
-    return create_app(config, store, http, picker, schema, RunTracker())
+    counter = VllmCounter(tokenizer, config.model_name)
+    return create_app(config, store, http, picker, schema, RunTracker(), counter)
 
 
 def main() -> None:

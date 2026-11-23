@@ -20,12 +20,11 @@ from agent_runtime.documents import (
     read_document,
     read_run_files,
 )
-from agent_runtime.support import GET_POLICY
 from agent_runtime.tools import (
     FINAL_ANSWER,
     InvalidCallError,
     check_call,
-    offered_tools,
+    scenario_tools,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -253,34 +252,33 @@ def test_diff_errors(left: int, right: int | None, error_parts: list[str]) -> No
 @pytest.mark.parametrize(
     ("mode", "names"),
     [
-        ("auto", [READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, GET_POLICY]),
-        ("required", [READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, GET_POLICY, FINAL_ANSWER]),
+        ("auto", [READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES]),
+        ("required", [READ_DOCUMENT, EXTRACT_CLAUSES, DIFF_CLAUSES, FINAL_ANSWER]),
     ],
 )
 def test_two_documents_offer_the_three_tools(mode: ToolChoice, names: list[str]) -> None:
-    """get_policy comes with every text file too (card 21, P2.1a-2), until P4.8's scenario step;
-    the calculator does not come with files (card 22, P2.1a-3)."""
-    assert list(offered_tools(mode, [], [contract(2025), contract(2026)])) == names
+    """A contracts pick sees the document tools alone (D13, P4.8): get_policy, which every text
+    file brought before (card 21, P2.1a-2), is the support scenario's."""
+    assert list(scenario_tools("contracts", mode, [], [contract(2025), contract(2026)])) == names
 
 
 def test_one_document_offers_no_diff() -> None:
-    assert list(offered_tools("auto", [], [contract(2025)])) == [
+    assert list(scenario_tools("contracts", "auto", [], [contract(2025)])) == [
         READ_DOCUMENT,
         EXTRACT_CLAUSES,
-        GET_POLICY,
     ]
 
 
-def test_csv_and_text_files_offer_both_tool_sets() -> None:
+def test_a_csv_beside_the_documents_stays_out_of_the_contracts_tools() -> None:
     table = parse_file("sales", "sales.csv", "region,revenue\nNorth,1\n")
-    tools = list(offered_tools("auto", [table], [contract(2025)]))
-    assert tools[0] == CSV_SUMMARY
-    assert tools.index(CSV_SUMMARY) < tools.index(READ_DOCUMENT)
+    tools = list(scenario_tools("contracts", "auto", [table], [contract(2025)]))
+    assert CSV_SUMMARY not in tools
+    assert tools[0] == READ_DOCUMENT
 
 
 def test_per_run_schemas_list_exactly_the_runs_documents_and_clauses() -> None:
     extra = doc("## Payment terms\nNet 30.\n## Termination\nAny time.\n", "addendum")
-    tools = offered_tools("auto", [], [contract(2025), contract(2026), extra])
+    tools = scenario_tools("contracts", "auto", [], [contract(2025), contract(2026), extra])
     files = ["contract-2025", "contract-2026", "addendum"]
     clauses = ["parties", "services", "fees", "termination", "confidentiality", "payment terms"]
     for name in (READ_DOCUMENT, EXTRACT_CLAUSES):
@@ -297,7 +295,7 @@ def test_per_run_schemas_list_exactly_the_runs_documents_and_clauses() -> None:
 
 
 def test_auto_clause_outside_the_enum_is_rejected_with_the_allowed_values() -> None:
-    tools = offered_tools("auto", [], [contract(2025), contract(2026)])
+    tools = scenario_tools("contracts", "auto", [], [contract(2025), contract(2026)])
     arguments = {"file": "contract-2025", "clause": "4. Termination"}
     with pytest.raises(InvalidCallError) as raised:
         check_call(EXTRACT_CLAUSES, json.dumps(arguments), tools)

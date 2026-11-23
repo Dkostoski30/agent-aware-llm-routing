@@ -14,6 +14,27 @@
       "description": "Sampling seed sent with every LLM call of the run, so a run can be repeated; absent for random sampling.",
       "type": "integer"
     },
+    "history": {
+      "description": "The chat's earlier turns, oldest first: each a question the user asked and the final answer its run gave (D13). The agent runtime keeps the newest turns that fit agent.history_budget_tokens in config/ and puts them between the system prompt and the task. Absent for a chat's first message.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "description": "The user's message of that turn.",
+            "type": "string",
+            "minLength": 1
+          },
+          "answer": {
+            "description": "The final answer of that turn's run.",
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": ["question", "answer"],
+        "additionalProperties": false
+      }
+    },
     "files": {
       "description": "Files attached to the task (CSV tables, text documents), kept with the run; the tools take them by id and they never enter the context (D13). Their number and size are limited by agent.max_files and agent.max_file_bytes in config/.",
       "type": "array",
