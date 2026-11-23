@@ -1,0 +1,33 @@
+# P4.13c's proof (docs/task-cards/68-P4.13c-two-pod-stall.md): validate-sim's 2-pod pair alone, real then simulated.
+# P4.13b's real-2pods stalled; two-pod-stall (hash 959ccdc9db3d) did not reproduce it with the pods started either way,
+# so this pair runs as validate-sim ran it, with no fix (the user, 2026-11-23). Its verdict replaces P4.13b's 2-pod
+# rows; the 1-pod rows stay. Run with make experiment NAME=validate-sim-2pods, with the cluster up on real (make up),
+# about 1.5 h; the cluster ends on sim at 2 replicas. A real stall shows in <stem>-windows-gpu.csv as well this time.
+# validate-sim's trace, load, seed, KV capacity and warm-up (experiments/validate-sim.yaml says why each).
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: baseline
+seed: 6
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  runs_discarded: 5
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# No pod_stall_seconds: a stalled replay is evidence here, not a reason to stop the run.
+variants:
+  - name: real-2pods
+    profile: real
+    replicas: 2
+    values: null
+    epp_config: default-plugins.yaml
+  - name: sim-2pods
+    profile: sim
+    replicas: 2
+    values: null
+    epp_config: default-plugins.yaml
+validation:
+  # validate-sim's tolerance (P2.9's row).
+  tolerance: 0.15
+  pairs:
+    - real: real-2pods
+      sim: sim-2pods

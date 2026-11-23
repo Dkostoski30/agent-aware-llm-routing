@@ -1,0 +1,107 @@
+{
+  "experiment": "two-pod-stall",
+  "hash": "959ccdc9db3d",
+  "profile": "real",
+  "profile_sha256": "141294f6c9e266681f1c5e0ff7a3a32953c101284da452e15a7b4c0df8e840ce",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "two-pod-stall-959ccdc9db3d-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "two-pod-stall-959ccdc9db3d-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "variants": {
+    "together": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "together",
+      "profile_sha256": "141294f6c9e266681f1c5e0ff7a3a32953c101284da452e15a7b4c0df8e840ce",
+      "warmup_ttft_ms": {
+        "vllm-7b664f58c7-nv6xw": [
+          688,
+          152,
+          165,
+          141,
+          128
+        ],
+        "vllm-7b664f58c7-xl7wm": [
+          180,
+          136,
+          118,
+          222,
+          158
+        ]
+      },
+      "started": 1795436182.3902545,
+      "ended": 1795438390.8993623,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7b664f58c7-xl7wm": 148,
+        "vllm-7b664f58c7-nv6xw": 161
+      },
+      "pod_switch_share": 0.1396103896103896,
+      "max_gap_deviation_ms": 4,
+      "picker_log": null,
+      "vllm_logs": [
+        "two-pod-stall-959ccdc9db3d-together-vllm-vllm-7b664f58c7-nv6xw.log",
+        "two-pod-stall-959ccdc9db3d-together-vllm-vllm-7b664f58c7-xl7wm.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "one-at-a-time": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "141294f6c9e266681f1c5e0ff7a3a32953c101284da452e15a7b4c0df8e840ce",
+      "warmup_ttft_ms": {
+        "vllm-78d4dcc9cf-6c27j": [
+          844,
+          170,
+          128,
+          201,
+          253
+        ],
+        "vllm-78d4dcc9cf-sj9lt": [
+          217,
+          183,
+          160,
+          144,
+          147
+        ]
+      },
+      "started": 1795438737.951015,
+      "ended": 1795440947.1466303,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-78d4dcc9cf-sj9lt": 172,
+        "vllm-78d4dcc9cf-6c27j": 137
+      },
+      "pod_switch_share": 0.16883116883116883,
+      "max_gap_deviation_ms": 7,
+      "picker_log": null,
+      "vllm_logs": [
+        "two-pod-stall-959ccdc9db3d-one-at-a-time-vllm-vllm-78d4dcc9cf-6c27j.log",
+        "two-pod-stall-959ccdc9db3d-one-at-a-time-vllm-vllm-78d4dcc9cf-sj9lt.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    }
+  }
+}

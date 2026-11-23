@@ -8,14 +8,17 @@ behind would silently change every later run; if even that fails, the run ends w
 
 A variant may name its own profile and replica count (P2.9): the vLLM release is swapped for the
 profile's whenever it changes, with no make down, since make up asks for sudo, and the pods are
-scaled before the restart. The deployed profile is scaled back to its own count at the end.
+scaled before the restart. The deployed profile is scaled back to its own count at the end. The
+restart recreates every pod at once; a fixed count may instead start one_at_a_time (P4.13c): scaled
+to 1, restarted, then scaled to its count, so each pod after the first starts beside a Ready one.
 
 A variant may instead turn routing rules on (P3.2): routing: {plugin: true, affinity: true} is laid
 over its profile's routing section by infra/routing-values.sh, and the picker runs
 thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the picker (P3.3).
 
 On real pods, nvidia-smi samples the GPU into a file beside the results for the whole run, and is
-checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons). A plugin variant's
+checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons); so does Windows'
+typeperf.exe, for the GPU memory nvidia-smi under WSL does not show (P4.13c). A plugin variant's
 picker log is kept before the next switch restarts the picker. A file may name a
 not_worse_tolerance, and a faster_by (P3.7b), which go into the .meta.json for make
 experiment-compare's verdicts. A file may name pod_stall_seconds: after each replay Prometheus is
@@ -54,6 +57,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -173,6 +177,25 @@ GPU_FIELDS = (
     "timestamp,temperature.gpu,utilization.gpu,utilization.memory,clocks.gr,clocks.mem,"
     "power.draw,memory.used,clocks_event_reasons.active"
 )
+# Windows' own counters for each GPU adapter's memory, which typeperf.exe logs beside nvidia-smi
+# (P4.13c): what the adapter holds in its own VRAM, and what the driver keeps for it in system
+# memory. Under WSL nvidia-smi shows only the first, so VRAM spilled into system memory shows only
+# here, as shared usage that rises. Every adapter is logged; the NVIDIA one is the one whose
+# dedicated usage follows nvidia-smi's memory.used.
+WINDOWS_GPU_COUNTERS = (
+    "\\GPU Adapter Memory(*)\\Dedicated Usage",
+    "\\GPU Adapter Memory(*)\\Shared Usage",
+)
+# typeperf names each column \\<computer>\<counter>; the name is dropped, so the committed results do
+# not carry it.
+COMPUTER_IN_COLUMN = re.compile(r'"\\\\[^\\"]+\\')
+# How a variant's pods start (P4.13c). Together: the restart recreates every pod at once, as the
+# Deployment is Recreate. One at a time: each pod after the first starts beside a Ready one, as an
+# autoscaler adds them; in P4.13b two compiled pods started together then stalled when both were
+# busy (experiments/log.md).
+TOGETHER = "together"
+ONE_AT_A_TIME = "one_at_a_time"
+STARTS = (TOGETHER, ONE_AT_A_TIME)
 # Prometheus's HTTP API through the API server's service proxy, so no port-forward is needed:
 # kube-prometheus-stack's service under make up's release name, monitoring
 # (infra/install-monitoring.sh).
@@ -252,6 +275,8 @@ class Variant:
     # One of autoscale.KINDS: KEDA (P3.9b) or a plain HPA on CPU (P3.10) scales the pods from the
     # profile's min_replicas. None is a fixed count. Never with replicas.
     autoscaler: str | None
+    # One of STARTS (P4.13c); one at a time only with a fixed count of 2 or more.
+    start: str
 
     @property
     def default(self) -> bool:
@@ -310,6 +335,10 @@ class Outputs:
     def gpu(self) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-gpu.csv")
 
+    @property
+    def windows_gpu(self) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-windows-gpu.csv")
+
     def picker(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}-picker.log")
 
@@ -358,6 +387,13 @@ class Cluster(Protocol):
 
     # nvidia-smi's exit code if it had ended before it was stopped, else None.
     def stop_gpu_log(self) -> int | None: ...
+
+    # As the three above, for Windows' GPU memory counters through typeperf.exe (P4.13c).
+    def check_windows_gpu(self) -> None: ...
+
+    def start_windows_gpu_log(self, path: Path) -> None: ...
+
+    def stop_windows_gpu_log(self) -> int | None: ...
 
     # The running picker's whole log.
     def picker_log(self) -> str: ...
@@ -427,6 +463,23 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
                 f"variant {section['name']}: an autoscaler starts at the profile's min_replicas, "
                 f"so not replicas {replicas} too"
             )
+    start = section.get("start", TOGETHER)
+    if start not in STARTS:
+        raise ExperimentError(
+            f"variant {section['name']}: no start {start}, there are {', '.join(STARTS)}"
+        )
+    if start == ONE_AT_A_TIME:
+        if autoscaler is not None:
+            raise ExperimentError(
+                f"variant {section['name']}: start {start} with an autoscaler, which adds its "
+                "pods one at a time already"
+            )
+        if replicas is None or replicas < 2:
+            count = "the profile's count" if replicas is None else replicas
+            raise ExperimentError(
+                f"variant {section['name']}: start {start} needs fixed replicas of 2 or more, "
+                f"not {count}"
+            )
     return Variant(
         section["name"],
         values,
@@ -435,6 +488,7 @@ def _variant(directory: Path, spec: Mapping[str, Any], section: Mapping[str, Any
         replicas,
         routing,
         autoscaler,
+        start,
     )
 
 
@@ -716,6 +770,7 @@ def _variant_meta(
         "routing": variant.routing,
         "profile": variant.profile,
         "replicas": variant.replicas,
+        "start": variant.start,
         "profile_sha256": profile_sha256,
         "warmup_ttft_ms": warmup_ttft,
         "started": times[0],
@@ -897,6 +952,7 @@ def run_experiment(
     cluster.check_ready()
     if experiment.gpu_logged:
         cluster.check_gpu()
+        cluster.check_windows_gpu()
     # Now and not at the end: the profiles were loaded just before, and a run takes hours.
     profile_sha256 = {
         name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
@@ -917,8 +973,9 @@ def run_experiment(
     deployed = experiment.profile
     # True once the deployed profile runs another count than its own.
     scaled = False
-    # True from the GPU log's start until it is stopped.
+    # True from the GPU log's start until it is stopped, and the same for Windows' GPU memory log.
     gpu_logging = False
+    windows_gpu_logging = False
     # True from an autoscaler's start until it is stopped: a start that fails halfway may have
     # installed it.
     autoscaled = False
@@ -926,6 +983,8 @@ def run_experiment(
         if experiment.gpu_logged:
             cluster.start_gpu_log(out.gpu)
             gpu_logging = True
+            cluster.start_windows_gpu_log(out.windows_gpu)
+            windows_gpu_logging = True
         for variant in experiment.variants:
             if variant.profile != deployed:
                 # The release it scaled is being replaced, so there is nothing to scale back.
@@ -933,7 +992,8 @@ def run_experiment(
                 cluster.deploy(variant.profile)
                 deployed = variant.profile
             if variant.replicas is not None:
-                cluster.scale(variant.replicas)
+                # One at a time: the restart starts one pod, and the rest are added after it.
+                cluster.scale(1 if variant.start == ONE_AT_A_TIME else variant.replicas)
                 scaled = True
             autoscaling = None
             if variant.autoscaler is not None:
@@ -944,6 +1004,8 @@ def run_experiment(
                     cluster.floor_autoscaler(variant.autoscaler), *timing[variant.profile]
                 )
             cluster.restart_pods()
+            if variant.start == ONE_AT_A_TIME:
+                cluster.scale(variant.replicas)
             off_default = off_default or not variant.default
             cluster.set_routing(variant.values, variant.routing)
             off_default = not variant.default
@@ -973,9 +1035,13 @@ def run_experiment(
             )
             variants_meta[variant.name] = variant_meta
         gpu_ended_early_with = None
+        windows_gpu_ended_early_with = None
         if gpu_logging:
             gpu_logging = False
             gpu_ended_early_with = cluster.stop_gpu_log()
+        if windows_gpu_logging:
+            windows_gpu_logging = False
+            windows_gpu_ended_early_with = cluster.stop_windows_gpu_log()
         meta = {
             "experiment": experiment.name,
             "hash": experiment.hash,
@@ -993,6 +1059,8 @@ def run_experiment(
             "gpu_log": out.gpu.name if experiment.gpu_logged else None,
             # A gap at the end of the GPU log, which its timestamps alone would not explain.
             "gpu_log_ended_early_with": gpu_ended_early_with,
+            "windows_gpu_log": out.windows_gpu.name if experiment.gpu_logged else None,
+            "windows_gpu_log_ended_early_with": windows_gpu_ended_early_with,
             "not_worse_tolerance": experiment.not_worse_tolerance,
             "faster_by": experiment.faster_by,
             "reference_variant": experiment.reference_variant,
@@ -1005,6 +1073,8 @@ def run_experiment(
     finally:
         if gpu_logging:
             cluster.stop_gpu_log()
+        if windows_gpu_logging:
+            cluster.stop_windows_gpu_log()
         if off_default:
             cluster.set_routing(None, None)
         # Before the count is restored, which its HPA would otherwise undo.
@@ -1087,6 +1157,15 @@ def count_clock_jumps(since: float, until: float) -> int:
     return sum(CLOCK_JUMP_LINE in line for line in done.stdout.splitlines())
 
 
+def windows_gpu_csv(raw: str) -> str:
+    """typeperf's output as a plain CSV: its quoted lines only, not its blank first line or the two
+    it prints on exit; LF line ends for its CRLF; each column without the computer's name."""
+    lines = [line.strip("\r") for line in raw.replace("\r\n", "\n").split("\n")]
+    return "".join(
+        COMPUTER_IN_COLUMN.sub('"\\\\', line) + "\n" for line in lines if line.startswith('"')
+    )
+
+
 def pod_stalls_from(
     busy: Sequence[Mapping[str, Any]],
     tokens: Sequence[Mapping[str, Any]],
@@ -1153,6 +1232,9 @@ class LiveCluster:
         self.replicas: int | None = None
         # nvidia-smi while it samples the GPU.
         self.gpu: subprocess.Popen[bytes] | None = None
+        # typeperf's process and the file it writes, from the start of Windows' GPU memory log
+        # until its stop.
+        self.windows_gpu: tuple[subprocess.Popen[bytes], Path] | None = None
         # The kind of the autoscaler last started and not yet stopped, which says what its stop
         # waits for; None is KEDA's, as before any start.
         self.autoscaler: str | None = None
@@ -1287,11 +1369,16 @@ class LiveCluster:
                 "could not be logged"
             )
 
-    def start_gpu_log(self, path: Path) -> None:
-        """As often as Prometheus reads the pods, so a sample lines up with a queue reading. -f has
-        nvidia-smi write the file itself, a whole line per sample, so stopping it loses none."""
+    def _gpu_interval(self) -> int:
+        """As often as Prometheus reads the pods, so a sample lines up with a queue reading."""
         real = next(name for name in self.experiment.profiles() if name != SIM_PROFILE)
-        interval = self.profiles[real]["monitoring"]["scrape_interval_seconds"]
+        interval: int = self.profiles[real]["monitoring"]["scrape_interval_seconds"]
+        return interval
+
+    def start_gpu_log(self, path: Path) -> None:
+        """-f has nvidia-smi write the file itself, a whole line per sample, so stopping it loses
+        none."""
+        interval = self._gpu_interval()
         self.gpu = subprocess.Popen(
             [
                 "nvidia-smi",
@@ -1312,6 +1399,45 @@ class LiveCluster:
             self.gpu.terminate()
             self.gpu.wait()
         self.gpu = None
+        return ended_with
+
+    def check_windows_gpu(self) -> None:
+        """One sample of the counters the log takes: a Windows that names them otherwise (in its
+        own language), or no WSL interop, fails here and not hours later in an empty log."""
+        done = subprocess.run(
+            ["typeperf.exe", *WINDOWS_GPU_COUNTERS, "-sc", "1"],
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        # The header and one row.
+        if done.returncode != 0 or len(windows_gpu_csv(done.stdout).splitlines()) < 2:
+            raise ExperimentError(
+                f"typeperf exited with {done.returncode} and printed {done.stdout!r}, so Windows' "
+                "GPU memory could not be logged"
+            )
+
+    def start_windows_gpu_log(self, path: Path) -> None:
+        """typeperf writes a whole line per sample to its output, which goes to the file; the file
+        is made a plain CSV when the log stops (windows_gpu_csv)."""
+        with path.open("wb") as file:
+            process = subprocess.Popen(
+                ["typeperf.exe", *WINDOWS_GPU_COUNTERS, "-si", str(self._gpu_interval())],
+                stdout=file,
+            )
+        self.windows_gpu = (process, path)
+
+    def stop_windows_gpu_log(self) -> int | None:
+        """Stopping typeperf from WSL ends the Windows process too (checked 2026-11-23)."""
+        if self.windows_gpu is None:
+            raise ExperimentError("Windows' GPU memory log was not started")
+        process, path = self.windows_gpu
+        ended_with = process.poll()
+        if ended_with is None:
+            process.terminate()
+            process.wait()
+        path.write_text(windows_gpu_csv(path.read_text()))
+        self.windows_gpu = None
         return ended_with
 
     def picker_log(self) -> str:
@@ -1554,6 +1680,14 @@ def finish(
         print(
             f"experiment: nvidia-smi ended early with exit {meta['gpu_log_ended_early_with']}, so "
             "the GPU log stops before the run did"
+        )
+    if meta["windows_gpu_log"] is not None:
+        print(f"experiment: Windows GPU memory log {out.windows_gpu}")
+    if meta["windows_gpu_log_ended_early_with"] is not None:
+        print(
+            "experiment: typeperf ended early with exit "
+            f"{meta['windows_gpu_log_ended_early_with']}, so the Windows GPU memory log stops "
+            "before the run did"
         )
     if experiment.validation is not None:
         entries = table(rows, experiment.validation)

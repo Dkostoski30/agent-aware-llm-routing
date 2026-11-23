@@ -34,6 +34,7 @@ from load_generator.autoscale import (
 )
 from load_generator.experiment import (
     GPU_FIELDS,
+    WINDOWS_GPU_COUNTERS,
     Experiment,
     ExperimentError,
     LiveCluster,
@@ -59,6 +60,7 @@ from load_generator.experiment import (
     short_of_cache,
     warm_pod,
     warmed_ttft_ms,
+    windows_gpu_csv,
     write_results,
 )
 from load_generator.plan import (
@@ -185,8 +187,14 @@ class FakeCluster:
         gpu_exit: int | None = None,
         stalls: Mapping[str, Sequence[PodStall]] | None = None,
         fail_autoscaler_start: bool = False,
+        fail_windows_gpu_check: bool = False,
+        windows_gpu_exit: int | None = None,
     ) -> None:
         self.asked: list[str] = []
+        # Windows' GPU memory log's steps, kept as the GPU log's are (P4.13c).
+        self.windows_gpu: list[tuple[str, int]] = []
+        self.fail_windows_gpu_check = fail_windows_gpu_check
+        self.windows_gpu_exit = windows_gpu_exit
         self.fail_autoscaler_start = fail_autoscaler_start
         # Each variant's pod stalls, found after its replay (P3.7).
         self.stalls = stalls or {}
@@ -274,6 +282,18 @@ class FakeCluster:
     def stop_gpu_log(self) -> int | None:
         self.gpu.append(("gpu stop", len(self.asked)))
         return self.gpu_exit
+
+    def check_windows_gpu(self) -> None:
+        self.windows_gpu.append(("check", len(self.asked)))
+        if self.fail_windows_gpu_check:
+            raise ExperimentError("typeperf exited with 2")
+
+    def start_windows_gpu_log(self, path: Path) -> None:
+        self.windows_gpu.append((f"log {path.name}", len(self.asked)))
+
+    def stop_windows_gpu_log(self) -> int | None:
+        self.windows_gpu.append(("stop", len(self.asked)))
+        return self.windows_gpu_exit
 
     def picker_log(self) -> str:
         self.asked.append("picker log")
@@ -3337,3 +3357,318 @@ def test_the_warmup_file_replays_p3_9bs_burst_with_warmup_off_then_on() -> None:
             None,
         ),
     ]
+
+
+# P4.13c (docs/task-cards/68-P4.13c-two-pod-stall.md): how a variant's pods start, and Windows'
+# own reading of the GPU's memory beside nvidia-smi's.
+
+TWO_PODS = {"name": "two", "values": None, "epp_config": "default-plugins.yaml", "replicas": 2}
+TWO_POD_STALL = REPO_ROOT / "experiments" / "two-pod-stall.yaml"
+
+
+def test_a_variant_starts_its_pods_together_unless_it_says_otherwise(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[TWO_PODS])
+    assert [variant.start for variant in experiment.variants] == ["together"]
+
+
+def test_a_fixed_count_of_two_or_more_may_start_one_at_a_time(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[{**TWO_PODS, "start": "one_at_a_time"}])
+    assert [variant.start for variant in experiment.variants] == ["one_at_a_time"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "says"),
+    [
+        ({"replicas": 1}, "replicas"),
+        ({"replicas": None}, "replicas"),
+        ({"replicas": None, "autoscaler": "remaining"}, "autoscaler"),
+        ({"start": "staggered"}, "staggered"),
+    ],
+    ids=["one pod", "the profile's count", "an autoscaler", "an unknown start"],
+)
+def test_a_start_that_cannot_be_kept_is_refused_naming_the_variant(
+    tmp_path: Path, changes: dict[str, Any], says: str
+) -> None:
+    section = {**TWO_PODS, "start": "one_at_a_time", **changes}
+    with pytest.raises(ExperimentError, match=f"variant two: .*{says}"):
+        loaded(tmp_path, variants=[section])
+
+
+@pytest.mark.parametrize(
+    ("start", "steps"),
+    [
+        ("together", ["scale 2", "restart", "routing default"]),
+        ("one_at_a_time", ["scale 1", "restart", "scale 2", "routing default"]),
+    ],
+)
+def test_one_at_a_time_restarts_one_pod_and_adds_the_others_before_the_warm_up(
+    tmp_path: Path, start: str, steps: list[str]
+) -> None:
+    """Every pod after the first starts beside a Ready one, as autoscaling adds them; together is
+    the restart as before, which recreates every pod at once."""
+    experiment = loaded(tmp_path, variants=[{**TWO_PODS, "start": start}])
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked[1 : 1 + len(steps)] == steps
+    assert cluster.asked.index("warm") > len(steps)
+
+
+def test_each_variants_meta_says_how_its_pods_started(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, variants=[{**TWO_PODS, "start": "one_at_a_time"}, DEFAULT_VARIANT])
+    _, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert meta["variants"]["two"]["start"] == "one_at_a_time"
+    assert meta["variants"]["default"]["start"] == "together"
+
+
+def test_a_real_profile_checks_windows_gpu_memory_first_and_logs_it_around_the_variants(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    stem = f"exp-{experiment.hash}"
+    assert cluster.windows_gpu == [
+        ("check", 1),
+        (f"log {stem}-windows-gpu.csv", 1),
+        ("stop", len(cluster.asked)),
+    ]
+
+
+def test_a_sim_only_experiment_has_no_windows_gpu_log(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.windows_gpu == []
+    assert meta["windows_gpu_log"] is None
+
+
+def test_windows_gpu_memory_that_cannot_be_read_stops_the_experiment_before_any_restart(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_windows_gpu_check=True)
+    with pytest.raises(ExperimentError, match="typeperf"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked == ["check"]
+    assert cluster.gpu == [("gpu check", 1)]
+
+
+def test_a_replay_that_breaks_still_stops_the_windows_gpu_log_before_the_default_comes_back(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_replay_of="round-robin")
+    out = outputs(experiment, tmp_path)
+    out.csv.parent.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="replay broke"):
+        run_experiment(experiment, out, cluster, ticking_clock())
+    stops = [steps for event, steps in cluster.windows_gpu if event == "stop"]
+    assert stops == [len(cluster.asked) - 1]
+    assert cluster.asked[-1] == "routing default"
+
+
+def test_the_meta_names_the_windows_gpu_log_and_whether_typeperf_ended_early(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    _, running = run_experiment(experiment, out, FakeCluster(), ticking_clock())
+    _, ended = run_experiment(experiment, out, FakeCluster(windows_gpu_exit=2), ticking_clock())
+    assert running["windows_gpu_log"] == out.windows_gpu.name
+    assert running["windows_gpu_log_ended_early_with"] is None
+    assert ended["windows_gpu_log_ended_early_with"] == 2
+
+
+def test_finish_names_the_windows_gpu_log_and_says_when_it_has_a_gap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows, meta = run_experiment(experiment, out, FakeCluster(windows_gpu_exit=2), ticking_clock())
+    finish(experiment, out, rows, meta)
+    printed = capsys.readouterr().out
+    assert f"Windows GPU memory log {out.windows_gpu}" in printed
+    assert (
+        "typeperf ended early with exit 2, so the Windows GPU memory log stops before the run did"
+        in printed
+    )
+
+
+def test_the_windows_gpu_log_is_an_output_and_a_leftover(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    assert out.windows_gpu == out.csv.with_name(f"exp-{experiment.hash}-windows-gpu.csv")
+    out.windows_gpu.parent.mkdir(parents=True)
+    out.windows_gpu.write_text("")
+    with pytest.raises(ExperimentError, match="exist"):
+        refuse_leftovers(experiment, out)
+
+
+# typeperf's output as this laptop's Windows wrote it (2026-11-23), one adapter kept and the
+# computer's name replaced: a blank line, the header, each row ended by \r with its newline written
+# before the next, and on exit two lines of its own.
+TYPEPERF_RAW = (
+    "\r\n"
+    '"(PDH-CSV 4.0)","\\\\HOST-1\\GPU Adapter Memory(luid_0x0_0x11B7F_phys_0)\\Dedicated Usage",'
+    '"\\\\HOST-1\\GPU Adapter Memory(luid_0x0_0x11B7F_phys_0)\\Shared Usage"\r\n'
+    '"11/23/2026 12:27:32.972","412594176.000000","4587520.000000"\r\n'
+    "Exiting, please wait...                         \r\n"
+    "The command completed successfully.\r\n"
+    "\r\r"
+)
+TYPEPERF_CSV = (
+    '"(PDH-CSV 4.0)","\\GPU Adapter Memory(luid_0x0_0x11B7F_phys_0)\\Dedicated Usage",'
+    '"\\GPU Adapter Memory(luid_0x0_0x11B7F_phys_0)\\Shared Usage"\n'
+    '"11/23/2026 12:27:32.972","412594176.000000","4587520.000000"\n'
+)
+
+
+def test_typeperfs_output_becomes_its_csv_lines_without_the_computers_name() -> None:
+    """The name would otherwise go into the committed results."""
+    assert windows_gpu_csv(TYPEPERF_RAW) == TYPEPERF_CSV
+
+
+def test_a_typeperf_log_stopped_mid_run_keeps_its_last_row() -> None:
+    """A row's line end comes with the next row, so the last one has none when typeperf stops."""
+    stopped = TYPEPERF_RAW.split("Exiting")[0].rstrip("\r\n")
+    assert windows_gpu_csv(stopped) == TYPEPERF_CSV
+
+
+def test_the_live_cluster_checks_windows_gpu_memory_with_the_counters_it_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=TYPEPERF_RAW)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    LiveCluster(experiment, {}).check_windows_gpu()
+    assert handed == [["typeperf.exe", *WINDOWS_GPU_COUNTERS, "-sc", "1"]]
+
+
+@pytest.mark.parametrize(
+    ("code", "stdout"),
+    [(2, "Error: No valid counters.\n"), (0, TYPEPERF_RAW.split('"11/')[0])],
+    ids=["exits 2", "samples nothing"],
+)
+def test_a_windows_gpu_check_that_fails_or_samples_nothing_is_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, stdout: str
+) -> None:
+    experiment = loaded(tmp_path)
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, code, stdout=stdout)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    with pytest.raises(ExperimentError, match="typeperf"):
+        LiveCluster(experiment, {}).check_windows_gpu()
+
+
+def windows_gpu_popen(started: list[FakeProcess], exited: int | None) -> Callable[..., Any]:
+    """Writes typeperf's output into the file it is handed, as typeperf.exe does."""
+
+    def popen(args: list[str], stdout: Any) -> FakeProcess:
+        stdout.write(TYPEPERF_RAW.encode())
+        started.append(FakeProcess(args, exited))
+        return started[-1]
+
+    return popen
+
+
+def test_the_live_windows_gpu_log_samples_both_counters_at_the_scrape_interval_into_its_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = profile_file("real")
+    started: list[FakeProcess] = []
+    monkeypatch.setattr(
+        "load_generator.experiment.subprocess.Popen", windows_gpu_popen(started, None)
+    )
+    cluster = LiveCluster(experiment, {"real": real})
+    path = tmp_path / "windows-gpu.csv"
+    cluster.start_windows_gpu_log(path)
+    assert cluster.stop_windows_gpu_log() is None
+    (process,) = started
+    assert process.args == [
+        "typeperf.exe",
+        "\\GPU Adapter Memory(*)\\Dedicated Usage",
+        "\\GPU Adapter Memory(*)\\Shared Usage",
+        "-si",
+        str(real["monitoring"]["scrape_interval_seconds"]),
+    ]
+    assert process.terminated
+    assert path.read_text() == TYPEPERF_CSV
+
+
+def test_a_live_windows_gpu_log_that_ended_early_gives_its_exit_and_is_still_its_csv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    started: list[FakeProcess] = []
+    monkeypatch.setattr("load_generator.experiment.subprocess.Popen", windows_gpu_popen(started, 2))
+    cluster = LiveCluster(experiment, {"real": profile_file("real")})
+    path = tmp_path / "windows-gpu.csv"
+    cluster.start_windows_gpu_log(path)
+    assert cluster.stop_windows_gpu_log() == 2
+    assert not started[0].terminated
+    assert path.read_text() == TYPEPERF_CSV
+
+
+def test_two_pod_stall_replays_validate_sims_load_on_two_real_pods_started_both_ways() -> None:
+    """P4.13c's diagnostic: the replay that stalled in P4.13b, once with the pods started as it
+    started them and once one at a time. A stalled replay is the result, so none is refused."""
+    real = profile_file("real")
+    experiment = committed(TWO_POD_STALL)
+    validate = load_experiment(VALIDATE_SIM, load_replay_config(real["replay"]).patterns)
+    assert experiment.profile == "real"
+    assert (experiment.trace, experiment.pattern_name, experiment.pattern, experiment.seed) == (
+        validate.trace,
+        validate.pattern_name,
+        validate.pattern,
+        validate.seed,
+    )
+    assert experiment.warmup == validate.warmup
+    assert experiment.kv_capacity_tokens_per_pod == validate.kv_capacity_tokens_per_pod
+    assert [(v.name, v.profile, v.replicas, v.start, v.default) for v in experiment.variants] == [
+        ("together", "real", 2, "together", True),
+        ("one-at-a-time", "real", 2, "one_at_a_time", True),
+    ]
+    assert experiment.validation is None
+    assert experiment.pod_stall_seconds is None
+
+
+VALIDATE_SIM_2PODS = REPO_ROOT / "experiments" / "validate-sim-2pods.yaml"
+
+
+def test_validate_sim_2pods_is_validate_sims_two_pod_pair_alone() -> None:
+    """P4.13c's proof (the user, 2026-11-23): validate-sim's 2-pod pair with its load, tolerance and
+    starts as they were, since two-pod-stall did not reproduce the stall. A stalled replay is
+    evidence, so none is refused."""
+    real = profile_file("real")
+    patterns = load_replay_config(real["replay"]).patterns
+    experiment = load_experiment(VALIDATE_SIM_2PODS, patterns)
+    validate = load_experiment(VALIDATE_SIM, patterns)
+    assert (experiment.trace, experiment.pattern_name, experiment.pattern, experiment.seed) == (
+        validate.trace,
+        validate.pattern_name,
+        validate.pattern,
+        validate.seed,
+    )
+    assert experiment.warmup == validate.warmup
+    assert experiment.kv_capacity_tokens_per_pod == validate.kv_capacity_tokens_per_pod
+    assert [(v.name, v.profile, v.replicas, v.start) for v in experiment.variants] == [
+        ("real-2pods", "real", 2, "together"),
+        ("sim-2pods", "sim", 2, "together"),
+    ]
+    assert experiment.validation is not None
+    assert validate.validation is not None
+    assert experiment.validation.tolerance == validate.validation.tolerance
+    assert [(pair.real, pair.sim) for pair in experiment.validation.pairs] == [
+        ("real-2pods", "sim-2pods")
+    ]
+    assert experiment.pod_stall_seconds is None

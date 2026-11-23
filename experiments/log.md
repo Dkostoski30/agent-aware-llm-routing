@@ -13,6 +13,38 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-23 · P4.13c · green (P4.13b's 2-pod stall not reproduced in three replays; the 2-pod pair still misses the simulator's tolerance, as the 1-pod pair does)
+Command: Claude: card 68, tests first (`loadgen/tests/test_experiment.py`): the Windows GPU log (`typeperf.exe` beside nvidia-smi on every real run) and a variant's `start` (`together`, `one_at_a_time`) · the user: `make test`, `make lint`, `make down`, `make up`, `make experiment NAME=two-pod-stall` (hash 959ccdc9db3d); `make test`, `make lint`, `make experiment NAME=validate-sim-2pods` (hash 05f6428bd00c, stopped at sim-2pods' run 29 of 40) · Claude: the 2-pod verdict scored with the runner's functions:
+`PYTHONPATH=agent:loadgen uv run --locked python -c` with `call_rows(...)` on `validate-sim-2pods-05f6428bd00c-real-2pods.jsonl` (`start_times(pattern, seed)`, KV 4384, 5 runs discarded), then `metrics(variant_rows(rows)["real-2pods"], summarise(rows)["real-2pods"])` against the `sim` column of `sim/validation-f27264e942ba.csv`'s real-2pods rows, with `relative_error`
+Result:
+- **The stall did not come back.** Three 2-pod real replays of validate-sim's load ran normally: 35 of 35 runs and 0 failed calls in each. P4.13b's stalled real-2pods had a 79.1 s run completion p50 and 2 failed calls.
+
+| Replay | Pods started | Per token | Run completion p50 |
+|---|---|---|---|
+| two-pod-stall `together` | at once, as P4.13b | 12.5 ms | 4.93 s |
+| two-pod-stall `one-at-a-time` | second beside a Ready first | 12.4 ms | 4.21 s |
+| validate-sim-2pods `real-2pods` | at once | 12.5 ms | 4.87 s |
+
+- **Windows' memory:** shared usage on the NVIDIA adapter stayed at 158-217 MiB in every replay, about what it reads with the pods idle. Dedicated usage peaked at 3,910 MiB. Nothing spilled into system memory.
+- **Graph capture:** pods started at once logged `took 1.73 GiB` again (5 s and 12 s captures, against P4.13b's 27-28 s) and then ran normally. The reading comes with a simultaneous start, not with the stall.
+- **The 2-pod verdict, P2.9's 15% rule**, today's real-2pods against P4.13b's sim-2pods:
+
+| Metric | real 2 pods | sim 2 pods | error | (1 pod, P4.13b) |
+|---|---|---|---|---|
+| TTFT p50 | 171 ms | 141 | 17.5% miss | 16.9% miss |
+| TTFT p95 | 836 ms | 290 | 65.3% miss | 56.9% miss |
+| call duration p50 | 391 ms | 308 | 21.2% miss | 13.3% within |
+| call duration p95 | 3,114 ms | 1,009 | 67.6% miss | 27.0% miss |
+| run completion p50 | 4,868 ms | 3,386 | 30.4% miss | 19.8% miss |
+| run completion p95 | 19,958 ms | 8,403 | 57.9% miss | 24.8% miss |
+| hit rate | 0.855 | 0.894 | 4.5% within | 4.3% within |
+
+Notes:
+- **Why P4.13b's sim-2pods stands in:** `config/sim.yaml` is unchanged since (sha256 67bd84e8…), and the simulator has no randomness. The stopped sim-2pods' 249 calls (`validate-sim-2pods-05f6428bd00c-sim-2pods.jsonl.partial`) matched P4.13b's call by call: 0.7% median difference on TTFT, 0.4% on duration, 3% at p95. A full rerun (about 1 h 45 min) was declined by the user, as it could not change the verdict.
+- **The 2-pod pair is now the 1-pod pair's kind of miss:** the simulator is faster than real, most of all in the tails, and somewhat more at 2 pods. That fits `sim/calibration.md`'s stated limit: two real pods share one GPU, simulated pods do not. It replaces P4.13b's 72-99% misses, which were the stall.
+- **Cause unknown.** Neither start order nor a memory spill showed. P4.13b's stall began about 5 minutes into its replay (10:27, after normal first calls) at 100% GPU and 35 W. It may have been the host's state, as with P3.7's pod stalls, but that is not shown. A variant's `start` and the Windows log stay, so a stall on a later real run is caught with Windows' memory beside it.
+- **Finding, not fixed:** a hard Ctrl-C (pressed three times) ended the runner before `stop_windows_gpu_log`, so the stopped run's Windows log kept typeperf's CRLF line ends and the computer's name. Claude applied `windows_gpu_csv` to it before commit. It has no meta.json, as a stopped run has none.
+
 ### 2026-11-23 · P4.13b · red at 2 pods (graphs adopted; answers unchanged; simulator remapped; at 1 pod close, at 2 pods real compiled pods stalled when both were busy)
 Command: Claude: profiles, tests first (`infra/checks/test_cuda_graphs_chart.py`, `infra/checks/test_compile_cache_chart.py`, `sim/tests/test_calibrate.py`) · the user, 2026-11-22/23: `make up`, `make smoke`, `make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml`; the CPU run (card 67); `make up PROFILE=demo`, `make go-no-go`; `make up`, `make calibrate` (hash 050859dea9d9, three reruns, below); the cold starts again with the compile cache; `make test`, `make lint`, `make experiment NAME=validate-sim` (hash f27264e942ba, 07:50-10:44 UTC)
 Result:

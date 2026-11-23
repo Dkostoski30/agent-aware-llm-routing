@@ -1,0 +1,29 @@
+# P4.13c (docs/task-cards/68-P4.13c-two-pod-stall.md): the replay that stalled two compiled real pods in P4.13b's
+# validate-sim (real-2pods, experiments/log.md 2026-11-23), once with both pods started at once as there, once one at a
+# time. Run with make experiment NAME=two-pod-stall, with the cluster up on real (make up), about 1-1.5 h. Beside
+# nvidia-smi's GPU log, <stem>-windows-gpu.csv holds Windows' dedicated and shared GPU memory: shared usage rising
+# while two pods run is VRAM spilled into system memory.
+profile: real
+# validate-sim's trace, load, seed, KV capacity and warm-up, so the first variant repeats P4.13b's real-2pods.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: baseline
+seed: 6
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  runs_discarded: 5
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# No pod_stall_seconds: a stalled replay is this file's result, not a reason to stop the run.
+variants:
+  # As P4.13b: the restart recreates both pods at once.
+  - name: together
+    replicas: 2
+    values: null
+    epp_config: default-plugins.yaml
+  # The restart starts one pod, the second starts beside it once it is Ready, as KEDA adds one.
+  - name: one-at-a-time
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    epp_config: default-plugins.yaml
