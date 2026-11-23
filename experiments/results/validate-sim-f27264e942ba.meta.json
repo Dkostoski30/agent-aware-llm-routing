@@ -1,0 +1,164 @@
+{
+  "experiment": "validate-sim",
+  "hash": "f27264e942ba",
+  "profile": null,
+  "profile_sha256": null,
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "baseline",
+  "seed": 6,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "validate-sim-f27264e942ba-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "variants": {
+    "real-1pod": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 1,
+      "profile_sha256": "141294f6c9e266681f1c5e0ff7a3a32953c101284da452e15a7b4c0df8e840ce",
+      "warmup_ttft_ms": {
+        "vllm-64b5f6697c-lwbff": [
+          1373,
+          163,
+          177,
+          159,
+          157
+        ]
+      },
+      "started": 1795420227.434068,
+      "ended": 1795422435.8289201,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-64b5f6697c-lwbff": 309
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 2,
+      "picker_log": null,
+      "vllm_logs": [
+        "validate-sim-f27264e942ba-real-1pod-vllm-vllm-64b5f6697c-lwbff.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "sim-1pod": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": 1,
+      "profile_sha256": "67bd84e8f9bd37d12d649b24804fb8d389d9334f0f5617b7c18ca43331a4a597",
+      "warmup_ttft_ms": {
+        "vllm-6b84b4c6d4-cqxl8": [
+          150,
+          148,
+          148,
+          148,
+          148
+        ]
+      },
+      "started": 1795422802.563632,
+      "ended": 1795425007.8227665,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6b84b4c6d4-cqxl8": 309
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 1,
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "real-2pods": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "profile_sha256": "141294f6c9e266681f1c5e0ff7a3a32953c101284da452e15a7b4c0df8e840ce",
+      "warmup_ttft_ms": {
+        "vllm-6c4945cf88-knmd7": [
+          922,
+          148,
+          150,
+          147,
+          152
+        ],
+        "vllm-6c4945cf88-qxkkt": [
+          169,
+          195,
+          116,
+          127,
+          133
+        ]
+      },
+      "started": 1795425728.6614618,
+      "ended": 1795428102.7250793,
+      "clock_jumps": 0,
+      "calls": 285,
+      "failed_calls": 2,
+      "calls_per_pod": {
+        "vllm-6c4945cf88-knmd7": 134,
+        "vllm-6c4945cf88-qxkkt": 149
+      },
+      "pod_switch_share": 0.2553191489361702,
+      "max_gap_deviation_ms": 48,
+      "picker_log": null,
+      "vllm_logs": [
+        "validate-sim-f27264e942ba-real-2pods-vllm-vllm-6c4945cf88-knmd7.log",
+        "validate-sim-f27264e942ba-real-2pods-vllm-vllm-6c4945cf88-qxkkt.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "sim-2pods": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": 2,
+      "profile_sha256": "67bd84e8f9bd37d12d649b24804fb8d389d9334f0f5617b7c18ca43331a4a597",
+      "warmup_ttft_ms": {
+        "vllm-57cbb6ddf6-wsh5n": [
+          293,
+          149,
+          148,
+          148,
+          148
+        ],
+        "vllm-57cbb6ddf6-zpq75": [
+          149,
+          149,
+          147,
+          147,
+          149
+        ]
+      },
+      "started": 1795428492.2522647,
+      "ended": 1795430699.3187556,
+      "clock_jumps": 0,
+      "calls": 309,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-57cbb6ddf6-wsh5n": 143,
+        "vllm-57cbb6ddf6-zpq75": 166
+      },
+      "pod_switch_share": 0.1266233766233766,
+      "max_gap_deviation_ms": 1,
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    }
+  }
+}

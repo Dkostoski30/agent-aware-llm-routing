@@ -1,0 +1,27 @@
+{
+  "calibration": "calibrate",
+  "hash": "050859dea9d9",
+  "model": "lora",
+  "profile": "real",
+  "profile_sha256": "24e3a402c56aa29d8966997338ff0c9593b55ad70ced2825bfe8cbbacbb04a08",
+  "started_unix": 1795345281,
+  "ended_unix": 1795347860,
+  "drift": {
+    "share": -0.027989988009269533,
+    "uncertainty": 0.0021566830694571084
+  },
+  "pods": [
+    "vllm-6f5864844b-8s4h6",
+    "vllm-6f5864844b-xkfqz"
+  ],
+  "warmup_ttft_ms": {
+    "vllm-6f5864844b-8s4h6": [
+      2354,
+      399
+    ],
+    "vllm-6f5864844b-xkfqz": [
+      2325,
+      391
+    ]
+  }
+}

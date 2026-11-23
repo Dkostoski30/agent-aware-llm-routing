@@ -13,6 +13,53 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-23 · P4.13b · red at 2 pods (graphs adopted; answers unchanged; simulator remapped; at 1 pod close, at 2 pods real compiled pods stalled when both were busy)
+Command: Claude: profiles, tests first (`infra/checks/test_cuda_graphs_chart.py`, `infra/checks/test_compile_cache_chart.py`, `sim/tests/test_calibrate.py`) · the user, 2026-11-22/23: `make up`, `make smoke`, `make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml`; the CPU run (card 67); `make up PROFILE=demo`, `make go-no-go`; `make up`, `make calibrate` (hash 050859dea9d9, three reruns, below); the cold starts again with the compile cache; `make test`, `make lint`, `make experiment NAME=validate-sim` (hash f27264e942ba, 07:50-10:44 UTC)
+Result:
+- **Adopted:** real, real-plain and demo run `cuda_graphs.mode: compiled` at capture sizes `[1, 2, 4, 8]`, with `model.compile_cache: true`. Every start fitted at 4 sizes, so the card's fallback to `[1, 2]` was not needed.
+- **Answers:** real 10/10 in both modes (`real-go-no-go-dde11d9c1871-e988b1e54a57-5554fcf81b09.csv`). Demo 8/10 in both (`demo-go-no-go-832673627066-e988b1e54a57.csv`), the same answers and the same four two-step misses as demo's last eager run (2026-11-01, a go at 8/10). Demo kept compiled by the user's decision (card 67).
+- **CPU:** `pod.cpu_request: 374m` in real, real-plain and demo (P3.10's eager pod: 1174m). It is the median of 31 `kubectl top` samples over a 1-pod burst at seed 6 (`p4-13b-cpu-top-1pod.txt`, `replays/p4-13b-cpu-burst-1pod.jsonl`): idle ~142m, busy 224-1219m.
+- **Calibration** (`sim/calibration-050859dea9d9-*`, `sim/cold-start-050859dea9d9-*`): lora 1 pod, per-token p50 12.1 ms at concurrency 1 (10.9-13.3 over the 12 cells; the eager table P2.8c: 154.2). 13.0 at 2, 1.12× at 4, 1.20× at 8. Two pods busy: 31 ms median, with stalled cells up to 24 s TTFT p50. P2.8b's mapping, unchanged, gave `config/sim.yaml`: `prefill_overhead` 127ms, `prefill_time_per_token` 91us, `inter_token_latency` 12ms, `time_factor_under_load` 1.08, `startup_duration` 141s (eager: 298ms, 146us, 154ms, 1.0, 140s). The line misses a cell by up to 65 ms. `sim/tests/test_calibration_mapping.py` passes on the new files.
+- **Cold start** with the compile cache: lora alone 140 s to Ready (median of 5, 131-188), both at once 127-157 s, plain alone 131 s. Without the cache (`experiments/results/p4-13b-no-cache/`): lora alone 254 s, both 268-297, plain 231. Eager was 126 s. First TTFT on a fresh pod 0.9-1.5 s alone (eager 13.7-15.0), 1.7-4.3 s with two starting.
+- **Validation**, `sim/validation-f27264e942ba.csv`, P2.9's 15% rule:
+
+| Metric | real 1 pod | sim 1 pod | error | real 2 pods | sim 2 pods | error |
+|---|---|---|---|---|---|---|
+| TTFT p50 | 172 ms | 143 | 16.9% miss | 519 | 141 | 72.8% miss |
+| TTFT p95 | 694 ms | 299 | 56.9% miss | 44,933 | 290 | 99.4% miss |
+| call duration p50 | 361 ms | 313 | 13.3% within | 1,560 | 308 | 80.3% miss |
+| call duration p95 | 1,390 ms | 1,015 | 27.0% miss | 68,523 | 1,009 | 98.5% miss |
+| run completion p50 | 4,234 ms | 3,396 | 19.8% miss | 79,121 | 3,386 | 95.7% miss |
+| run completion p95 | 11,281 ms | 8,482 | 24.8% miss | 332,855 | 8,403 | 97.5% miss |
+| cache hit rate | 0.854 | 0.891 | 4.3% within | 0.820 | 0.894 | 9.1% within |
+
+  P2.9's eager 1-pod real run (`validation-5593507542a4.csv`) took 29.2 s per run at the median, 2.7 s per call. Compiled it took 4.2 s and 0.36 s.
+
+Notes:
+- **At 1 pod the speed matches.** Real generated at 12.4 ms per token, sim at 12.5, the table 12.1. P2.9a's open question (an eager replay ran faster than the table's calls) does not show on compiled pods. The misses are in first tokens, through limits `sim/calibration.md` already states:
+  - Real's 29 calls over the KV limit took 0.50 s to the first token at the median (p95 1.65 s), sim's 22 took 0.15 s: a real pod waits for KV blocks, a simulated one does not.
+  - 26 of real's 243 later steps had less of their previous prompt cached (sim 0). The sim cache is 1.9× real's.
+  - Real's first warm-up call took 1,373 ms.
+  - Under the KV limit TTFT p50 was 0.16 s real against 0.14 sim.
+  - Run completion p50 misses by 19.8% where the eager validation was within 2.5%: with calls 7× faster, the same absolute waits likely weigh more (not checked).
+- **At 2 pods the real side broke down; the finding of this task.**
+  - When both compiled pods were busy at once, each generated about 1 token per second (vLLM's own lines: generation throughput 0.2-1.2 tokens/s with 1 request running). A pod busy alone ran at 40+.
+  - The GPU sat at 100% utilisation at 1,957-1,995 MHz and 34-38 W. All 232 samples at 100% fell in the real 2-pod replay, 10:19-11:01 local, about 19 minutes in all. It used 3,873-3,904 of 4,096 MiB.
+  - 33 of 35 runs finished and 2 calls failed.
+  - Warm-up was normal (116-195 ms after the first call), so the pods were warm when it started.
+  - The eager 2-pod runs used the same memory (3,886-3,955 MiB in P3.7-P4.5's GPU logs) and spent 1-17 samples at 100%. P2.9's eager 2-pod run took 28.4 s per run at the median, compiled took 79.1 s.
+  - The cause is not known. Calibrate's 2-pod table (64-token calls) mostly ran at 31 ms per token but had stalled cells up to 24 s TTFT. The first calibrate rerun stopped on a both-pods warm-up at ~35 s per call, which a check afterwards did not repeat. Both are likely the same effect.
+  - Each pod's log also shows Triton JIT-compiling top-p sampling kernels (`_topp_sb_*`) about 30 minutes into the replay. That came well after the stall began.
+- **Verdict:** red at 2 pods, kept as the result (the user, 2026-11-23; offered: rerun the 2-pod real side first; real back to eager). Gate 2's wording is not reopened. The 1-pod comparison stands with the limits above. The 2-pod stall goes to P4.13c before anything else runs real at 2 pods. Real stays compiled until then.
+- **`make calibrate` and WSL:**
+  - The first run (overnight 2026-11-22) lost its lora 2-pod file when the clock read after its last cell failed: powershell.exe gave "UtilAcceptVsock: accept4 failed 110". Since then a failed Windows call is made once more (`WINDOWS_TRIES`).
+  - The second rerun lost its lora cold-start file to two failed reads in a row. Since then a failed read after a file's last row keeps the file with `"drift": null` (card 67).
+  - Every failed read came with 2 pods running and the WSL VM at 0 of 9 GB available. The cause is a guess, not proven.
+  - Drift otherwise 0-4.9% slow, not corrected (`sim/calibration.md`).
+- **The compile cache** (folded into this task by the user): without it every compiled pod compiled again, 254 s to Ready. With it `~/.cache/thesis/vllm-compile` holds one entry per model and flags. The first pod after a change still compiles. The cell tables were measured without the cache, the cold starts with it.
+- **Reported, not fixed:** the EPP scrapes each vLLM pod's `/metrics` about 6 times a second, so a pod's startup lines rotate out of `kubectl logs` within minutes.
+- **Kept as they are** (card 67): the Phase 3-4 real results ran eager pods (P3.7, P3.10, P4.1-P4.6, P4.11, P4.12, P4.5); P5.2 reuses P4.5's eager real 1↔2 runs; `infra/local/vllm-common.sh` stays eager. The four experiment files' header notes went in with P4.13's commit.
+
 ### 2026-11-22 · P4.13 · green (CUDA graphs: 16x faster per token on real at 1 pod, 10x at 2, 4x on demo; all variants fit)
 Command: tests first (Claude): `infra/checks/test_cuda_graphs_chart.py` and `sim/tests/test_cuda_graphs.py` red, then green; 15 changes to the driver, 14 failing a test (the 15th, an unneeded rule, removed) · the user, on real after `make down`, `make up`: `make cuda-graphs` (hash 02617bd616c5), 00:00-01:05 UTC, two earlier tries stopped in the host check before anything changed (below)
 Result: every variant fit and answered every call; real was deployed again at the end. 1,024-token prompt, partial cache (752 cached), 64 tokens, 20 calls per cell; per-token and TTFT p50, ms. Each row is from the same night, so compare within a row first:

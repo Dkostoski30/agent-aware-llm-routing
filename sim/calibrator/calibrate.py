@@ -75,6 +75,10 @@ FORWARDING = re.compile(r"Forwarding from 127\.0\.0\.1:(\d+) -> ")
 PRIMER_TOKENS = 1
 # The model whose profile is deployed again at the end: the agent runs on the one with the adapter.
 RESTORED_MODEL = "lora"
+# WSL's interop sometimes times out a Windows call ("UtilAcceptVsock: accept4 failed 110"): once
+# in P4.13's make cuda-graphs, once in P4.13b's make calibrate, where it lost a whole file. Each
+# time the same call worked when made again; a second failure in a row stops the run.
+WINDOWS_TRIES = 2
 
 
 @dataclass(frozen=True)
@@ -176,6 +180,20 @@ def _measure_cold_starts(
     return {}
 
 
+def _drift(started: ClockReading, cluster: Cluster, out: Output) -> dict[str, Any]:
+    """The meta's drift, from the clock read after the file's last row. Not corrected for: P2.5's
+    drift was about -2%, so durations here may read that much low. A read that fails even when
+    made again leaves the drift unmeasured and keeps the rows, which do not depend on it: P4.13b
+    lost two finished files to it, each time with 2 pods running."""
+    try:
+        ended = cluster.clock()
+    except subprocess.CalledProcessError as error:
+        print(f"calibrate: no drift for {out.path.name}: {error}", flush=True)
+        return {"drift": None, "drift_error": str(error)}
+    measured = drift(started, ended)
+    return {"drift": {"share": measured.share, "uncertainty": measured.uncertainty}}
+
+
 def _write(
     calibration: Calibration,
     out: Output,
@@ -200,7 +218,7 @@ def _write(
             file.flush()
 
         details = measure(calibration, out, cluster, keep)
-    measured = drift(started, cluster.clock())
+    measured = _drift(started, cluster, out)
     meta = {
         "calibration": calibration.name,
         "hash": calibration.hash,
@@ -210,8 +228,7 @@ def _write(
         "profile_sha256": profile_sha256,
         "started_unix": round(started_unix),
         "ended_unix": round(time.time()),
-        # Not corrected for: P2.5's drift was about -2%, so durations here may read that much low.
-        "drift": {"share": measured.share, "uncertainty": measured.uncertainty},
+        **measured,
         **details,
     }
     out.path.with_name(f"{out.path.stem}.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -494,8 +511,19 @@ async def _check_pod(port: int, pod: str, model: Mapping[str, Any]) -> int:
     return template
 
 
-def _windows(*command: str) -> str:
+def _run_windows(command: Sequence[str]) -> str:
     return subprocess.run(list(command), stdout=subprocess.PIPE, text=True, check=True).stdout
+
+
+def windows_output(*command: str) -> str:
+    """A Windows program's output through WSL's interop. A call that fails is made once more: a
+    clock read after a file's last cell is not repeatable without measuring the file again."""
+    for _ in range(WINDOWS_TRIES - 1):
+        try:
+            return _run_windows(command)
+        except subprocess.CalledProcessError as error:
+            print(f"calibrate: {command[0]} exited {error.returncode}, once more", flush=True)
+    return _run_windows(command)
 
 
 class LiveCluster:
@@ -506,9 +534,11 @@ class LiveCluster:
     def check_host(self) -> None:
         host = self.calibration.host
         check_host(
-            _windows("powercfg.exe", "/getactivescheme"),
+            windows_output("powercfg.exe", "/getactivescheme"),
             {
-                alias: _windows("powercfg.exe", "/query", "SCHEME_CURRENT", "SUB_SLEEP", alias)
+                alias: windows_output(
+                    "powercfg.exe", "/query", "SCHEME_CURRENT", "SUB_SLEEP", alias
+                )
                 for alias in host.sleep_settings
             },
             host,
@@ -570,7 +600,7 @@ class LiveCluster:
 
     def clock(self) -> ClockReading:
         before = time.monotonic()
-        windows = _windows(
+        windows = windows_output(
             "powershell.exe",
             "-NoProfile",
             "-Command",

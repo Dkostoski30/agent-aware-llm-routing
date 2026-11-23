@@ -6,6 +6,7 @@ import asyncio
 import csv
 import dataclasses
 import json
+import subprocess
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,6 +23,7 @@ from calibrator.calibrate import (
     ready_pods,
     run_calibration,
     warm_pod,
+    windows_output,
 )
 from calibrator.config import (
     Calibration,
@@ -85,11 +87,13 @@ class FakeCluster:
         fail_at: tuple[str, int, Cell] | None = None,
         refuse: bool = False,
         add_no_pod: bool = False,
+        clock_fails_at: int | None = None,
     ) -> None:
         self.calibration = calibration
         self.fail_at = fail_at
         self.refuse = refuse
         self.add_no_pod = add_no_pod
+        self.clock_fails_at = clock_fails_at
         self.log: list[str] = []
         self.started = 0
         self.pods: list[str] = []
@@ -138,8 +142,11 @@ class FakeCluster:
         yield FakePods(self, model, pods)
 
     def clock(self) -> ClockReading:
-        """600 s on both clocks between readings, each read in no time."""
+        """600 s on both clocks between readings, each read in no time. File n is read at 2n-1 and
+        2n; reading clock_fails_at fails as powershell.exe did in P4.13b."""
         self.readings += 1
+        if self.readings == self.clock_fails_at:
+            raise subprocess.CalledProcessError(1, ["powershell.exe"])
         monotonic = 100.0 + 600 * self.readings
         return ClockReading(monotonic, 1_000_000 + 600_000 * self.readings, monotonic)
 
@@ -247,6 +254,36 @@ def test_a_files_meta_holds_its_model_profile_and_clock_drift(tmp_path: Path) ->
     assert meta["pods"] == ["pod-8"]
     assert meta["warmup_ttft_ms"] == {"pod-8": [26000, 900]}
     assert meta["drift"] == {"share": 0.0, "uncertainty": 0.0}
+
+
+def test_a_clock_read_that_fails_after_a_files_rows_keeps_the_file_without_drift(
+    tmp_path: Path,
+) -> None:
+    """P4.13b lost two finished files to the clock read after their last row; drift is only a check
+    on the VM's clock, and the rows do not depend on it."""
+    calibration = _calibration()
+    planned = outputs(calibration, tmp_path)
+    run_calibration(calibration, planned, FakeCluster(calibration, clock_fails_at=2), SHA)
+    assert all(out.path.exists() for out in planned)
+    assert len(_rows(planned[0].path)) == planned[0].rows
+    meta = json.loads(planned[0].path.with_name(f"{planned[0].path.stem}.meta.json").read_text())
+    assert meta["drift"] is None
+    assert "powershell.exe" in meta["drift_error"]
+    later = json.loads(planned[1].path.with_name(f"{planned[1].path.stem}.meta.json").read_text())
+    assert later["drift"] == {"share": 0.0, "uncertainty": 0.0}
+    assert "drift_error" not in later
+
+
+def test_a_clock_read_that_fails_before_a_files_rows_stops_the_run(tmp_path: Path) -> None:
+    calibration = _calibration()
+    planned = outputs(calibration, tmp_path)
+    cluster = FakeCluster(calibration, clock_fails_at=3)
+    with pytest.raises(subprocess.CalledProcessError):
+        run_calibration(calibration, planned, cluster, SHA)
+    assert planned[0].path.exists()
+    assert not planned[1].path.exists()
+    assert not planned[1].path.with_name(f"{planned[1].path.name}.partial").exists()
+    assert cluster.log[-1] == "deploy real"
 
 
 def test_a_rerun_with_every_file_finished_touches_nothing(
@@ -515,3 +552,31 @@ def test_the_lora_profile_serves_its_adapter_and_the_plain_one_does_not() -> Non
     assert expected_models(base) == {"Qwen/Qwen3-0.6B-GPTQ-Int8"}
     lora = {**base, "lora": {"name": "thesis-5554fcf81b09"}}
     assert expected_models(lora) == {"Qwen/Qwen3-0.6B-GPTQ-Int8", "thesis-5554fcf81b09"}
+
+
+def test_a_windows_call_that_fails_once_is_made_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """P4.13b's make calibrate lost a file to one powershell.exe call that WSL timed out."""
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        if len(handed) == 1:
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, stdout="1795318115000\n")
+
+    monkeypatch.setattr("calibrator.calibrate.subprocess.run", run)
+    assert windows_output("powershell.exe", "-NoProfile") == "1795318115000\n"
+    assert handed == [["powershell.exe", "-NoProfile"]] * 2
+
+
+def test_a_windows_call_that_fails_twice_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr("calibrator.calibrate.subprocess.run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        windows_output("powercfg.exe", "/getactivescheme")
+    assert handed == [["powercfg.exe", "/getactivescheme"]] * 2

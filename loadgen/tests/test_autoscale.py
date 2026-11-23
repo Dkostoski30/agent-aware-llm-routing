@@ -481,6 +481,7 @@ def real_pod_values(gpu_access: str) -> dict[str, Any]:
         "gpuAccess": gpu_access,
         "hfCacheHostPath": "/hf",
         "loraHostPath": "/lora",
+        "compileCacheHostPath": "/vllm-compile",
         "drainImage": "thesis/picker:0123456789ab",
     }
 

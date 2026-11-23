@@ -1,0 +1,13 @@
+{
+  "calibration": "calibrate",
+  "hash": "050859dea9d9",
+  "model": "plain",
+  "profile": "real-plain",
+  "profile_sha256": "b2c02e94e6dcb1ceb59a4f0211a70c3771c519e34f69102d242d8ea1a7906eb3",
+  "started_unix": 1795390284,
+  "ended_unix": 1795391479,
+  "drift": {
+    "share": -0.04845659261575208,
+    "uncertainty": 0.000458081343999502
+  }
+}

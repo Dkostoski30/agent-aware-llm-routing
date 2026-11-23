@@ -1,0 +1,13 @@
+{
+  "calibration": "calibrate",
+  "hash": "050859dea9d9",
+  "model": "lora",
+  "profile": "real",
+  "profile_sha256": "c5907118f7bba93d618c85b427354b540d2ba966197b037003594e5573b8ad4a",
+  "started_unix": 1795388659,
+  "ended_unix": 1795390037,
+  "drift": {
+    "share": -0.04373353472295785,
+    "uncertainty": 0.000671427047421813
+  }
+}

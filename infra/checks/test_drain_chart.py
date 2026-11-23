@@ -32,6 +32,7 @@ def chart_values(name: str) -> dict[str, Any]:
         "drainImage": IMAGE,
         "hfCacheHostPath": "/home/user/.cache/huggingface",
         "loraHostPath": "/home/user/adapters",
+        "compileCacheHostPath": "/home/user/.cache/thesis/vllm-compile",
     }
 
 

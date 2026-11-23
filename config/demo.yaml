@@ -20,12 +20,21 @@ model:
   tool_call_parser: hermes
   # Same as "real" (P4.1): the priority rule needs it, and with the rule off every call is 0, first come, first served.
   scheduling_policy: priority
-  # How vLLM runs the model's steps (P4.13, docs/task-cards/66-P4.13-cuda-graphs-spike.md). eager is --enforce-eager,
-  # kept since P0.3: CUDA graphs cost VRAM and startup time, and two pods share the 4GB GPU. compiled (torch.compile)
-  # and decode_only (full graphs for decode batches, no torch.compile) also take capture_sizes, the batch sizes graphs
-  # are captured for; only make cuda-graphs runs them, and no profile does until its numbers are decided on.
+  # How vLLM runs the model's steps: eager (--enforce-eager, every profile until P4.13), compiled (torch.compile and
+  # CUDA graphs) or decode_only (graphs for decode batches, no torch.compile). P4.13 (make cuda-graphs, experiments/
+  # log.md) measured real at 12.7 ms per token compiled against 200.9 eager on 1 pod, 28-30 against 261-343 on 2, and
+  # demo at 16.5 against 63.7; two compiled pods used 3,857 of 4,096 MiB and shared the GPU evenly, where decode_only's
+  # did not; torch.compile adds 100-155 s to a pod's start. Adopted in real, real-plain and demo in P4.13b
+  # (docs/task-cards/67-P4.13b-adopt-cuda-graphs.md).
   cuda_graphs:
-    mode: eager
+    mode: compiled
+    # The batch sizes graphs are captured for; a larger batch runs compiled, without a graph. 8 covers make calibrate's
+    # grid and a burst's calls on one pod; each size costs some VRAM (P4.13: 0.04 GiB per real pod for 1 and 2).
+    capture_sizes: [1, 2, 4, 8]
+  # Keep what torch.compile makes in ~/.cache/thesis/vllm-compile on the host (make vllm-deploy), so a pod after the
+  # first loads it instead of compiling again. P4.13b's make calibrate: a real pod started alone took 140 s to Ready
+  # with it, 254 s without, 126 s on eager. vLLM keys the folder by model and flags, so the profiles share it.
+  compile_cache: true
 # Only one 1.7B pod fits on the 4GB GPU (D8).
 replicas: 1
 # Kubernetes pod settings for the vLLM chart (P0.7).
@@ -35,8 +44,8 @@ pod:
   # just becomes Ready a few probes later.
   readiness_initial_delay_seconds: 150
   # Bookkeeping only: the vLLM chart needs a CPU request (P3.10), and demo never autoscales (one pod, D8). Copied from
-  # config/real.yaml, measured on the 0.6B, not on this 1.7B.
-  cpu_request: 1174m
+  # config/real.yaml, measured on the 0.6B with compiled CUDA graphs (P4.13b), not on this 1.7B.
+  cpu_request: 374m
 # Every routing rule is off until its task implements it; experiments turn rules on and off for ablation (D11).
 routing:
   # The thesis's plugin (P3.2). Off: the picker runs the chart's default-plugins.yaml, the default variant of Gate 2's

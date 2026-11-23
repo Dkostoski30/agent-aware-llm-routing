@@ -85,7 +85,8 @@ VLLM_DEPLOY_TIMEOUT := 900s
 # is there is read from the node's status, which names it by digest, without sudo: make calibrate redeploys hours into
 # a run, after sudo has stopped remembering the password (P2.8). --force-conflicts: kubectl scale (make calibrate,
 # make experiment) owns .spec.replicas afterwards, and helm 4's server-side apply refuses to set it back without it;
-# with it, a deploy always gives the profile's replicas (P2.12).
+# with it, a deploy always gives the profile's replicas (P2.12). The folder for model.compile_cache is made here; the
+# pods write into it as root, and make down keeps it, as it keeps the model (P4.13b).
 vllm-deploy:
 	@if [ -z "$(PROFILE)" ]; then echo "usage: make vllm-deploy PROFILE=real|demo"; exit 2; fi
 	@set -eu; \
@@ -117,10 +118,12 @@ vllm-deploy:
 			"(progress: watch -n 10 sudo du -sh /var/lib/rancher/k3s/agent/containerd)"; \
 		sudo k3s crictl pull "$$image"; \
 	fi; \
+	mkdir -p "$$HOME/.cache/thesis/vllm-compile"; \
 	yq -e '{"replicas": .replicas, "model": .model, "pod": .pod, "monitoring": .monitoring, "drain": .drain}' \
 		config/$(PROFILE).yaml | \
 		helm upgrade --install vllm infra/charts/vllm --values - --force-conflicts \
 			--set hfCacheHostPath=$$HOME/.cache/huggingface --set-string loraHostPath=$$lora_path \
+			--set-string compileCacheHostPath=$$HOME/.cache/thesis/vllm-compile \
 			--set-string drainImage=$$(bash infra/picker-image.sh --tag); \
 	echo "vllm-deploy: waiting for the pods to load the model (about 2-3 min)"; \
 	kubectl rollout status deployment/vllm --timeout=$(VLLM_DEPLOY_TIMEOUT); \

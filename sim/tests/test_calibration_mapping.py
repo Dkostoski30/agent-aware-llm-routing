@@ -18,8 +18,8 @@ from calibrator.mapping import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # The files config/sim.yaml's comments name: the adapter on one pod alone (decided 2026-11-06).
-TABLE = REPO_ROOT / "sim" / "calibration-5553d79b34d7-lora-1pod.csv"
-COLD_STARTS = REPO_ROOT / "sim" / "cold-start-5553d79b34d7-lora.csv"
+TABLE = REPO_ROOT / "sim" / "calibration-050859dea9d9-lora-1pod.csv"
+COLD_STARTS = REPO_ROOT / "sim" / "cold-start-050859dea9d9-lora.csv"
 
 
 def _cell(

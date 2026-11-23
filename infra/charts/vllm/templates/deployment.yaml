@@ -35,6 +35,11 @@
 {{- $last = float64 . }}
 {{- end }}
 {{- end }}
+{{- /* What torch.compile makes, kept in a host folder so a later pod loads it (P4.13b, card 67). */}}
+{{- $compileCache := required "model.compile_cache from the profile" .Values.model.compile_cache }}
+{{- if not (kindIs "bool" $compileCache) }}
+{{- fail (printf "model.compile_cache from the profile must be true or false, got %v" $compileCache) }}
+{{- end }}
 {{- $image := "" }}
 {{- if $drain.enabled }}
 {{- $image = required "drainImage, the picker's image that carries the waiter, set by make vllm-deploy or make sim-deploy" .Values.drainImage }}
@@ -132,6 +137,11 @@ spec:
             # The model is already in the host cache (infra/download-model.sh, run by make up); a pod never downloads.
             - name: HF_HUB_OFFLINE
               value: "1"
+            {{- if $compileCache }}
+            {{- /* vLLM keeps torch.compile's output under this folder, one subfolder per configuration hash. */}}
+            - name: VLLM_CACHE_ROOT
+              value: /vllm-cache
+            {{- end }}
             {{- if eq .Values.gpuAccess "runtime" }}
             - name: NVIDIA_VISIBLE_DEVICES
               value: all
@@ -185,6 +195,10 @@ spec:
               mountPath: /adapters/{{ .name }}
               readOnly: true
             {{- end }}
+            {{- if $compileCache }}
+            - name: compile-cache
+              mountPath: /vllm-cache
+            {{- end }}
       volumes:
         - name: hf-cache
           hostPath:
@@ -201,5 +215,11 @@ spec:
         - name: lora
           hostPath:
             path: {{ required "loraHostPath, set by make vllm-deploy from model.lora.path" .Values.loraHostPath }}
+            type: Directory
+        {{- end }}
+        {{- if $compileCache }}
+        - name: compile-cache
+          hostPath:
+            path: {{ required "compileCacheHostPath, set by make vllm-deploy" .Values.compileCacheHostPath }}
             type: Directory
         {{- end }}
