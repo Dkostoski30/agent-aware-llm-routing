@@ -250,6 +250,19 @@ replay:
       fan_out:
         share: 0.5
         k: 2
+    # burst-fan-out with twice the runs per burst, for P5.1's squares (card 72, P5.1a-2): on compiled real pods
+    # burst-fan-out queued at most 3 calls per pod, so the overload guard and the parallel spill would barely act
+    # (experiments/log.md, P5.1a). 50 runs keep its 4 bursts: 40 in them, plus the ~10 that arrive at the base rate in
+    # the 480 s they span. The same in every profile.
+    burst-fan-out-heavy:
+      runs: 50
+      rate_per_second: 0.02
+      burst:
+        runs: 10
+        every_seconds: 120
+      fan_out:
+        share: 0.5
+        k: 2
     # For the converted traces (P2.4), whose runs are longer, so steady's rate would likely overload 2 pods. A first guess,
     # not the same load as steady: on 2 pods at seed 6, the done-when's by its rule for a mix of types, it measured 1.68 calls
     # in flight on average, at most 5, slowest 87 s, against steady's 0.70 at seed 1 (log). 20 of 879 runs leave the seed a

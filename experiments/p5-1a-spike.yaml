@@ -1,0 +1,35 @@
+# P5.1a: a spike, measuring only, on compiled real pods (docs/task-cards/72-P5.1a-compiled-load-spike.md). P3.7's load
+# ran on eager pods; since P4.13b the real pods run CUDA graphs, 16x faster per token, so before P5.1's two squares:
+# does this load still overload 2 pods, how far apart are two runs of the same picker, does upstream's
+# session-affinity-filter load and hold runs, and how long is one variant. Run with make experiment NAME=p5-1a-spike
+# after make down and make up, the laptop idle and Windows' AC standby off. Results carry this file's hash (D11).
+profile: real
+# P3.7's load (experiments/routing-burst.yaml): the long runs, burst-fan-out, seed 6, so the answer is about the load
+# the squares would run. A test holds the three to routing-burst.yaml's.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6, as routing-burst.yaml; a test holds it there.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As routing-burst.yaml: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused, since the
+# GPU-sharing stalls of 2026-11-12 (P3.7) would read as the picker's result.
+pod_stall_seconds: 30
+# No claim: the spike measures, and the card fixes what it reads before the run. default twice in a row, the same
+# picker and load, for the host's own spread on compiled pods; then upstream's filter.
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml
+  - name: default-again
+    values: null
+    epp_config: default-plugins.yaml
+  - name: session-affinity
+    values: ../infra/helm/router-session-affinity-values.yaml
+    epp_config: session-affinity.yaml

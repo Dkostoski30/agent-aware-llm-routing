@@ -1,0 +1,27 @@
+# P5.1a-2: the heavier load for P5.1's squares, checked on compiled real pods before them, measuring only
+# (docs/task-cards/72-P5.1a-compiled-load-spike.md). P5.1a's burst-fan-out queued at most 3 calls per pod, so the overload
+# guard and the parallel spill would barely act; burst-fan-out-heavy has 10 runs per burst. The rule, fixed before the
+# run: more than 1 call waiting on a pod within 60 s after every burst. Run with make experiment NAME=p5-1a-heavy after
+# make up, the laptop idle and Windows' AC standby off. Results carry this file's hash (D11).
+profile: real
+# The spike's trace and seed (experiments/p5-1a-spike.yaml); only the pattern differs, which a test holds.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6, as in the spike; a test holds it there.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As the spike: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused, since the GPU-sharing
+# stalls of 2026-11-12 (P3.7) would read as the load's result.
+pod_stall_seconds: 30
+# No claim: one default replay, the picker the squares' other variants are held to.
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml

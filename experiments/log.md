@@ -13,6 +13,38 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-24 · P5.1a-2 · green (the heavier burst overloads the compiled pods after every burst, and nothing timed out)
+Command: the user, one block ending in a shutdown, on `feature/phase-5` after a reboot: `make up`, `make experiment NAME=p5-1a-heavy` (hash c80f9d4fdf07: real, converted trace, `burst-fan-out-heavy`, seed 6, one `default` variant, replay from 10:45 local), then Prometheus's `vllm:num_requests_waiting` saved before the shutdown (`~/p5-1a-heavy-waiting.json`, outside the repo; read by Claude). Card 72, P5.1a-2.
+Result:
+- **The rule (more than 1 call waiting on a pod within 60 s after every one of the 4 bursts): met at all 4.** The most waiting per pod after the bursts at 120/240/360/480 s: 6 and 7, 7 and 5, 5 and 7, 5 and 6; at most 7 on either pod over the replay (`burst-fan-out`: 3).
+- **Clean:** 573 calls, 0 failed, 0 retried, 46 of 46 kept runs, no pod stall, 0 clock jumps, GPU logs whole, Windows' shared GPU memory 13-176 MiB. No call came near the 120 s deadline: the longest took 14.2 s, the slowest first token 10.8 s.
+- **The load:** 446 of 529 kept calls over the KV limit (P5.1a: 193 of 313); first token p50 2.27 s over it against 0.28 s under; run time p50 26.42 s, p95 67.57 s, total 1,243.0 s; hit rate 0.585, 176 of 483 later steps moved; 8.8 min of replay.
+- **The replayer started some calls late:** 40 of 573 calls began more than 50 ms after their planned gap (`replay.gap_tolerance_ms`), 30 of them in a fanned-out step, median 172 ms, at most 1,698 ms, 11.4 s in all, 0.9% of the total run time. P5.1a's replays had none. With no retries, a call starts right after its gap's sleep, so the replayer's event loop woke late, likely busy with the burst's streams; not measured.
+Notes:
+- **Decided before the run (card 72):** the rule passing means P5.1's squares run `burst-fan-out-heavy`.
+- **For P5.0 (Claude's proposal, decided with card 73):** the comparison reports each variant's late-start count and sum beside its run times, so that no variant is credited with the replayer's lag.
+- What it does not show: one seed, one variant; whether the plugin's rules act more on it, which the squares' picker logs will count.
+
+### 2026-11-24 · P5.1a · green (measuring only; the overload rule met by its letter, at 2 of 4 bursts; the squares get a heavier load)
+Command: the user, one block ending in a shutdown, on `feature/phase-5`: `make test` (3,327 Python, Go, 22 training, 258 UI specs, 0 failed), `make lint` (every hook passed), `make down`, `make up`, `make experiment NAME=p5-1a-spike` (hash e9337329fa9e: real, converted trace, `burst-fan-out`, seed 6; `default` 04:15, `default-again` 04:27, `session-affinity` 04:39 local), then Prometheus's `vllm:num_requests_waiting` for the whole run saved before the shutdown (`~/p5-1a-spike-waiting.json`, outside the repo; read by Claude). Card 72.
+Result:
+- **Every replay clean:** 357 calls, 0 failed, 26 of 26 kept runs, no pod stall, 0 clock jumps; GPU logs whole; Windows' shared GPU memory 2-165 MiB.
+- **1, overload (P3.7's rule: more than 1 call waiting on a pod within 60 s after at least 2 of the 4 bursts): met in both default runs, at 2 of 4.** The most waiting per pod after the bursts at 120/240/360/480 s:
+  | variant | 120 s | 240 s | 360 s | 480 s |
+  |---|---|---|---|---|
+  | default | 3, 1 | 1, 1 | 2, 1 | 0, 0 |
+  | default-again | 3, 2 | 1, 1 | 2, 2 | 0, 0 |
+  | session-affinity | 0, 2 | 0, 2 | 2, 0 | 0, 0 |
+  On eager pods the same load reached 5, 10, 12 and 11 (P3.7's spike). The last burst holds 3 runs, the trace's 28th to 30th. Readings are 5 s scrapes, so a shorter wait between two is not seen.
+- **2, noise:** total run time `default` 308.3 s, `default-again` 272.5 s, **-11.6%** on the same picker and load; the second faster in 19 of 26 paired runs (median -0.91 s). Run time p50 11.69 against 7.74 s, p95 25.61 against 22.42 s.
+- **3, upstream's filter:** it loaded (the picker started with the Alpha flag and the config) and held every run: 0 of 287 later steps moved (default 89 and 130), hit rate 0.851 (default 0.788 and 0.766), 54 of 287 stayed steps short of their previous prompt in cache. Total run time 252.2 s, 13.1% under the two defaults' mean, inside their own 11.6% spread.
+- **4, budget:** each replay 8.2 min, 11.7 min from one variant's start to the next, the whole experiment 38 min. A four-variant square file is about 47 min, a square about 3.1 h, plus `make down`/`make up`.
+Notes:
+- **The host sped up through the run:** generation 26.1, 23.4 and 16.6 ms per token in the variants' order, warm-up first tokens 249, 209 and 199 ms. So the filter's -13% cannot be told from its position; Gate 2 saw the variant run second generate faster too. The squares' balanced positions are for this.
+- **Compiled pods changed the load:** run times are about 25 times shorter than on eager pods (P3.7's run completion p50 ~280 s), and 193 of 313 calls are still over the KV limit, but queues stay short. The overload guard acts only past `routing.overload_queue_threshold` (1) waiting for `overload_sustained_seconds`, so at this load it and the parallel spill would barely fire, and P5.1c would ablate rules that did not act.
+- **Decided after the result (the user, 2026-11-24):** P5.1's squares run a heavier burst, a new pattern beside `burst-fan-out` with 10 runs per burst instead of 5. One default replay checks it first against a stricter rule fixed before it: more than 1 call waiting on a pod within 60 s after every burst.
+- What it does not show: one seed, one load, the variants in one order; whether the filter is faster.
+
 ### 2026-11-24 · Gate 4 · green with stated limits (feature freeze: every Phase 4 row built and working end to end)
 Command: the user, on `bf79164`: `make test`, `make lint`, `make up`, `make smoke`. The rows are read from the Phase 4 entries below.
 Result:

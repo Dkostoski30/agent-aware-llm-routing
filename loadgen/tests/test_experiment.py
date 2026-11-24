@@ -3674,3 +3674,85 @@ def test_validate_sim_2pods_is_validate_sims_two_pod_pair_alone() -> None:
         ("real-2pods", "sim-2pods")
     ]
     assert experiment.pod_stall_seconds is None
+
+
+# P5.1a: the spike on compiled real pods (card 72), and upstream's session-affinity-filter.
+
+P5_1A_SPIKE = REPO_ROOT / "experiments" / "p5-1a-spike.yaml"
+SESSION_AFFINITY_VALUES = REPO_ROOT / "infra" / "helm" / "router-session-affinity-values.yaml"
+
+
+def test_the_p5_1a_spike_runs_routing_bursts_load() -> None:
+    """The spike answers whether P5.1's squares can run P3.7's load, so it must be that load."""
+    spike = committed(P5_1A_SPIKE)
+    burst = committed(ROUTING_BURST)
+    assert (spike.profile, spike.trace, spike.pattern_name, spike.seed) == (
+        burst.profile,
+        burst.trace,
+        burst.pattern_name,
+        burst.seed,
+    )
+    assert spike.warmup == burst.warmup
+    assert spike.pod_stall_seconds == burst.pod_stall_seconds
+    assert spike.not_worse_tolerance is None
+    assert spike.faster_by is None
+
+
+def test_the_p5_1a_spike_runs_default_twice_then_upstreams_filter() -> None:
+    """Two default variants alike in all but the name give the host's spread on one picker."""
+    spike = committed(P5_1A_SPIKE)
+    assert [variant.name for variant in spike.variants] == [
+        "default",
+        "default-again",
+        "session-affinity",
+    ]
+    first, again, upstream = spike.variants
+    assert first.default and again.default
+    assert (first.values, first.epp_config) == (again.values, again.epp_config)
+    assert upstream.routing is None
+    assert upstream.values == SESSION_AFFINITY_VALUES.resolve()
+
+
+def test_upstreams_filter_binds_runs_by_their_header_as_long_as_the_plugins_pin() -> None:
+    """The baseline for task affinity keys on the same header and holds a quiet run as long as
+    thesis-run-router does, so the two differ in what they do with a run, not in which run."""
+    epp = yaml.safe_load(SESSION_AFFINITY_VALUES.read_text())["router"]["epp"]
+    config_file = epp["pluginsConfigFile"]
+    assert config_file == committed(P5_1A_SPIKE).variants[2].epp_config
+    config = yaml.safe_load(epp["pluginsCustomConfig"][config_file])
+    plugins = {plugin["type"]: plugin.get("parameters") for plugin in config["plugins"]}
+    session = plugins["session-affinity-filter"]
+    assert session["strategy"] == "session_id"
+    assert session["sessionIdConfig"]["sources"] == [{"header": "x-run-id"}]
+    real = profile_file("real")
+    assert session["sessionIdConfig"]["evictionTtlSeconds"] == real["routing"]["run_ttl_seconds"]
+    assert epp["flags"]["allow-experimental-plugins"] == "true"
+    (profile,) = config["schedulingProfiles"]
+    refs = [plugin["pluginRef"] for plugin in profile["plugins"]]
+    assert refs[0] == "session-affinity-filter"
+    weights = {plugin["pluginRef"]: plugin.get("weight") for plugin in profile["plugins"][1:]}
+    assert weights == {
+        "queue-scorer": 2,
+        "kv-cache-utilization-scorer": 2,
+        "prefix-cache-scorer": 3,
+    }
+
+
+P5_1A_HEAVY = REPO_ROOT / "experiments" / "p5-1a-heavy.yaml"
+
+
+def test_the_heavy_check_runs_the_spikes_load_but_its_pattern() -> None:
+    """P5.1a-2 answers whether twice the burst overloads the pods the spike ran on, so all but the
+    pattern is the spike's, and its warm-up drops the runs before the first burst."""
+    heavy = committed(P5_1A_HEAVY)
+    spike = committed(P5_1A_SPIKE)
+    assert heavy.pattern_name == "burst-fan-out-heavy"
+    assert (heavy.profile, heavy.trace, heavy.seed) == (spike.profile, spike.trace, spike.seed)
+    assert heavy.warmup == spike.warmup
+    assert heavy.pod_stall_seconds == spike.pod_stall_seconds
+    burst = heavy.pattern.burst
+    assert burst is not None
+    starts = start_times(heavy.pattern, heavy.seed)
+    assert heavy.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
+    assert [variant.name for variant in heavy.variants] == ["default"]
+    assert heavy.variants[0].default

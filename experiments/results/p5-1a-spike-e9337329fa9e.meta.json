@@ -1,0 +1,150 @@
+{
+  "experiment": "p5-1a-spike",
+  "hash": "e9337329fa9e",
+  "profile": "real",
+  "profile_sha256": "f8e247da8d75c26334195d90fccd6f2256aee1afc3ece807fbd8cc15ef42a699",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1a-spike-e9337329fa9e-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1a-spike-e9337329fa9e-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "f8e247da8d75c26334195d90fccd6f2256aee1afc3ece807fbd8cc15ef42a699",
+      "warmup_ttft_ms": {
+        "vllm-5ffcc7d544-bp55t": [
+          1056,
+          194,
+          216,
+          240,
+          213
+        ],
+        "vllm-5ffcc7d544-d9cs8": [
+          263,
+          274,
+          219,
+          229,
+          410
+        ]
+      },
+      "started": 1795490127.3653808,
+      "ended": 1795490621.419343,
+      "clock_jumps": 0,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-5ffcc7d544-bp55t": 171,
+        "vllm-5ffcc7d544-d9cs8": 186
+      },
+      "pod_switch_share": 0.21629213483146068,
+      "max_gap_deviation_ms": 39,
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1a-spike-e9337329fa9e-default-vllm-vllm-5ffcc7d544-bp55t.log",
+        "p5-1a-spike-e9337329fa9e-default-vllm-vllm-5ffcc7d544-d9cs8.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "default-again": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "f8e247da8d75c26334195d90fccd6f2256aee1afc3ece807fbd8cc15ef42a699",
+      "warmup_ttft_ms": {
+        "vllm-6cc65d7b4d-ldcf6": [
+          846,
+          206,
+          163,
+          268,
+          296
+        ],
+        "vllm-6cc65d7b4d-wnc9s": [
+          341,
+          192,
+          201,
+          180,
+          164
+        ]
+      },
+      "started": 1795490826.179012,
+      "ended": 1795491317.6158197,
+      "clock_jumps": 0,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6cc65d7b4d-ldcf6": 162,
+        "vllm-6cc65d7b4d-wnc9s": 195
+      },
+      "pod_switch_share": 0.29775280898876405,
+      "max_gap_deviation_ms": 41,
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1a-spike-e9337329fa9e-default-again-vllm-vllm-6cc65d7b4d-ldcf6.log",
+        "p5-1a-spike-e9337329fa9e-default-again-vllm-vllm-6cc65d7b4d-wnc9s.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    },
+    "session-affinity": {
+      "epp_config": "session-affinity.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "f8e247da8d75c26334195d90fccd6f2256aee1afc3ece807fbd8cc15ef42a699",
+      "warmup_ttft_ms": {
+        "vllm-5596c6b8f7-8st8s": [
+          748,
+          231,
+          253,
+          194,
+          187
+        ],
+        "vllm-5596c6b8f7-pc9ml": [
+          174,
+          192,
+          146,
+          166,
+          221
+        ]
+      },
+      "started": 1795491543.3292336,
+      "ended": 1795492034.8988187,
+      "clock_jumps": 0,
+      "calls": 357,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-5596c6b8f7-8st8s": 220,
+        "vllm-5596c6b8f7-pc9ml": 137
+      },
+      "pod_switch_share": 0.20224719101123595,
+      "max_gap_deviation_ms": 19,
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1a-spike-e9337329fa9e-session-affinity-vllm-vllm-5596c6b8f7-8st8s.log",
+        "p5-1a-spike-e9337329fa9e-session-affinity-vllm-vllm-5596c6b8f7-pc9ml.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    }
+  }
+}

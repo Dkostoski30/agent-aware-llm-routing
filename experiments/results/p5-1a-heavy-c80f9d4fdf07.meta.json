@@ -1,0 +1,66 @@
+{
+  "experiment": "p5-1a-heavy",
+  "hash": "c80f9d4fdf07",
+  "profile": "real",
+  "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1a-heavy-c80f9d4fdf07-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1a-heavy-c80f9d4fdf07-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-b795599d7-4mzvt": [
+          1492,
+          370,
+          261,
+          242,
+          227
+        ],
+        "vllm-b795599d7-tzxdw": [
+          186,
+          233,
+          306,
+          189,
+          193
+        ]
+      },
+      "started": 1795513513.0946562,
+      "ended": 1795514043.106725,
+      "clock_jumps": 0,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-b795599d7-4mzvt": 288,
+        "vllm-b795599d7-tzxdw": 285
+      },
+      "pod_switch_share": 0.26048951048951047,
+      "max_gap_deviation_ms": 1698,
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1a-heavy-c80f9d4fdf07-default-vllm-vllm-5596c6b8f7-8st8s.log",
+        "p5-1a-heavy-c80f9d4fdf07-default-vllm-vllm-5596c6b8f7-pc9ml.log",
+        "p5-1a-heavy-c80f9d4fdf07-default-vllm-vllm-b795599d7-4mzvt.log",
+        "p5-1a-heavy-c80f9d4fdf07-default-vllm-vllm-b795599d7-tzxdw.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null
+    }
+  }
+}

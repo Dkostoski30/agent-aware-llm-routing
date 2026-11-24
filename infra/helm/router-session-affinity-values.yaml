@@ -1,0 +1,51 @@
+# Upstream's session-affinity-filter on x-run-id, on top of infra/helm/router-values.yaml: P5.1's upstream baseline
+# for task affinity (decided 2026-11-09, card 38; docs/task-cards/72-P5.1a-compiled-load-spike.md). It is the default
+# picker with the filter in front: a run's later calls go to the pod its earlier call went to while that pod is a
+# candidate, and the default's scorers and weights pick a run's first call, as on default-plugins.yaml. Unlike
+# thesis-run-router it never moves a run off a busy pod and is told no run's end; a binding unused for its TTL is dropped.
+# Source: llm-d-router v0.11.0, pkg/epp/framework/plugins/scheduling/filter/sessionaffinity.
+router:
+  epp:
+    flags:
+      # The filter is registered at Alpha stability (cmd/epp/runner/runner.go), and the picker refuses to load an Alpha
+      # plugin without this flag. Only this variant sets it; router-values.yaml's v: 3 stays.
+      allow-experimental-plugins: "true"
+    pluginsConfigFile: session-affinity.yaml
+    pluginsCustomConfig:
+      session-affinity.yaml: |
+        apiVersion: llm-d.ai/v1alpha1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: queue-scorer
+        - type: kv-cache-utilization-scorer
+        - type: prefix-cache-scorer
+        - type: metrics-data-source
+          parameters:
+            scheme: "http"
+            path: "/metrics"
+            insecureSkipVerify: true
+        - type: core-metrics-extractor
+        - type: session-affinity-filter
+          parameters:
+            # session_id keys the binding on a header the client sends; the default, encoded_endpoint_header, needs the
+            # client to echo a response header back, which neither the agent runtime nor the replayer does.
+            strategy: session_id
+            sessionIdConfig:
+              sources:
+              - header: x-run-id
+              # The same 300 s as thesis-run-router's pin (routing.run_ttl_seconds), so the two hold a quiet run equally
+              # long: longer than the call deadline (agent.llm_timeout_seconds, 120 s) plus the gap after it (2 ms at
+              # most in the converted trace). It is upstream's default too, stated so the baseline reads the same if
+              # upstream changes it.
+              evictionTtlSeconds: 300
+              evictionSweepSeconds: 10
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: session-affinity-filter
+          - pluginRef: queue-scorer
+            weight: 2
+          - pluginRef: kv-cache-utilization-scorer
+            weight: 2
+          - pluginRef: prefix-cache-scorer
+            weight: 3

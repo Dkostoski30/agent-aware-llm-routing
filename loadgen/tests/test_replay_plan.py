@@ -559,6 +559,31 @@ def test_burst_fan_out_is_bursts_arrivals_with_a_fan_out_of_half_the_later_steps
     assert section["patterns"]["burst-fan-out"] == sim["patterns"]["burst-fan-out"]
 
 
+@pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
+def test_burst_fan_out_heavy_is_burst_fan_out_with_twice_the_burst(profile: str) -> None:
+    """P5.1's squares' load (card 72): burst-fan-out's rate, period and fan-out, 10 runs per burst
+    and 50 in all, the same in every profile."""
+    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["replay"]
+    patterns = load_replay_config(section).patterns
+    light = patterns["burst-fan-out"]
+    assert light.burst is not None
+    assert patterns["burst-fan-out-heavy"] == Pattern(
+        50, light.rate_per_second, Burst(10, light.burst.every_seconds), light.fan_out
+    )
+    sim = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["replay"]
+    assert section["patterns"]["burst-fan-out-heavy"] == sim["patterns"]["burst-fan-out-heavy"]
+
+
+def test_burst_fan_out_heavy_at_seed_6_keeps_four_bursts_of_runs() -> None:
+    """At seed 6, the spike's: 4 runs before the first burst, as burst-fan-out's, then 10 at 120,
+    240 and 360 s and the last 8 at 480 s, so every burst it is judged on is there."""
+    section = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["replay"]
+    starts = start_times(load_replay_config(section).patterns["burst-fan-out-heavy"], 6)
+    assert len(starts) == 50
+    assert sum(start < 120 for start in starts) == 4
+    assert [starts.count(float(at)) for at in (120, 240, 360, 480)] == [10, 10, 10, 8]
+
+
 def test_burst_fan_out_really_fans_out_on_the_recorded_trace() -> None:
     section = yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())["replay"]
     config = load_replay_config(section)
