@@ -17,3 +17,6 @@ ui/dist/
 ui/.angular/
 
 graphify-out/
+
+# Claude Code worktrees: local checkouts, not part of the repo
+.claude/worktrees/
