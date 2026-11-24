@@ -301,6 +301,33 @@ def test_files_of_other_commits_on_the_same_system_code_are_compared(tmp_path: P
     assert "b: commit def, uncommitted experiments/b.yaml" in report
 
 
+def test_the_results_of_earlier_files_are_counted_not_listed(tmp_path: Path) -> None:
+    """In a series each file finds the results of the files before it uncommitted (P5.0's sim
+    check: 8 of a's in b's list); the meta keeps them all, the report names the rest."""
+    results = [
+        "experiments/graphs/a.png",
+        "experiments/results/a.csv",
+        "experiments/results/a.meta.json",
+    ]
+    other = {**SOURCE, "uncommitted": ["experiments/b.yaml", *results]}
+    files = [
+        square_file(tmp_path, "a", 6, {"default": [1000], "plugin": [900]}),
+        square_file(tmp_path, "b", 9, {"plugin": [400], "default": [500]}, source=other),
+    ]
+    report = "\n".join(compare(files, REFERENCE, tmp_path / "square.csv"))
+    assert "b: commit abc, uncommitted experiments/b.yaml and 3 files of results" in report
+
+
+def test_only_results_uncommitted_are_counted_alone(tmp_path: Path) -> None:
+    other = {**SOURCE, "uncommitted": ["experiments/results/a.csv"]}
+    files = [
+        square_file(tmp_path, "a", 6, {"default": [1000], "plugin": [900]}),
+        square_file(tmp_path, "b", 9, {"plugin": [400], "default": [500]}, source=other),
+    ]
+    report = "\n".join(compare(files, REFERENCE, tmp_path / "square.csv"))
+    assert "b: commit abc, uncommitted 1 files of results" in report
+
+
 def series_file(directory: Path, text: str) -> Path:
     (directory / "series").mkdir(exist_ok=True)
     for name in ("one", "two"):

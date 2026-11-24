@@ -62,6 +62,8 @@ REPLAY_KEYS = ("trace", "pattern", "profile_sha256")
 # The run-completion shares reported, as make experiment's report and P3.7's verdict read them.
 MEDIAN_SHARE = 0.5
 P95_SHARE = 0.95
+# Where make experiment writes its results, which a later file of a series finds uncommitted.
+RESULT_DIRECTORIES = ("experiments/results/", "experiments/graphs/")
 # thesis-run-router's log line for each call it placed, with the rule that placed it (P3.5, P3.6).
 PICKED = "Run call picked"
 
@@ -329,10 +331,20 @@ def _variant_lines(file: SquareFile, result: VariantResult) -> list[str]:
 
 
 def _source_line(file: SquareFile) -> str:
+    """The results make experiment writes are counted, not named: in a series each file finds
+    those of the files before it uncommitted, and they change no replay. The .meta.json keeps
+    every path."""
     source = file.meta["source"]
     line = f"{file.label}: commit {source['commit']}"
-    if source["uncommitted"]:
-        line += f", uncommitted {', '.join(source['uncommitted'])}"
+    results = [path for path in source["uncommitted"] if path.startswith(RESULT_DIRECTORIES)]
+    named = [path for path in source["uncommitted"] if path not in results]
+    parts = []
+    if named:
+        parts.append(", ".join(named))
+    if results:
+        parts.append(f"{len(results)} files of results")
+    if parts:
+        line += f", uncommitted {' and '.join(parts)}"
     return line
 
 
