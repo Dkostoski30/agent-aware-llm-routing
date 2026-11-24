@@ -21,6 +21,7 @@ from load_generator.plan import (
     TraceCall,
     TraceRun,
     build_plan,
+    burst_starts,
     call_headers,
     chat_request,
     choose_runs,
@@ -582,6 +583,71 @@ def test_burst_fan_out_heavy_at_seed_6_keeps_four_bursts_of_runs() -> None:
     assert len(starts) == 50
     assert sum(start < 120 for start in starts) == 4
     assert [starts.count(float(at)) for at in (120, 240, 360, 480)] == [10, 10, 10, 8]
+
+
+def test_the_bursts_are_the_moments_a_burst_of_runs_starts() -> None:
+    """At seed 6 burst-fan-out-heavy's 50 runs end in the burst at 480 s, so a fifth at 600 s is
+    never reached (P5.0: the waiting after each burst is read at these)."""
+    section = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["replay"]
+    heavy = load_replay_config(section).patterns["burst-fan-out-heavy"]
+    assert burst_starts(heavy, 6) == [120.0, 240.0, 360.0, 480.0]
+
+
+def test_a_pattern_without_bursts_has_none() -> None:
+    assert burst_starts(STEADY, 6) == []
+
+
+APB_TRACE = (
+    REPO_ROOT / "experiments" / "results" / "traces" / "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl"
+)
+# P2.4's mix, the dataset's four sources, tau2's three domains as one.
+MIX_SOURCES = ("hotpotqa", "gaia_dev", "tau2", "bfcl")
+# P5.1's squares, a seed per file (decided 2026-11-24, card 73): 6, then the first three after it
+# whose 50 runs meet P2.4's rule.
+SQUARE_SEEDS = (6, 9, 10, 13)
+
+
+def meets_p2_4s_mix(runs: list[TraceRun]) -> bool:
+    """P2.4's rule, 4-6 of 20 runs from each source, as a share: each 20-30% of the runs."""
+    counts = {
+        source: sum(run.task_type.startswith(source) for run in runs) for source in MIX_SOURCES
+    }
+    return all(0.2 * len(runs) <= count <= 0.3 * len(runs) for count in counts.values())
+
+
+def seeds_meeting_the_mix(pattern: Pattern, after: int, count: int) -> list[int]:
+    runs = load_trace(APB_TRACE)
+    found: list[int] = []
+    seed = after
+    while len(found) < count:
+        seed += 1
+        if meets_p2_4s_mix(choose_runs(runs, pattern.runs, seed)):
+            found.append(seed)
+    return found
+
+
+def test_the_rule_as_a_share_gives_p2_4s_seed_on_its_pattern() -> None:
+    """On steady-long's 20 runs the share is P2.4's 4-6, and its first seed is P2.4's 6."""
+    section = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["replay"]
+    steady_long = load_replay_config(section).patterns["steady-long"]
+    assert steady_long.runs == 20
+    assert seeds_meeting_the_mix(steady_long, after=0, count=1) == [6]
+
+
+def test_the_squares_seeds_are_6_and_the_next_three_by_p2_4s_rule() -> None:
+    section = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["replay"]
+    heavy = load_replay_config(section).patterns["burst-fan-out-heavy"]
+    assert seeds_meeting_the_mix(heavy, after=SQUARE_SEEDS[0], count=3) == list(SQUARE_SEEDS[1:])
+
+
+def test_seed_6_misses_the_rule_on_the_heavy_load_by_one_run() -> None:
+    """Kept as the squares' first seed all the same (card 73): its load is the one P5.1a-2 checked.
+    9 gaia_dev runs of 50, one under 20%."""
+    section = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())["replay"]
+    heavy = load_replay_config(section).patterns["burst-fan-out-heavy"]
+    runs = choose_runs(load_trace(APB_TRACE), heavy.runs, 6)
+    assert not meets_p2_4s_mix(runs)
+    assert sum(run.task_type == "gaia_dev" for run in runs) == 9
 
 
 def test_burst_fan_out_really_fans_out_on_the_recorded_trace() -> None:

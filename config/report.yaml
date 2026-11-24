@@ -15,6 +15,16 @@ runs_left_out: [2, 5]
 # a bend the rebuilt times do not show. A bucket holds its lower edge: under 0.75, 0.75-1, ..., 3 and over.
 pressure_bucket_edges: [0.75, 1.0, 1.25, 1.5, 2, 3]
 
+# How long after each burst make experiment reads the most calls waiting on each pod (P5.0, card 73): card 72's rule for
+# whether a load overloads the pods, more than 1 waiting within 60 s after a burst, fixed before P5.1a ran. Printed, not
+# judged; the series itself is kept beside the results.
+burst_waiting_window_seconds: 60
+
+# A call make experiment counts as started late (P5.0, card 73): its gap ran over the trace's by more than this. As every
+# profile's replay.gap_tolerance_ms, which make replay-compare holds a replay to and a test holds this to. With no retries
+# a call starts right after its gap's sleep, so a late one is the replayer's own lag (P5.1a-2).
+late_start_ms: 50
+
 # make experiment-graph's layout, in each axis's own units, as tried on P2.5's graph at the figure's size.
 graph:
   # Hit-rate bars, on an axis with one unit between variants: leaves a gap between bars.

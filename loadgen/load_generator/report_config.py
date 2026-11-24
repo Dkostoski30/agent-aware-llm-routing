@@ -32,6 +32,8 @@ class ReportConfig:
     fewest_tokens_for_speed: int
     runs_left_out: tuple[int, ...]
     pressure_bucket_edges: tuple[float, ...]
+    burst_waiting_window_seconds: int
+    late_start_ms: int
     graph: GraphLayout
 
 
@@ -65,6 +67,19 @@ def load_report_config(path: Path = REPORT_FILE) -> ReportConfig:
             f"pressure_bucket_edges is {edges}, it must list numbers over 0, each above the one "
             "before"
         )
+    window = spec["burst_waiting_window_seconds"]
+    if not _is_count(window, 1):
+        raise ReportConfigError(
+            f"burst_waiting_window_seconds is {window}, it must be a whole number, at least 1"
+        )
+    late = spec["late_start_ms"]
+    if not _is_count(late, 0):
+        raise ReportConfigError(f"late_start_ms is {late}, it must be a whole number, at least 0")
     return ReportConfig(
-        fewest, tuple(left_out), tuple(float(edge) for edge in edges), GraphLayout(**spec["graph"])
+        fewest,
+        tuple(left_out),
+        tuple(float(edge) for edge in edges),
+        window,
+        late,
+        GraphLayout(**spec["graph"]),
     )

@@ -248,6 +248,17 @@ def start_times(pattern: Pattern, seed: int) -> list[float]:
     return sorted(base + bursts)[: pattern.runs]
 
 
+def burst_starts(pattern: Pattern, seed: int) -> list[float]:
+    """The moments a burst of runs starts, in order: start_times' burst moments that one of its
+    pattern.runs starts still reaches; none without bursts."""
+    if pattern.burst is None:
+        return []
+    starts = set(start_times(pattern, seed))
+    count = math.ceil(pattern.runs / pattern.burst.runs)
+    moments = [pattern.burst.every_seconds * number for number in range(1, count + 1)]
+    return [moment for moment in moments if moment in starts]
+
+
 def choose_runs(runs: Sequence[TraceRun], count: int, seed: int) -> list[TraceRun]:
     """count runs in a seeded order; every run of the trace is used once before any repeats."""
     rng = random.Random(f"{seed}/order")

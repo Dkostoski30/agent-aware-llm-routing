@@ -13,6 +13,22 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-24 · P5.0 · green (the squares' tooling: a series from one command, the square's comparison and verdict, each file's source, late starts and waiting)
+Command: Claude: card 73, tests first; `make test` (3,409 Python, Go, 22 training, 258 UI specs; 1 warning, FastAPI's TestClient deprecation in the app tests, there before) and `make lint` (every hook) · the user, one block on `feature/phase-5`, the cluster up on sim since 12:28 from a first try that came before the code: `make experiment-series NAME=p5-0-sim-check` twice. Files p5-0-sim-a (hash aa4b71ff5d10: sim, converted trace, `burst-fan-out-heavy`, seed 6, `default` then `plugin`) and p5-0-sim-b (e7f3aaddbe75: seed 9, `plugin` then `default`), replays 13:26-14:12 local. Then Claude, read only: the square CSV and both `.meta.json` files.
+Result:
+- **The series:** the first command ran a, then b, then printed the square's report; the second printed "finished before, skipped" for both and the same report. 4 replays, 573 calls in a's and 474 in b's, 0 failed.
+- **The source:** both files ran on commit ea25ffd with card 73's code uncommitted, system hash 304772fd0be1 in both, so the comparison took them.
+- **Late starts:** 0 in all four replays (P5.1a-2 on real: 40).
+- **Waiting per pod within 60 s after the bursts at 120/240/360/480 s:** a default 5/8, 5/5, 3/2, 2/2; a plugin 5/4, 4/6, 0/1, 3/0; b plugin 3/3, 2/4, 8/5, 0/0; b default 4/3, 3/0, 5/6, 0/0. On sim, with 8,192 KV tokens per pod, the last bursts barely queue.
+- **The plugin's picks:** a 46 first, 147 pinned, 58 spill, 263 parallel-stay, 15 parallel-spill; b 45 first, 120 pinned, 46 spill, 1 remap, 208 parallel-stay, 21 parallel-spill. The guard and the spill do act on this load.
+- **The square (`p5-0-sim-check-square.csv`):** total run time a default 355.6 s, plugin 346.7 s (+2.5%); b plugin 338.6 s, default 320.9 s (-5.5%); mean -1.5%, spread 8.0%: no difference shown. By position, each total over its file's mean: 1st 1.020, 2nd 0.980.
+Notes:
+- **What it shows:** the tooling, not the plugin. The simulator does not model KV admission (P3.7b), and its plugin has no priority (P4.1). In both files the variant run second was the faster one, which is the drift a square balances out.
+- **Clock jumps in file b:** 5 in its plugin replay and 6 in its default, 0 in file a's. The journal's "Clock change detected" lines, which P2.3 flagged as a slowed host. Not looked into; on the real squares they are in each variant's meta.
+- **Reported, not changed:** each file's uncommitted list also names the results of the files before it in the series (b's names a's 8 result files), so on a 4-file square the last file's list runs to ~30 paths. The hash leaves out experiments/, so the check is unaffected; only the report is long.
+- **Reported, not changed:** set-routing's probe got a 500 on its first try before both of b's replays and passed on try 2, as before.
+- Seed 6 misses the seed rule by one run (9 gaia_dev of 50) and stays as the squares' first seed: it is the load P5.1a-2 checked for overload. Seeds 9, 10 and 13 have not been checked for overload on real pods. The squares' waiting lines will show it per file.
+
 ### 2026-11-24 · P5.1a-2 · green (the heavier burst overloads the compiled pods after every burst, and nothing timed out)
 Command: the user, one block ending in a shutdown, on `feature/phase-5` after a reboot: `make up`, `make experiment NAME=p5-1a-heavy` (hash c80f9d4fdf07: real, converted trace, `burst-fan-out-heavy`, seed 6, one `default` variant, replay from 10:45 local), then Prometheus's `vllm:num_requests_waiting` saved before the shutdown (`~/p5-1a-heavy-waiting.json`, outside the repo; read by Claude). Card 72, P5.1a-2.
 Result:

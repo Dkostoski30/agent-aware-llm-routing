@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare experiment-series square-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -345,6 +345,21 @@ experiment-graph:
 experiment-compare:
 	@if [ -z "$(CSVS)" ] || [ -z "$(STALL_SECONDS)" ]; then echo "usage: make experiment-compare CSVS=\"<a.csv> <b.csv>\" STALL_SECONDS=5"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.experiment_compare --stall-seconds $(STALL_SECONDS) $(CSVS)
+
+# A square's experiment files one after another, as make experiment runs each, then the square's comparison (P5.0, card
+# 73). experiments/series/$(NAME).yaml names the files and the reference variant. A file whose CSV, .meta.json and graph
+# are written is skipped, so the same command picks up a night that stopped; the first failure stops the rest. Needs make
+# up with the files' profile, Windows kept from sleeping and the laptop idle, as make experiment.
+experiment-series:
+	@if [ -z "$(NAME)" ]; then echo "usage: make experiment-series NAME=p5-0-sim-check"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.series experiments/series/$(NAME).yaml
+
+# A square's comparison again, from its files' CSVs and .meta.json files alone, no cluster (P5.0): per file each variant's
+# numbers, each variant's gap against the reference and the verdict card 73 fixed before the runs, the position means.
+# Writes experiments/results/$(SERIES)-square.csv.
+square-compare:
+	@if [ -z "$(SERIES)" ]; then echo "usage: make square-compare SERIES=p5-0-sim-check"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.square_compare experiments/series/$(SERIES).yaml
 
 # The autoscalers across files of one real 1<->2 replay, from their .meta.json files alone (P4.5, card 61): per variant
 # per file, mean and min-max per variant, per position, and the verdict card 61 fixed before the runs. OUT is the CSV.

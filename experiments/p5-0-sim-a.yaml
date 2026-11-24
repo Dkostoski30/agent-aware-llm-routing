@@ -1,0 +1,33 @@
+# P5.0's done-when (docs/task-cards/73-P5.0-square-tooling.md): file a of a 2x2 square on simulated pods, which
+# make experiment-series NAME=p5-0-sim-check runs with p5-0-sim-b.yaml and then compares. It checks the
+# tooling, not the plugin: the simulator does not model KV admission (P3.7b) and has no priority scheduling (P4.1),
+# so its plugin is affinity, the overload guard and parallel spill. The two files differ in seed and in the order of
+# their variants, as the squares' files do; a test holds both. Run after make up PROFILE=sim. Results carry this
+# file's hash (D11).
+profile: sim
+# P5.1's squares' trace and load.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# The squares' seeds 6 and 9 (loadgen/tests/test_replay_plan.py's SQUARE_SEEDS).
+seed: 6
+# sim's model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 8192
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 6; a test holds it there.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+variants:
+  - name: default
+    values: null
+    epp_config: default-plugins.yaml
+  - name: plugin
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+    epp_config: thesis-plugins.yaml

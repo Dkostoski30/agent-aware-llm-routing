@@ -55,6 +55,7 @@ Usage: python -m load_generator.experiment EXPERIMENT
 
 import argparse
 import asyncio
+import dataclasses
 import hashlib
 import json
 import re
@@ -103,11 +104,12 @@ from load_generator.autoscale import (
     write_cpu_csv,
     write_summary_csv,
 )
-from load_generator.compare import max_gap_deviation
+from load_generator.compare import late_starts, max_gap_deviation
 from load_generator.graph import render
 from load_generator.plan import (
     Pattern,
     PlannedRun,
+    burst_starts,
     load_replay_config,
     served_model,
     start_times,
@@ -115,6 +117,7 @@ from load_generator.plan import (
 )
 from load_generator.record import REPO_ROOT, experiment_hash, kubectl
 from load_generator.replay import VLLM_PORT, failed_calls, replay_runs, replay_to_file
+from load_generator.report_config import load_report_config
 from load_generator.results import (
     CallRow,
     call_rows,
@@ -134,6 +137,13 @@ from load_generator.validation import (
     write_table,
 )
 from load_generator.validation import report_lines as validation_lines
+from load_generator.waiting import (
+    WAITING_QUERY,
+    WaitingRow,
+    burst_peaks,
+    write_waiting_csv,
+)
+from load_generator.waiting import rows_from as waiting_rows_from
 
 VLLM_SELECTOR = "app.kubernetes.io/name=vllm"
 EPP_DEPLOYMENT = "vllm-pool-epp"
@@ -237,6 +247,28 @@ PROFILE_ONLY_KEYS = frozenset(
 # block (P2.4, experiments/log.md). Derived, not tuned: a step short by more lost part of its run's
 # history on its own pod, a capacity effect the hit rate alone would hide.
 CACHE_SHORTFALL_TOKENS = 24
+# The paths a replay runs on (P5.0, card 73): the replayer and the tracker it imports (loadgen/,
+# agent/), the picker (gateway/), the cluster (infra/, sim/), the profiles (config/), the schemas,
+# and the build (Makefile, pyproject.toml, uv.lock). Not experiments/, whose files carry their own
+# hash (D11), nor docs/, app/, ui/ or training/, which no replay runs. A square's files are compared
+# only when the hash of these was the same for each.
+SYSTEM_PATHS = (
+    "agent/",
+    "config/",
+    "gateway/",
+    "infra/",
+    "loadgen/",
+    "schemas/",
+    "sim/",
+    "Makefile",
+    "pyproject.toml",
+    "uv.lock",
+)
+# The repo this module was loaded from, whose code is what runs: its source state goes into each
+# .meta.json. Apart from REPO_ROOT, where the results and profiles are, though both are this repo.
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+BURST_WAITING_WINDOW_SECONDS = load_report_config().burst_waiting_window_seconds
+LATE_START_MS = load_report_config().late_start_ms
 
 
 class ExperimentError(Exception):
@@ -351,6 +383,9 @@ class Outputs:
     def cpu_hpa(self, variant: str) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-{variant}-cpu-hpa.csv")
 
+    def waiting(self, variant: str) -> Path:
+        return self.csv.with_name(f"{self.csv.stem}-{variant}-waiting.csv")
+
     @property
     def autoscale_summary(self) -> Path:
         return self.csv.with_name(f"{self.csv.stem}-autoscale-summary.csv")
@@ -419,6 +454,10 @@ class Cluster(Protocol):
 
     # The plain HPA's reading of the pods' CPU from since to until (P3.10).
     def cpu_series(self, since: float, until: float) -> list[CpuRow]: ...
+
+    # The calls waiting on each pod from since to until, at the scrape step, in seconds since
+    # since (P5.0).
+    def waiting(self, since: float, until: float) -> list[WaitingRow]: ...
 
 
 def variant_profile(spec: Mapping[str, Any], section: Mapping[str, Any]) -> str:
@@ -719,15 +758,25 @@ def load_experiment(path: Path, patterns: Mapping[str, Pattern]) -> Experiment:
     )
 
 
-def outputs(experiment: Experiment, root: Path) -> Outputs:
-    stem = f"{experiment.name}-{experiment.hash}"
+def _outputs(name: str, digest: str, root: Path) -> Outputs:
+    stem = f"{name}-{digest}"
     results = root / "experiments" / "results"
     return Outputs(
         csv=results / f"{stem}.csv",
         meta=results / f"{stem}.meta.json",
         graph=root / "experiments" / "graphs" / f"{stem}.png",
-        validation=table_path(root, experiment.hash),
+        validation=table_path(root, digest),
     )
+
+
+def outputs(experiment: Experiment, root: Path) -> Outputs:
+    return _outputs(experiment.name, experiment.hash, root)
+
+
+def file_outputs(path: Path, root: Path) -> Outputs:
+    """What a run of the experiment file writes, from the file alone, as outputs gives once it is
+    loaded (P5.0): a series finds finished files and a square their results without a profile."""
+    return _outputs(path.stem, experiment_hash(path), root)
 
 
 def refuse_leftovers(experiment: Experiment, out: Outputs) -> None:
@@ -743,6 +792,38 @@ def refuse_leftovers(experiment: Experiment, out: Outputs) -> None:
 
 def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git(root: Path, *args: str) -> list[str]:
+    done = subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout.splitlines()
+
+
+def source_state(root: Path) -> dict[str, Any]:
+    """The commit checked out, the paths that differ from it, tracked or new and not ignored, and
+    a hash of SYSTEM_PATHS' files as they are on disk (P5.0). The hash, not the commit, says what
+    a run ran on: results are committed after their run, and a commit of experiments/ alone changes
+    no replay. A tracked file deleted from disk is left out of the hash, so its absence changes
+    it."""
+    commit = _git(root, "rev-parse", "HEAD")[0]
+    changed = _git(root, "diff", "--name-only", "HEAD")
+    new = _git(root, "ls-files", "--others", "--exclude-standard")
+    system = _git(
+        root, "ls-files", "--cached", "--others", "--exclude-standard", "--", *SYSTEM_PATHS
+    )
+    digest = hashlib.sha256()
+    for name in sorted(set(system)):
+        path = root / name
+        if path.is_file():
+            # The name too, so a file moved to another path changes the hash.
+            digest.update(name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return {
+        "commit": commit,
+        "uncommitted": sorted(set(changed) | set(new)),
+        "system_sha256": digest.hexdigest(),
+    }
 
 
 def _trace_lines(path: Path) -> list[dict[str, Any]]:
@@ -763,6 +844,7 @@ def _variant_meta(
     autoscale: Mapping[str, Any] | None,
     autoscale_summary: Mapping[str, Any] | None,
     cpu_hpa: str | None,
+    waiting: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "epp_config": variant.epp_config,
@@ -782,6 +864,8 @@ def _variant_meta(
         "calls_per_pod": calls_per_pod(lines),
         "pod_switch_share": pod_switch_share(lines, starts),
         "max_gap_deviation_ms": max_gap_deviation(trace, lines),
+        # The replayer's own lag, which must not be credited to the variant (P5.1a-2).
+        "late_starts": dataclasses.asdict(late_starts(trace, lines, LATE_START_MS)),
         # The file name beside the results, None for a variant without the plugin.
         "picker_log": picker_log,
         # Each vLLM pod's log beside the results, None on simulated pods.
@@ -792,6 +876,28 @@ def _variant_meta(
         "autoscale_summary": autoscale_summary,
         # The file of the plain HPA's CPU reading, None but for the cpu autoscaler.
         "cpu_hpa": cpu_hpa,
+        # The waiting series' file and each burst's most waiting per pod; None without bursts.
+        "waiting": waiting,
+    }
+
+
+def _waiting_meta(
+    variant: Variant,
+    out: Outputs,
+    rows: Sequence[WaitingRow],
+    bursts: Sequence[float],
+) -> dict[str, Any]:
+    """The series beside the results, and the most waiting per pod within the window after each
+    burst: whether the load overloaded the pods (card 72's reading), printed, not judged."""
+    write_waiting_csv(out.waiting(variant.name), rows)
+    peaks = burst_peaks(rows, bursts, BURST_WAITING_WINDOW_SECONDS)
+    return {
+        "csv": out.waiting(variant.name).name,
+        "window_seconds": BURST_WAITING_WINDOW_SECONDS,
+        "peaks": [
+            {"burst_seconds": burst, "most_waiting": most}
+            for burst, most in zip(bursts, peaks, strict=True)
+        ],
     }
 
 
@@ -920,6 +1026,10 @@ def _run_variant(
         stalls = cluster.pod_stalls(started, ended, experiment.pod_stall_seconds)
         if stalls:
             raise ExperimentError(stall_text(variant.name, stalls, started))
+    bursts = burst_starts(experiment.pattern, experiment.seed)
+    waiting = None
+    if bursts:
+        waiting = _waiting_meta(variant, out, cluster.waiting(started, ended), bursts)
     meta = _variant_meta(
         variant,
         profile_sha256,
@@ -934,6 +1044,7 @@ def _run_variant(
         autoscale,
         summary,
         cpu_hpa,
+        waiting,
     )
     return lines, meta
 
@@ -957,6 +1068,7 @@ def run_experiment(
     profile_sha256 = {
         name: _file_sha256(REPO_ROOT / "config" / f"{name}.yaml") for name in experiment.profiles()
     }
+    source = source_state(SOURCE_ROOT)
     # Also now, and only for the profiles an autoscaler runs on, the only ones it is read for.
     timing = {
         variant.profile: _summary_inputs(variant.profile)
@@ -1066,6 +1178,10 @@ def run_experiment(
             "reference_variant": experiment.reference_variant,
             # Every replay was checked and had no pod stalled this long; None when not checked.
             "pod_stall_seconds": experiment.pod_stall_seconds,
+            # What the system code was at the start (P5.0); a square compares only files alike.
+            "source": source,
+            # When each burst of runs started, in seconds from the replay's start; empty without.
+            "bursts_seconds": burst_starts(experiment.pattern, experiment.seed),
             "variants": variants_meta,
         }
         if finished is not None:
@@ -1474,6 +1590,11 @@ class LiveCluster:
         tokens = self._prometheus(TOKENS_QUERY.format(window=seconds), since, until, step)
         return pod_stalls_from(busy, tokens, seconds, step)
 
+    def waiting(self, since: float, until: float) -> list[WaitingRow]:
+        """At the profile's scrape interval, as pod_stalls reads."""
+        step = self.profile["monitoring"]["scrape_interval_seconds"]
+        return waiting_rows_from(self._prometheus(WAITING_QUERY, since, until, step), since)
+
     def floor_autoscaler(self, kind: str) -> Mapping[str, Any]:
         """The kind is kept first, so a run that fails from here on stops the right objects. Until
         start_autoscaler there are none, and stop_autoscaler passes: helm's --ignore-not-found, and
@@ -1608,6 +1729,26 @@ def short_of_cache(rows: Sequence[CallRow]) -> tuple[int, int]:
     return short, len(checked)
 
 
+def _late_and_waiting_lines(extra: Mapping[str, Any]) -> list[str]:
+    late = extra["late_starts"]
+    largest = "-" if late["max_ms"] is None else late["max_ms"]
+    lines = [
+        f"  late starts: {late['calls']} calls more than {late['tolerance_ms']} ms after their "
+        f"gap, {late['total_ms'] / 1000:.1f} s in all, at most {largest} ms"
+    ]
+    waiting = extra["waiting"]
+    if waiting is not None:
+        peaks = "; ".join(
+            f"{peak['burst_seconds']:g} s "
+            + (", ".join(f"{most:g}" for most in peak["most_waiting"].values()) or "no reading")
+            for peak in waiting["peaks"]
+        )
+        lines.append(
+            f"  most waiting per pod within {waiting['window_seconds']} s after each burst: {peaks}"
+        )
+    return lines
+
+
 def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
     """The numbers to read first. Moved and stayed sit inside the KV split, as P2.4 asks: over the
     limit a call is slow wherever it goes, which must not read as the cost of moving."""
@@ -1630,6 +1771,7 @@ def report_lines(rows: Sequence[CallRow], meta: Mapping[str, Any]) -> list[str]:
             f"{extra['pod_switch_share']}; clock jumps {extra['clock_jumps']}; largest gap "
             f"deviation {extra['max_gap_deviation_ms']} ms"
         )
+        report += _late_and_waiting_lines(extra)
         generation = _number_text(summary.generation_ms_per_token)
         warmed = _number_text(warmed_ttft_ms(extra["warmup_ttft_ms"]))
         report.append(
@@ -1697,12 +1839,10 @@ def finish(
         print(f"experiment: wrote {out.validation}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="P2.5: run an experiment file.")
-    parser.add_argument("experiment", type=Path)
-    args = parser.parse_args()
-
-    spec = yaml.safe_load(args.experiment.read_text())
+def run_file(path: Path) -> None:
+    """One experiment file, from its checks to its report; make experiment-series runs each of its
+    files with this (P5.0)."""
+    spec = yaml.safe_load(path.read_text())
     names = dict.fromkeys(variant_profile(spec, section) for section in spec["variants"])
     profiles = {
         name: yaml.safe_load((REPO_ROOT / "config" / f"{name}.yaml").read_text()) for name in names
@@ -1710,7 +1850,7 @@ def main() -> None:
     check_same_replay(profiles, spec["pattern"])
     first = next(iter(profiles.values()))
     patterns = load_replay_config(first["replay"]).patterns
-    experiment = load_experiment(args.experiment, patterns)
+    experiment = load_experiment(path, patterns)
     check_routing(experiment, profiles)
     check_autoscaling(experiment, profiles)
     check_stall_window(experiment, profiles)
@@ -1721,6 +1861,12 @@ def main() -> None:
         finish(experiment, out, rows, meta)
 
     run_experiment(experiment, out, LiveCluster(experiment, profiles), time.time, finished)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="P2.5: run an experiment file.")
+    parser.add_argument("experiment", type=Path)
+    run_file(parser.parse_args().experiment)
 
 
 if __name__ == "__main__":

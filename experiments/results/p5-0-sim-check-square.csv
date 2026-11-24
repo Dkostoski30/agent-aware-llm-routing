@@ -1,0 +1,5 @@
+experiment,seed,position,variant,runs,finished_runs,failed_calls,total_run_ms,run_p50_ms,run_p95_ms,first_token_ms,generation_ms,hit_rate,moved,later_steps,late_starts,late_ms,weakest_burst_waiting,gap
+p5-0-sim-a-aa4b71ff5d10,6,1,default,46,46,0,355570,7850,16921,333065,163024,0.8315968668802212,112,483,0,0,2.0,
+p5-0-sim-a-aa4b71ff5d10,6,2,plugin,46,46,0,346720,6296,18088,321477,163331,0.8428680754033329,77,483,0,0,1.0,0.02488961385943696
+p5-0-sim-b-e7f3aaddbe75,9,1,plugin,45,45,0,338618,5675,17084,300617,166740,0.7906504414878053,88,396,0,0,0.0,-0.05509509684173792
+p5-0-sim-b-e7f3aaddbe75,9,2,default,45,45,0,320936,5242,17237,281638,166768,0.8034804689358833,79,396,0,0,0.0,

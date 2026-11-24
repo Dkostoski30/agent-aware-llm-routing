@@ -6,7 +6,14 @@ from typing import Any
 
 import pytest
 import yaml
-from load_generator.compare import differences, main, max_gap_deviation, plan_differences
+from load_generator.compare import (
+    LateStarts,
+    differences,
+    late_starts,
+    main,
+    max_gap_deviation,
+    plan_differences,
+)
 from load_generator.plan import (
     FanOut,
     Pattern,
@@ -166,6 +173,26 @@ def test_fanned_out_calls_each_compare_to_their_steps_trace_line() -> None:
 def test_the_largest_gap_deviation_is_reported() -> None:
     other = [line_of(step=1), line_of(step=2, gap_before_ms=33)]
     assert max_gap_deviation(TRACE, other) == 23
+
+
+def test_late_starts_are_the_calls_whose_gap_ran_over_the_traces_by_more_than_the_tolerance() -> (
+    None
+):
+    """P5.1a-2's replayer lag (card 73): a call that started later than its recorded gap by more
+    than the tolerance. Each counts by how much later than recorded, early ones not at all."""
+    other = [
+        line_of(step=1, gap_before_ms=80),
+        line_of(step=2, gap_before_ms=10 + TOLERANCE),
+        line_of(run="run-b-2", step=1, gap_before_ms=200),
+    ]
+    trace = [*TRACE, traced(run="run-b", step=1)]
+    assert late_starts(trace, other, TOLERANCE) == LateStarts(
+        tolerance_ms=TOLERANCE, calls=2, total_ms=280, max_ms=200
+    )
+
+
+def test_no_late_start_has_no_largest() -> None:
+    assert late_starts(TRACE, REPLAY, TOLERANCE) == LateStarts(TOLERANCE, 0, 0, None)
 
 
 # Against the plan: two replays that lost the same calls agree, so only the plan can show it.

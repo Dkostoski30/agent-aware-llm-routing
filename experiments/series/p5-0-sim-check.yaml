@@ -1,0 +1,7 @@
+# P5.0's done-when (docs/task-cards/73-P5.0-square-tooling.md): two simulated files, a 2x2 square, run by
+# make experiment-series NAME=p5-0-sim-check and compared by make square-compare SERIES=p5-0-sim-check.
+# The plugin is held to the default picker.
+reference: default
+files:
+  - p5-0-sim-a
+  - p5-0-sim-b

@@ -46,6 +46,7 @@ from load_generator.experiment import (
     check_same_replay,
     check_stall_window,
     count_clock_jumps,
+    file_outputs,
     finish,
     load_experiment,
     main,
@@ -58,12 +59,14 @@ from load_generator.experiment import (
     run_experiment,
     served_config_file,
     short_of_cache,
+    source_state,
     warm_pod,
     warmed_ttft_ms,
     windows_gpu_csv,
     write_results,
 )
 from load_generator.plan import (
+    Burst,
     Pattern,
     choose_runs,
     load_replay_config,
@@ -72,7 +75,10 @@ from load_generator.plan import (
     warmup_run,
 )
 from load_generator.record import experiment_hash
+from load_generator.report_config import load_report_config
 from load_generator.results import CallRow
+from load_generator.square_compare import load_series
+from load_generator.waiting import WaitingRow
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # What the fake cluster's autoscaler applies, and the series it then reads from Prometheus:
@@ -189,8 +195,12 @@ class FakeCluster:
         fail_autoscaler_start: bool = False,
         fail_windows_gpu_check: bool = False,
         windows_gpu_exit: int | None = None,
+        waiting_rows: Sequence[WaitingRow] = (),
     ) -> None:
         self.asked: list[str] = []
+        # The waiting series' asks, (since, until), apart from asked as the GPU log's are (P5.0).
+        self.waiting_asked: list[tuple[float, float]] = []
+        self.waiting_rows = waiting_rows
         # Windows' GPU memory log's steps, kept as the GPU log's are (P4.13c).
         self.windows_gpu: list[tuple[str, int]] = []
         self.fail_windows_gpu_check = fail_windows_gpu_check
@@ -326,6 +336,10 @@ class FakeCluster:
     def cpu_series(self, since: float, until: float) -> list[CpuRow]:
         self.asked.append(f"cpu series {since:.0f} {until:.0f}")
         return list(CPU_ROWS)
+
+    def waiting(self, since: float, until: float) -> list[WaitingRow]:
+        self.waiting_asked.append((since, until))
+        return list(self.waiting_rows)
 
 
 def ticking_clock() -> Callable[[], float]:
@@ -3756,3 +3770,285 @@ def test_the_heavy_check_runs_the_spikes_load_but_its_pattern() -> None:
     assert heavy.warmup.runs_discarded == sum(start < burst.every_seconds for start in starts)
     assert [variant.name for variant in heavy.variants] == ["default"]
     assert heavy.variants[0].default
+
+
+# P5.0 (card 73): the source a run started on, the replayer's late starts, and the calls waiting on
+# each pod after each burst, all in the .meta.json the squares' comparison reads.
+
+# Two runs: the first at 0 s, the second in the first burst at 1 s; the second burst's moment, 2 s,
+# is past the last run.
+BURST_PATTERN = Pattern(runs=2, rate_per_second=0.02, burst=Burst(1, 1), fan_out=None)
+REPORT_WINDOW = load_report_config().burst_waiting_window_seconds
+LATE_START = load_report_config().late_start_ms
+
+
+def burst_loaded(directory: Path) -> Experiment:
+    return load_experiment(experiment_file(directory), {"baseline": BURST_PATTERN})
+
+
+def test_each_replay_of_a_burst_pattern_keeps_its_waiting_series_and_each_bursts_peaks(
+    tmp_path: Path,
+) -> None:
+    experiment = burst_loaded(tmp_path)
+    out = outputs(experiment, tmp_path)
+    rows = [
+        WaitingRow(1.0, "pod-a", 3.0),
+        WaitingRow(30.0, "pod-b", 2.0),
+        # Past the window after the burst at 1 s.
+        WaitingRow(2.0 + REPORT_WINDOW, "pod-a", 9.0),
+    ]
+    cluster = FakeCluster(waiting_rows=rows)
+    _, meta = run_experiment(experiment, out, cluster, ticking_clock())
+    assert meta["bursts_seconds"] == [1.0]
+    for name in ("round-robin", "default"):
+        variant = meta["variants"][name]
+        assert variant["waiting"] == {
+            "csv": out.waiting(name).name,
+            "window_seconds": REPORT_WINDOW,
+            "peaks": [{"burst_seconds": 1.0, "most_waiting": {"pod-a": 3.0, "pod-b": 2.0}}],
+        }
+        with out.waiting(name).open() as file:
+            assert len(list(csv.DictReader(file))) == len(rows)
+    # Over each replay, from its start to its end.
+    assert cluster.waiting_asked == [
+        (meta["variants"][name]["started"], meta["variants"][name]["ended"])
+        for name in ("round-robin", "default")
+    ]
+
+
+def test_a_pattern_without_bursts_asks_for_no_waiting(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert meta["bursts_seconds"] == []
+    assert meta["variants"]["default"]["waiting"] is None
+    assert cluster.waiting_asked == []
+
+
+def test_each_variants_late_starts_are_in_the_meta(tmp_path: Path) -> None:
+    """Against the trace's gaps, at report.yaml's late_start_ms."""
+    experiment = loaded(tmp_path)
+    late = replay_lines()
+    # The trace's first steps have gap 0.
+    late[1]["gap_before_ms"] = LATE_START + 31
+    cluster = FakeCluster(replays={"robin": late})
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert meta["variants"]["round-robin"]["late_starts"] == {
+        "tolerance_ms": LATE_START,
+        "calls": 1,
+        "total_ms": LATE_START + 31,
+        "max_ms": LATE_START + 31,
+    }
+    assert meta["variants"]["default"]["late_starts"] == {
+        "tolerance_ms": LATE_START,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": None,
+    }
+
+
+def test_the_meta_names_the_source_the_run_started_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Of the repo the code was loaded from, read once, before any pod restarts: a run takes hours,
+    and the code may change meanwhile."""
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    read_at: list[tuple[Path, int]] = []
+    source = {"commit": "abc123", "uncommitted": ["loadgen/x.py"], "system_sha256": "f00"}
+
+    def source_state(root: Path) -> dict[str, Any]:
+        read_at.append((root, len(cluster.asked)))
+        return source
+
+    monkeypatch.setattr("load_generator.experiment.source_state", source_state)
+    _, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert meta["source"] == source
+    assert read_at == [(REPO_ROOT, cluster.asked.index("restart"))]
+
+
+def git(root: Path, *args: str) -> str:
+    done = subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    )
+    return done.stdout
+
+
+def repo(directory: Path) -> Path:
+    """A repo with a file of system code, an experiment file and a .gitignore, all committed."""
+    root = directory / "repo"
+    (root / "loadgen").mkdir(parents=True)
+    (root / "experiments").mkdir()
+    (root / "loadgen" / "a.py").write_text("one\n")
+    (root / "experiments" / "e.yaml").write_text("e\n")
+    (root / ".gitignore").write_text("__pycache__/\n")
+    git(root, "init", "-q")
+    git(root, "add", ".")
+    git(
+        root,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-qm",
+        "first",
+    )
+    return root
+
+
+def test_a_clean_repo_gives_its_commit_and_nothing_uncommitted(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    state = source_state(root)
+    assert state["commit"] == git(root, "rev-parse", "HEAD").strip()
+    assert state["uncommitted"] == []
+
+
+def test_an_edit_to_system_code_is_uncommitted_and_changes_its_hash(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    clean = source_state(root)["system_sha256"]
+    (root / "loadgen" / "a.py").write_text("two\n")
+    state = source_state(root)
+    assert state["uncommitted"] == ["loadgen/a.py"]
+    assert state["system_sha256"] != clean
+
+
+def test_an_edit_to_an_experiment_file_is_uncommitted_and_leaves_the_hash(tmp_path: Path) -> None:
+    """An experiment file carries its own hash (D11); what it ran on is the system code."""
+    root = repo(tmp_path)
+    clean = source_state(root)["system_sha256"]
+    (root / "experiments" / "e.yaml").write_text("changed\n")
+    state = source_state(root)
+    assert state["uncommitted"] == ["experiments/e.yaml"]
+    assert state["system_sha256"] == clean
+
+
+def test_a_new_file_of_system_code_changes_the_hash_and_an_ignored_one_does_not(
+    tmp_path: Path,
+) -> None:
+    root = repo(tmp_path)
+    clean = source_state(root)["system_sha256"]
+    (root / "loadgen" / "__pycache__").mkdir()
+    (root / "loadgen" / "__pycache__" / "a.pyc").write_bytes(b"\x00")
+    ignored = source_state(root)
+    assert ignored["system_sha256"] == clean
+    assert ignored["uncommitted"] == []
+    (root / "agent").mkdir()
+    (root / "agent" / "new.py").write_text("new\n")
+    state = source_state(root)
+    assert state["uncommitted"] == ["agent/new.py"]
+    assert state["system_sha256"] != clean
+
+
+def test_a_deleted_file_of_system_code_changes_the_hash(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    clean = source_state(root)["system_sha256"]
+    (root / "loadgen" / "a.py").unlink()
+    state = source_state(root)
+    assert state["uncommitted"] == ["loadgen/a.py"]
+    assert state["system_sha256"] != clean
+
+
+def test_the_report_gives_late_starts_and_the_waiting_after_each_burst(tmp_path: Path) -> None:
+    experiment = burst_loaded(tmp_path)
+    late = replay_lines()
+    late[1]["gap_before_ms"] = LATE_START + 1450
+    cluster = FakeCluster(
+        replays={"robin": late},
+        waiting_rows=[WaitingRow(5.0, "pod-a", 6.0), WaitingRow(5.0, "pod-b", 7.0)],
+    )
+    rows, meta = run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    report = "\n".join(report_lines(rows, meta))
+    assert (
+        f"late starts: 1 calls more than {LATE_START} ms after their gap, 1.5 s in all, "
+        f"at most {LATE_START + 1450} ms"
+    ) in report
+    assert f"most waiting per pod within {REPORT_WINDOW} s after each burst: 1 s 6, 7" in report
+
+
+def test_the_report_says_when_a_burst_had_no_reading(tmp_path: Path) -> None:
+    experiment = burst_loaded(tmp_path)
+    rows, meta = run_experiment(
+        experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
+    )
+    assert f"within {REPORT_WINDOW} s after each burst: 1 s no reading" in "\n".join(
+        report_lines(rows, meta)
+    )
+
+
+def test_the_live_cluster_asks_prometheus_for_the_waiting_at_the_scrape_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = loaded(tmp_path)
+    real = yaml.safe_load((REPO_ROOT / "config" / "real.yaml").read_text())
+    asked: list[tuple[str, ...]] = []
+
+    def kubectl(*args: str) -> str:
+        asked.append(args)
+        return prometheus_answer([series("pod-a", {200.0: 4.0})])
+
+    monkeypatch.setattr("load_generator.experiment.kubectl", kubectl)
+    found = LiveCluster(experiment, {"real": real}).waiting(170.5, 400.25)
+    assert found == [WaitingRow(29.5, "pod-a", 4.0)]
+    (args,) = asked
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(args[2]).query)
+    assert query["query"] == ["sum by (pod) (vllm:num_requests_waiting)"]
+    assert (query["start"], query["end"]) == (["170.500"], ["400.250"])
+    assert query["step"] == [str(real["monitoring"]["scrape_interval_seconds"])]
+
+
+P5_0_SIM = [REPO_ROOT / "experiments" / f"p5-0-sim-{name}.yaml" for name in ("a", "b")]
+P5_0_SERIES = REPO_ROOT / "experiments" / "series" / "p5-0-sim-check.yaml"
+
+
+def test_a_files_outputs_are_known_from_the_file_alone() -> None:
+    for path in P5_0_SIM:
+        assert file_outputs(path, REPO_ROOT) == outputs(committed(path), REPO_ROOT)
+
+
+def test_the_sim_check_is_a_two_by_two_square_of_the_squares_load() -> None:
+    """P5.0's done-when (card 73): the squares' trace and pattern on sim, seeds 6 and 9 (the first
+    two of test_replay_plan's SQUARE_SEEDS), the variants in opposite orders, the runs before the
+    first burst dropped in each."""
+    first, second = (committed(path) for path in P5_0_SIM)
+    heavy = committed(P5_1A_HEAVY)
+    for experiment in (first, second):
+        assert experiment.profile == "sim"
+        assert (experiment.trace, experiment.pattern_name) == (heavy.trace, heavy.pattern_name)
+        burst = experiment.pattern.burst
+        assert burst is not None
+        starts = start_times(experiment.pattern, experiment.seed)
+        assert experiment.warmup.runs_discarded == sum(
+            start < burst.every_seconds for start in starts
+        )
+        assert experiment.warmup.calls_per_pod == heavy.warmup.calls_per_pod
+    assert (first.seed, second.seed) == (6, 9)
+    names = [[variant.name for variant in experiment.variants] for experiment in (first, second)]
+    assert names == [["default", "plugin"], ["plugin", "default"]]
+    by_name = [
+        {variant.name: variant for variant in experiment.variants} for experiment in (first, second)
+    ]
+    assert by_name[0] == by_name[1]
+
+
+def test_the_sim_checks_plugin_is_the_squares_but_priority() -> None:
+    """The simulator has no priority scheduling (P4.1), which make experiment refuses."""
+    profiles = {"sim": yaml.safe_load((REPO_ROOT / "config" / "sim.yaml").read_text())}
+    for path in P5_0_SIM:
+        experiment = committed(path)
+        check_routing(experiment, profiles)
+        plugin = {variant.name: variant for variant in experiment.variants}["plugin"]
+        assert plugin.routing == {
+            "plugin": True,
+            "affinity": True,
+            "overload_guard": True,
+            "parallel_spill": True,
+        }
+
+
+def test_the_sim_check_series_runs_both_files_against_the_default() -> None:
+    series = load_series(P5_0_SERIES)
+    assert series.files == P5_0_SIM
+    assert series.reference == "default"

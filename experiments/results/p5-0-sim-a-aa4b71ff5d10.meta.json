@@ -1,0 +1,217 @@
+{
+  "experiment": "p5-0-sim-a",
+  "hash": "aa4b71ff5d10",
+  "profile": "sim",
+  "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": null,
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "source": {
+    "commit": "ea25ffd004828bcb3d690cb4ff7775b819af9a10",
+    "uncommitted": [
+      "Makefile",
+      "config/report.yaml",
+      "experiments/p5-0-sim-a.yaml",
+      "experiments/p5-0-sim-b.yaml",
+      "experiments/series/p5-0-sim-check.yaml",
+      "loadgen/load_generator/compare.py",
+      "loadgen/load_generator/experiment.py",
+      "loadgen/load_generator/plan.py",
+      "loadgen/load_generator/report_config.py",
+      "loadgen/load_generator/series.py",
+      "loadgen/load_generator/square_compare.py",
+      "loadgen/load_generator/waiting.py",
+      "loadgen/tests/test_compare.py",
+      "loadgen/tests/test_experiment.py",
+      "loadgen/tests/test_replay_plan.py",
+      "loadgen/tests/test_report_config.py",
+      "loadgen/tests/test_series.py",
+      "loadgen/tests/test_square_compare.py",
+      "loadgen/tests/test_waiting.py"
+    ],
+    "system_sha256": "304772fd0be14d05751cd3cf3618ccc7492fc532c07ae3fb31dc1b24c0f5d3ea"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+      "warmup_ttft_ms": {
+        "vllm-7759474986-cl4mx": [
+          193,
+          148,
+          148,
+          149,
+          148
+        ],
+        "vllm-7759474986-qhrgd": [
+          153,
+          149,
+          149,
+          149,
+          149
+        ]
+      },
+      "started": 1795523196.5590298,
+      "ended": 1795523693.6520622,
+      "clock_jumps": 0,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7759474986-qhrgd": 288,
+        "vllm-7759474986-cl4mx": 285
+      },
+      "pod_switch_share": 0.28146853146853146,
+      "max_gap_deviation_ms": 5,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-0-sim-a-aa4b71ff5d10-default-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-7759474986-cl4mx": 5.0,
+              "vllm-7759474986-qhrgd": 8.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-7759474986-cl4mx": 5.0,
+              "vllm-7759474986-qhrgd": 5.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-7759474986-cl4mx": 3.0,
+              "vllm-7759474986-qhrgd": 2.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-7759474986-cl4mx": 2.0,
+              "vllm-7759474986-qhrgd": 2.0
+            }
+          }
+        ]
+      }
+    },
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true
+      },
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+      "warmup_ttft_ms": {
+        "vllm-7656cdc8b4-2r9nl": [
+          152,
+          149,
+          149,
+          148,
+          149
+        ],
+        "vllm-7656cdc8b4-9fjv2": [
+          150,
+          148,
+          148,
+          149,
+          148
+        ]
+      },
+      "started": 1795523918.2902608,
+      "ended": 1795524416.159154,
+      "clock_jumps": 0,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7656cdc8b4-9fjv2": 293,
+        "vllm-7656cdc8b4-2r9nl": 280
+      },
+      "pod_switch_share": 0.270979020979021,
+      "max_gap_deviation_ms": 4,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": "p5-0-sim-a-aa4b71ff5d10-plugin-picker.log",
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-0-sim-a-aa4b71ff5d10-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-7656cdc8b4-2r9nl": 5.0,
+              "vllm-7656cdc8b4-9fjv2": 4.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-7656cdc8b4-2r9nl": 4.0,
+              "vllm-7656cdc8b4-9fjv2": 6.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-7656cdc8b4-2r9nl": 0.0,
+              "vllm-7656cdc8b4-9fjv2": 1.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-7656cdc8b4-2r9nl": 3.0,
+              "vllm-7656cdc8b4-9fjv2": 0.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

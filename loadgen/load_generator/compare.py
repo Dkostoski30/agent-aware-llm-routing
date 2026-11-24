@@ -16,6 +16,7 @@ Usage: python -m load_generator.compare TRACE PATTERN FIRST SECOND [--profile re
 import argparse
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -142,6 +143,32 @@ def max_gap_deviation(trace: Sequence[Line], lines: Sequence[Line]) -> int:
         (abs(line["gap_before_ms"] - call["gap_before_ms"]) for line, call in recorded if call),
         default=0,
     )
+
+
+@dataclass(frozen=True)
+class LateStarts:
+    """The calls a replay started later than their recorded gap by more than tolerance_ms, and by
+    how much later in all and at most; None with none (P5.1a-2, card 73)."""
+
+    tolerance_ms: int
+    calls: int
+    total_ms: int
+    max_ms: int | None
+
+
+def late_starts(trace: Sequence[Line], lines: Sequence[Line], tolerance_ms: int) -> LateStarts:
+    """With no retries a call starts right after its gap's sleep, so a late one is the replayer's
+    own lag, which must not be credited to the variant it ran for. An early one cannot be."""
+    traced = _traced_calls(trace)
+    late = []
+    for line in lines:
+        call = _traced_call(traced, line)
+        if call is None:
+            continue
+        lateness: int = line["gap_before_ms"] - call["gap_before_ms"]
+        if lateness > tolerance_ms:
+            late.append(lateness)
+    return LateStarts(tolerance_ms, len(late), sum(late), max(late, default=None))
 
 
 def _read_lines(path: Path, validator: Draft202012Validator) -> list[dict[str, Any]]:

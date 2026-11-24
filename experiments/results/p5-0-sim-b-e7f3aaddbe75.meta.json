@@ -1,0 +1,225 @@
+{
+  "experiment": "p5-0-sim-b",
+  "hash": "e7f3aaddbe75",
+  "profile": "sim",
+  "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 9,
+  "runs_discarded": 5,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": null,
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "source": {
+    "commit": "ea25ffd004828bcb3d690cb4ff7775b819af9a10",
+    "uncommitted": [
+      "Makefile",
+      "config/report.yaml",
+      "experiments/graphs/p5-0-sim-a-aa4b71ff5d10.png",
+      "experiments/p5-0-sim-a.yaml",
+      "experiments/p5-0-sim-b.yaml",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10-default-waiting.csv",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10-default.jsonl",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10-plugin-picker.log",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10-plugin-waiting.csv",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10-plugin.jsonl",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10.csv",
+      "experiments/results/p5-0-sim-a-aa4b71ff5d10.meta.json",
+      "experiments/series/p5-0-sim-check.yaml",
+      "loadgen/load_generator/compare.py",
+      "loadgen/load_generator/experiment.py",
+      "loadgen/load_generator/plan.py",
+      "loadgen/load_generator/report_config.py",
+      "loadgen/load_generator/series.py",
+      "loadgen/load_generator/square_compare.py",
+      "loadgen/load_generator/waiting.py",
+      "loadgen/tests/test_compare.py",
+      "loadgen/tests/test_experiment.py",
+      "loadgen/tests/test_replay_plan.py",
+      "loadgen/tests/test_report_config.py",
+      "loadgen/tests/test_series.py",
+      "loadgen/tests/test_square_compare.py",
+      "loadgen/tests/test_waiting.py"
+    ],
+    "system_sha256": "304772fd0be14d05751cd3cf3618ccc7492fc532c07ae3fb31dc1b24c0f5d3ea"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true
+      },
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+      "warmup_ttft_ms": {
+        "vllm-58749bbbcf-tzpjd": [
+          153,
+          148,
+          148,
+          148,
+          148
+        ],
+        "vllm-58749bbbcf-x4pzr": [
+          151,
+          148,
+          149,
+          149,
+          147
+        ]
+      },
+      "started": 1795524713.403884,
+      "ended": 1795525204.4890962,
+      "clock_jumps": 5,
+      "calls": 474,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-58749bbbcf-tzpjd": 254,
+        "vllm-58749bbbcf-x4pzr": 220
+      },
+      "pod_switch_share": 0.27061310782241016,
+      "max_gap_deviation_ms": 3,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": "p5-0-sim-b-e7f3aaddbe75-plugin-picker.log",
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-0-sim-b-e7f3aaddbe75-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-58749bbbcf-tzpjd": 3.0,
+              "vllm-58749bbbcf-x4pzr": 3.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-58749bbbcf-tzpjd": 2.0,
+              "vllm-58749bbbcf-x4pzr": 4.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-58749bbbcf-tzpjd": 8.0,
+              "vllm-58749bbbcf-x4pzr": 5.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-58749bbbcf-tzpjd": 0.0,
+              "vllm-58749bbbcf-x4pzr": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "77d0d70514e415c8665fd9112ce53249114df15a38baaf54d96a9805ddc38323",
+      "warmup_ttft_ms": {
+        "vllm-849d4cbddb-224rl": [
+          150,
+          148,
+          148,
+          148,
+          148
+        ],
+        "vllm-849d4cbddb-7xc65": [
+          150,
+          147,
+          148,
+          148,
+          147
+        ]
+      },
+      "started": 1795525435.659327,
+      "ended": 1795525925.9441671,
+      "clock_jumps": 6,
+      "calls": 474,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-849d4cbddb-224rl": 238,
+        "vllm-849d4cbddb-7xc65": 236
+      },
+      "pod_switch_share": 0.35306553911205074,
+      "max_gap_deviation_ms": 2,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-0-sim-b-e7f3aaddbe75-default-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-849d4cbddb-224rl": 4.0,
+              "vllm-849d4cbddb-7xc65": 3.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-849d4cbddb-224rl": 3.0,
+              "vllm-849d4cbddb-7xc65": 0.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-849d4cbddb-224rl": 5.0,
+              "vllm-849d4cbddb-7xc65": 6.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-849d4cbddb-224rl": 0.0,
+              "vllm-849d4cbddb-7xc65": 0.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -13,6 +13,8 @@ SETTINGS = {
     "fewest_tokens_for_speed": 5,
     "runs_left_out": [2, 5],
     "pressure_bucket_edges": [0.75, 1.0, 1.25],
+    "burst_waiting_window_seconds": 60,
+    "late_start_ms": 50,
     "graph": {
         "bar_height": 0.3,
         "value_gap": 0.02,
@@ -34,6 +36,8 @@ def test_the_file_gives_the_settings(tmp_path: Path) -> None:
     assert config.fewest_tokens_for_speed == 5
     assert config.runs_left_out == (2, 5)
     assert config.pressure_bucket_edges == (0.75, 1.0, 1.25)
+    assert config.burst_waiting_window_seconds == 60
+    assert config.late_start_ms == 50
     assert config.graph == GraphLayout(
         bar_height=0.3,
         value_gap=0.02,
@@ -52,6 +56,27 @@ def test_a_missing_setting_is_an_error(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump({"runs_left_out": [2]}))
     with pytest.raises(KeyError):
         load_report_config(path)
+
+
+@pytest.mark.parametrize("window", [0, 2.5, "60"])
+def test_the_window_after_a_burst_is_whole_seconds_over_zero(
+    tmp_path: Path, window: object
+) -> None:
+    with pytest.raises(ReportConfigError, match="burst_waiting_window_seconds"):
+        load_report_config(written(tmp_path, burst_waiting_window_seconds=window))
+
+
+@pytest.mark.parametrize("late", [-1, 2.5])
+def test_a_late_start_is_whole_milliseconds(tmp_path: Path, late: object) -> None:
+    with pytest.raises(ReportConfigError, match="late_start_ms"):
+        load_report_config(written(tmp_path, late_start_ms=late))
+
+
+@pytest.mark.parametrize("profile", ["real", "real-plain", "sim", "demo"])
+def test_a_late_start_is_what_each_profile_holds_a_replays_gaps_to(profile: str) -> None:
+    replay = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["replay"]
+    late = load_report_config(REPO_ROOT / "config" / "report.yaml").late_start_ms
+    assert late == replay["gap_tolerance_ms"]
 
 
 @pytest.mark.parametrize("fewest", [1, 0, 2.5])
