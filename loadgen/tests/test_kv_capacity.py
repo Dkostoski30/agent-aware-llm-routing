@@ -11,7 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPERIMENTS = sorted((REPO_ROOT / "experiments").glob("*.yaml"))
 # Files that run on simulated pods but count "over" against a real pod's cache, so a call is
 # over when it would wait for KV blocks on real vLLM; each says so in its comment (P2.9, P3.1).
-MEASURED_AGAINST_REAL = {"self-built-check.yaml", "validate-sim.yaml"}
+# validate-sim-2pods.yaml takes validate-sim's (P4.13c).
+MEASURED_AGAINST_REAL = {"self-built-check.yaml", "validate-sim.yaml", "validate-sim-2pods.yaml"}
 
 
 def load(path: Path) -> Any:

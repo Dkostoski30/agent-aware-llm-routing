@@ -3414,7 +3414,9 @@ def test_one_at_a_time_restarts_one_pod_and_adds_the_others_before_the_warm_up(
 
 
 def test_each_variants_meta_says_how_its_pods_started(tmp_path: Path) -> None:
-    experiment = loaded(tmp_path, variants=[{**TWO_PODS, "start": "one_at_a_time"}, DEFAULT_VARIANT])
+    experiment = loaded(
+        tmp_path, variants=[{**TWO_PODS, "start": "one_at_a_time"}, DEFAULT_VARIANT]
+    )
     _, meta = run_experiment(
         experiment, outputs(experiment, tmp_path), FakeCluster(), ticking_clock()
     )

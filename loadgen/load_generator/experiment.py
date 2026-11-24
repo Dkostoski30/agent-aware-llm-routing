@@ -186,8 +186,8 @@ WINDOWS_GPU_COUNTERS = (
     "\\GPU Adapter Memory(*)\\Dedicated Usage",
     "\\GPU Adapter Memory(*)\\Shared Usage",
 )
-# typeperf names each column \\<computer>\<counter>; the name is dropped, so the committed results do
-# not carry it.
+# typeperf names each column \\<computer>\<counter>; the name is dropped, so the committed results
+# do not carry it.
 COMPUTER_IN_COLUMN = re.compile(r'"\\\\[^\\"]+\\')
 # How a variant's pods start (P4.13c). Together: the restart recreates every pod at once, as the
 # Deployment is Recreate. One at a time: each pod after the first starts beside a Ready one, as an
