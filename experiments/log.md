@@ -13,6 +13,39 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-24 · Gate 4 · green with stated limits (feature freeze: every Phase 4 row built and working end to end)
+Command: the user, on `bf79164`: `make test`, `make lint`, `make up`, `make smoke`. The rows are read from the Phase 4 entries below.
+Result:
+- **`make test`:** 3,323 Python tests, Go `gateway/...`, 22 training tests and 258 UI specs, 0 failed. **`make lint`:** every hook passed.
+- **`make smoke`, on real with adapter `e03c0981507c`:** every layer ok.
+  - Pods: vllm 2/2, gateway, picker, redis, agent and app.
+  - A chat run through the app (`run-14603b4042c8`, "What is 7 times 8?") ended done in 5 s: "7 times 8 is 56". It took 3 steps, step 1's pick included.
+  - The gateway logged the run's 3 steps, and the picker made 3 picks. Redis held status done at step 3, and Prometheus had samples from both vLLM pods.
+- **Every Phase 4 row works, with the evidence its own entry gives:**
+
+| Row | What works | Evidence |
+|---|---|---|
+| P4.1 | priority by the run's share of steps left, with aging | `make priority-check`, real: with priority on, a last step went ahead of all six waiting first steps; off, of none |
+| P4.2 | warm-up routing to new pods | sim burst: 14 of 14 first calls to a new pod while one was new (off: 8 of 14) |
+| P4.3 | drain on scale-down | real 2 -> 1: 0 interrupted runs with it, 2 without |
+| P4.4 | failover: calls sent again, runs resumed from Redis | sim kill: 30 of 30 runs with it, 27 without; real: 5 live runs through a vLLM kill and 5 through an agent kill |
+| P4.5 | the autoscalers at real 1↔2 | the same ranking as on the simulator: remaining work rose at 85.0 s against the queue's 95.0 s, losing 1 run against 10 |
+| P4.6 | demo buttons Start and Kill, `retry N` and `resumed` tags | 20 of 20 runs through two kills; a chat step read `retry 1` on the other pod |
+| P4.7 | the 3 demo scenarios through the chat | csv 8/10, contracts 10/10, support 10/10; step 1 right in 30/30 |
+| P4.8, P4.8b | routing step (D13) and chat history in a token budget | real held-out 168/168 in both modes, go/no-go 10/10; demo's chat showed `Scenario · csv`; the demo trace recorded again with the pick |
+| P4.9-P4.12 | cache pressure measured, exported, shown and scaled on | first-token median 0.4 s under 0.75 up to 23.1 s at 3 and over; `make context-check` 267 of 267 scrapes; the panel matched Grafana; KEDA on context tokens: target passed at 60 s, scaled at 100 s, second pod Ready at 265 s |
+| P4.13-P4.13c | CUDA graphs in real, real-plain and demo | real 12.4-12.5 ms per token (eager 200.9); the 2-pod stall not reproduced in three replays |
+
+- **Stated limits, for chapter 6 and Phase 5:**
+  - P4.7: csv 8/10. `two-step` was wrong in both seeds, with the right product and the wrong revenue. It is the untrained 1.7B's miss, the same as in demo's go/no-go since P4.13b (the user, 2026-11-24: logged, no new task).
+  - P4.13b-c: the simulator's timings miss real's. At 2 pods they miss by 17-68% and only the hit rate is within; at 1 pod, run completion p50 misses by 19.8% and TTFT p50 by 16.9%. So simulated p95 figures stay labelled optimistic (Gate 2). P4.13b's 2-pod stall has no known cause and was not seen again.
+  - P4.2: with warm-up on, run completion p50 was worse (56.6 s against 41.8 s), and a burst's 5 runs went whole to one new pod. Not run on real pods.
+  - P4.12: the second pod was Ready 15 s after the second burst, so 10 of 26 kept runs failed at the deadline. P4.5: run time p50 does not separate the four autoscalers, and the queue idled most although it scaled last (cause not found).
+  - P4.2-P4.5 and P4.12 ran one seed each. Phase 5 repeats the comparisons.
+Notes:
+- PLAN.md dated the freeze Sun 22.11. It closes on 24.11 because Phase 4 had no slip order (the user, 2026-11-19: build every row), and P4.13-P4.13c and P4.8b were added within it. Phase 5's 23-29.11 starts two days late.
+- From here on, only bug fixes.
+
 ### 2026-11-24 · P4.7 · red on csv (csv 8/10, contracts 10/10, support 10/10; logged as a limit of the untrained 1.7B)
 Command: Claude: card 71, tests first (`experiments/tests/test_task_suite.py`, 12 tests) · the user, one unattended block after P4.8b's checks: `make down`, `make up PROFILE=demo`, `make task-suite` (suite hash b963193f1d3a, agent `c5cf306f32ee`)
 Result (`task-suite-b963193f1d3a-c5cf306f32ee.csv`), 5 questions x 2 seeds per scenario, one message in a new chat each, through the app backend:

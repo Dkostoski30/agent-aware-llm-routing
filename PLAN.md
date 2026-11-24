@@ -211,7 +211,7 @@ Order (2026-11-09): routing P3.1 → P3.2 → P3.3 → P3.4 → P3.5 → P3.6 �
 
 Cache pressure (added 2026-11-16: Claude's proposal, planned at the user's request; sources in `docs/thesis/sources.md`): P4.9 → P4.10 → P4.11 → P4.12. P4.9 needs no cluster and P4.10's code none, so both can be written while a replay runs; P4.11 waits for P3.11, and P4.12 comes before P4.5, which can then run it beside its three. None is on Gate 4. If the week runs over they drop in this order: P4.12, P4.11, P4.10, P4.9; a dropped one goes to chapter 7 as future work, since the freeze on 22.11 does not move. The P4.5 and P5.2 rows are unchanged until P4.12 has a result.
 
-**Gate 4 = feature freeze (Sun 22.11).** Everything works end to end. From here on, only bug fixes.
+**Gate 4 = feature freeze (Sun 22.11).** Everything works end to end. From here on, only bug fixes. Closed 2026-11-24, green with stated limits: `make test`, `make lint` and `make smoke` green on real with adapter `e03c0981507c`, every Phase 4 row built; limits: P4.7's csv 8/10 (`two-step` on the untrained 1.7B), the simulator's timings against real (P4.13b-c), and one seed per autoscaling result (`experiments/log.md`).
 
 ### Phase 5: Experiments (23–29.11)
 
