@@ -9,6 +9,7 @@ the converter (D12).
 
 import hashlib
 import json
+import re
 import zlib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -48,7 +49,6 @@ from load_generator.plan import (
     build_plan,
     load_replay_config,
     load_trace,
-    served_model,
 )
 from load_generator.record import RecordError, check_line, trace_validator
 
@@ -1114,11 +1114,14 @@ def test_a_converted_traces_meta_names_the_tokenizer_and_the_dataset(trace: Path
     assert trace == output_path(spec)
     meta = json.loads(trace.with_suffix(".meta.json").read_text())
     model = yaml.safe_load((REPO_ROOT / "config" / f"{spec.profile}.yaml").read_text())["model"]
-    assert meta["model"] == {
+    # The base model's name and revision are the tokenizer that counted the tokens. The adapter
+    # served then may be an older one than the profile's (P4.8b retrained it): a LoRA adapter
+    # leaves the tokenizer as it is. Its name has the form make vllm-deploy accepts (P2.11).
+    assert {key: meta["model"][key] for key in ("name", "revision")} == {
         "name": model["name"],
         "revision": model["revision"],
-        "served_as": served_model(model),
     }
+    assert re.fullmatch(r"thesis-[0-9a-f]{12}", meta["model"]["served_as"])
     assert meta["dataset_revision"] == spec.revision
     assert meta["max_model_len"] == model["max_model_len"]
 

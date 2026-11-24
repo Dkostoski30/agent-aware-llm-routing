@@ -37,15 +37,16 @@ spike:
   learning_rate: 0.0001
 # The generated data the run trains on: experiments/finetune-data.yaml and the hash make finetune-data printed for it.
 # Training refuses other data, so the adapter learns from the data whose held-out split the baseline was scored on
-# (experiments/log.md, P1.7 step 2; P2.1b's data with the support and contracts kinds, 2026-11-01).
+# (experiments/log.md, P1.7 step 2; P2.1b's data with the support and contracts kinds, 2026-11-01; P4.8b's with step
+# 1's scenario pick and earlier chat turns, 2026-11-23, its held-out split the same questions as P2.1b's).
 data:
   experiment: experiments/finetune-data.yaml
-  hash: 091b52c4a457
+  hash: b631851a43e6
 # The training run (P1.7 step 3). It trains one example at a time: the examples differ in length, and one needs no
 # padding; step 1 measured that size.
 train:
-  # Passes over the 5200 examples (P2.1b; 3196 in P1.7), ~1 h 45 min each: P1.7's 2.86 M tokens took 2 h 01 min for
-  # two passes, and these are 4.94 M. One pass is often too few for a format the base model gets wrong in every run
+  # Passes over the 7400 examples (P4.8b; 5200 in P2.1b, 3196 in P1.7), about 1 h 50 min each: P1.7's 2.86 M tokens
+  # took 2 h 01 min for two passes, and these are 5.17 M (P2.1b's 4.94 M). One pass is often too few for a format the base model gets wrong in every run
   # (two-step, arithmetic and off-topic were 0/14 in P1.7's baseline); more passes make the model likelier to repeat the
   # training questions than to learn the format.
   epochs: 2
@@ -54,8 +55,8 @@ train:
   # Share of the optimizer steps over which the rate climbs from 0; then it falls linearly to 0 at the end. The first
   # steps' gradients are large (the base model's formats are wrong), and this keeps them from throwing the adapter far.
   warmup: 0.05
-  # Examples per optimizer step: 16 spans several kinds and modes, so no step pulls towards one format. 5200 / 16 = 325
-  # optimizer steps per epoch.
+  # Examples per optimizer step: 16 spans several kinds and modes, so no step pulls towards one format. 7400 / 16 = 463
+  # optimizer steps per epoch (P2.1b: 325).
   gradient_accumulation: 16
   # model.max_model_len of the served profile: no prompt the runtime sends is longer. A longer example is refused, not
   # cut, since a cut prompt is one vLLM never sends (the longest is 1533 tokens in P2.1b's data, experiments/log.md).

@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -253,6 +253,12 @@ grafana:
 # EXPERIMENT picks another experiment file: experiments/real-go-no-go.yaml asks the same on the real profile (P1.7).
 go-no-go:
 	uv run --locked python experiments/go_no_go.py $(or $(EXPERIMENT),experiments/demo-go-no-go.yaml)
+
+# P4.7: each demo scenario's questions (experiments/task-suite.yaml) once per seed through the chat path, one message
+# in a new chat each, scored like the go-no-go; one CSV row per run in experiments/results/ and the success table. Needs
+# make up PROFILE=demo; 30 runs, about 30-45 min.
+task-suite:
+	uv run --locked python experiments/task_suite.py experiments/task-suite.yaml
 
 # LoRA training steps of the base model at each length in experiments/finetune-train.yaml: template check, peak VRAM,
 # s/step; saves the spike's adapter (P1.7 step 1). Needs the cluster down (make down); the training environment is

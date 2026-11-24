@@ -1,0 +1,104 @@
+# P4.7: the practical task suite (docs/task-cards/71-P4.7-task-suite.md). Each demo scenario's questions, every seed, as
+# one message in a new chat through the app backend, on the demo model; scored like the go/no-go (experiments/go_no_go.py).
+# Run with make task-suite after make up PROFILE=demo; 30 runs, about 30-45 min. The table goes into the thesis as the
+# proof of practical use, whatever it shows.
+# The cluster's profile; make task-suite refuses an agent serving another model. Its agent.tool_choice is the mode: the
+# go/no-go chose it.
+profile: demo
+# Two seeds per question, as the go/no-go has: 5 questions x 2 seeds = 10 runs per scenario (the user, 2026-11-23).
+seeds: [1, 2]
+# A scenario passes with this many right of its 10 (PLAN.md P4.7).
+threshold: 9
+# One entry per demo scenario, named as step 1 picks it (D13). Each question's files are its scenario's; a file's path is
+# relative to this file, and a text file needs type: text. A question is go_no_go's Question: expected_calls are calls
+# a correct run makes (a tool, and the arguments it must have), expected how the answer is scored: a number computed
+# from the scenario's CSV, or texts the answer contains, case and spacing aside (the generator's convention for the same
+# kinds, experiments/finetune_data.py). A date is quoted, or YAML reads it as a date, not text.
+scenarios:
+  csv:
+    files:
+      - {id: sales, name: sales.csv, path: data/sales.csv}
+    # The go/no-go's five, as experiments/demo-go-no-go.yaml has them (a test holds them equal). two-step was wrong in
+    # 4 of 4 of P4.8's demo go/no-go runs; it stays (the user, 2026-11-23).
+    questions:
+      - id: summary
+        text: What is the average revenue per row in sales.csv?
+        expected_calls: [{tool: csv_summary}]
+        expected: {kind: aggregate, agg: mean, value: revenue}
+      - id: group-total
+        text: What is the total revenue of the North region in sales.csv?
+        expected_calls: [{tool: group_by}]
+        expected: {kind: aggregate, agg: sum, value: revenue, group: {by: region, equals: North}}
+      - id: group-mean
+        text: What is the average number of units per row for the product Gadget in sales.csv?
+        expected_calls: [{tool: group_by}]
+        expected: {kind: aggregate, agg: mean, value: units, group: {by: product, equals: Gadget}}
+      - id: compare
+        text: How much more total revenue did the North region make than the South region in sales.csv?
+        expected_calls: [{tool: compare}]
+        wrong_if_matches: '\bnorth\b(?:[^.]|\.\d)*\b(?:less|lower|fewer|smaller)(?:\s+\w+){0,2}\s+than\b|\bsouth\b(?:[^.]|\.\d)*\b(?:more|higher|greater|larger)(?:\s+\w+){0,2}\s+than\b'
+        expected: {kind: difference, agg: sum, value: revenue, by: region, left: South, right: North}
+      - id: two-step
+        text: Which product sold the most units in total in sales.csv, and what is that product's total revenue?
+        expected_calls: [{tool: group_by, arguments: {by: product, value: units, agg: sum}}]
+        expected:
+          kind: of_top_group
+          by: product
+          rank: {agg: sum, value: units}
+          agg: sum
+          value: revenue
+  contracts:
+    files:
+      - {id: contract-2025, name: contract-2025.txt, type: text, path: ../agent/tests/fixtures/contract-2025.txt}
+      - {id: contract-2026, name: contract-2026.txt, type: text, path: ../agent/tests/fixtures/contract-2026.txt}
+    # record-demo's four, and a second clause text. A diff's answer holds the newer version's value, a clause text's the
+    # clause's value (the generator's clause-diff and clause-text kinds).
+    questions:
+      - id: termination-diff
+        text: What changed in the termination clause between contract-2025.txt and contract-2026.txt?
+        expected_calls: [{tool: diff_clauses, arguments: {clause: termination}}]
+        expected: {kind: contains, texts: [60 days]}
+      - id: fees-diff
+        text: Compare the fees clause of contract-2025.txt and contract-2026.txt.
+        expected_calls: [{tool: diff_clauses, arguments: {clause: fees}}]
+        expected: {kind: contains, texts: ["1,350 EUR"]}
+      - id: confidentiality-text
+        text: What does the confidentiality clause of contract-2026.txt say?
+        expected_calls: [{tool: extract_clauses, arguments: {file: contract-2026, clause: confidentiality}}]
+        expected: {kind: contains, texts: [two years]}
+      - id: services-text
+        text: Read me the services clause in contract-2025.txt.
+        expected_calls: [{tool: extract_clauses, arguments: {file: contract-2025, clause: services}}]
+        expected: {kind: contains, texts: [monthly sales report]}
+      - id: termination-text
+        text: What does the termination clause of contract-2026.txt say?
+        expected_calls: [{tool: extract_clauses, arguments: {file: contract-2026, clause: termination}}]
+        expected: {kind: contains, texts: [60 days]}
+  support:
+    files:
+      - {id: orders, name: orders.csv, path: ../agent/tests/fixtures/orders.csv}
+      - {id: policies, name: policies.txt, type: text, path: ../agent/tests/fixtures/policies.txt}
+    # record-demo's four, and a second order status. A reply holds the order, the policy's section and its deadline (a
+    # delivered order under a calendar-day rule), as the generator's reply kind; a status the order's status; a policy
+    # its rule.
+    questions:
+      - id: returns-reply
+        text: A customer asks about our returns policy for order 1041. Write the reply.
+        expected_calls: [{tool: draft_reply, arguments: {order_id: "1041", topic: returns}}]
+        expected: {kind: contains, texts: ["1041", Returns, "2026-11-05"]}
+      - id: damaged-reply
+        text: Draft a reply for order 1042 that applies our damaged items policy.
+        expected_calls: [{tool: draft_reply, arguments: {order_id: "1042", topic: damaged items}}]
+        expected: {kind: contains, texts: ["1042", Damaged items, "2026-10-29"]}
+      - id: status-1043
+        text: What is the status of order 1043?
+        expected_calls: [{tool: get_order, arguments: {order_id: "1043"}}]
+        expected: {kind: contains, texts: [shipped]}
+      - id: status-1041
+        text: What is the status of order 1041?
+        expected_calls: [{tool: get_order, arguments: {order_id: "1041"}}]
+        expected: {kind: contains, texts: [delivered]}
+      - id: refunds-policy
+        text: What does the refunds policy say?
+        expected_calls: [{tool: get_policy, arguments: {topic: refunds}}]
+        expected: {kind: contains, texts: [5 working days]}

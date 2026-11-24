@@ -325,9 +325,10 @@ def apply_profile(text: str) -> None:
         kubectl("wait", "--for=delete", *old_pods, f"--timeout={ROLLOUT_TIMEOUT}")
 
 
-def ready_pod_ip(pods: Mapping[str, Any]) -> str:
-    """The IP of the one Ready agent pod that is not being deleted, from kubectl get pods -o json.
-    The Deployment has one replica, so anything else means the switch is not finished."""
+def ready_pod_ip(pods: Mapping[str, Any], deployment: str = "agent") -> str:
+    """The IP of the one Ready pod of deployment that is not being deleted, from kubectl get pods
+    -o json. The agent and app Deployments have one replica each, so anything else means a switch
+    or a rollout is not finished."""
     ready = [
         item["status"]["podIP"]
         for item in pods["items"]
@@ -338,7 +339,7 @@ def ready_pod_ip(pods: Mapping[str, Any]) -> str:
         )
     ]
     if len(ready) != 1:
-        raise RuntimeError(f"expected one Ready agent pod, found {len(ready)}")
+        raise RuntimeError(f"expected one Ready {deployment} pod, found {len(ready)}")
     ip: str = ready[0]
     return ip
 

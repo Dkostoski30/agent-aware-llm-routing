@@ -39,7 +39,7 @@ from load_generator.record import REPO_ROOT
 PROFILES = ["real", "real-plain", "demo", "sim"]
 TOKEN = "f" * 64
 STARTED = datetime(2026, 11, 20, 21, 5, 3, 250_000, tzinfo=UTC)
-TRACE = "experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
+TRACE = "experiments/results/traces/record-demo-e1044feb534c-c5cf306f32ee-e03c0981507c.jsonl"
 OUT = "experiments/results/replays/demo-steady-20261120T210503.jsonl"
 POD_A = "vllm-568fc4b669-c9kb2"
 POD_B = "vllm-568fc4b669-fgdgm"

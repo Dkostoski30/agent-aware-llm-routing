@@ -13,6 +13,48 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-24 · P4.7 · red on csv (csv 8/10, contracts 10/10, support 10/10; logged as a limit of the untrained 1.7B)
+Command: Claude: card 71, tests first (`experiments/tests/test_task_suite.py`, 12 tests) · the user, one unattended block after P4.8b's checks: `make down`, `make up PROFILE=demo`, `make task-suite` (suite hash b963193f1d3a, agent `c5cf306f32ee`)
+Result (`task-suite-b963193f1d3a-c5cf306f32ee.csv`), 5 questions x 2 seeds per scenario, one message in a new chat each, through the app backend:
+
+| Scenario | Right | Step 1 picked | Calls per run | Duration |
+|---|---|---|---|---|
+| csv | **8/10** | csv 10 | 4-6 | 2.1-5.2 s |
+| contracts | 10/10 | contracts 10 | 3 | 2.1-3.1 s |
+| support | 10/10 | support 10 | 4-6 | 3.1-7.1 s |
+
+- No-go on csv, below the 9/10 bar. Every pick was right, and no run made an invalid call. The 30 runs took 1.7 min.
+- **Both misses are `two-step`** (seeds 1 and 2): "Widget sold the most units ... (617) ... total revenue ... 2224.0", against 15,116.5. The product and its units are right and the revenue is not. This is the question demo also got wrong in P4.8's and P4.13b's go/no-go.
+- The scorer passed two loose answers. "What is the status of order 1043?" (seed 2) got a whole reply draft, and "status of order 1041" (seed 1) added the shipping policy. Both hold the status. The untrained 1.7B makes more calls than the 0.6B with its adapter: on csv, 4-6 against the 3 real's go/no-go runs make.
+Notes:
+- Decision (the user, 2026-11-24): the csv result is logged as a limit, with no new task. It goes into Gate 4 as a stated limit. (Offered: a task to fix `two-step`, or training demo's adapter too.)
+- It ran in the second of two unattended blocks. The first stopped at `make up PROFILE=demo`'s sudo prompt, so the second block renewed sudo in the background.
+
+### 2026-11-24 · P4.8b · green (adapter `e03c0981507c`: held-out 168/168 in both modes, real go/no-go 10/10; the demo trace recorded again with the routing step)
+Command: the user, overnight: `make down`, `make finetune-data` (data b631851a43e6), `make finetune` (run bfba5b59087c) · Claude: `config/real.yaml`'s `model.lora` to the new adapter (sha256 checked against the file) · the user, one unattended block, run twice (the first stopped at the second `make up`'s sudo prompt): `make up`, `make heldout BASELINE=experiments/results/finetune-heldout-091b52c4a457-323935f068c4-5554fcf81b09.csv`, `make go-no-go EXPERIMENT=experiments/real-go-no-go.yaml`, `make record EXPERIMENT=experiments/record-demo.yaml` (run only if both modes reached 9/10; the second block's refused the trace the first wrote) · Claude: the trace read with `load_trace`, the profiles and tests changed, `uv run --locked pytest` (3,321 passed; P4.13c's `test_kv_capacity[validate-sim-2pods.yaml]` failed, below), ruff and mypy on the working tree
+Result:
+- **Training:** 7,400 examples (5.17 M tokens, longest 1,549), 926 steps in 223 min. Loss went from 1.491 to 5.5e-05, and torch reserved at most 1,816 MiB.
+- **Held-out** (`finetune-heldout-b631851a43e6-c5cf306f32ee-e03c0981507c.csv`): **168/168 in both modes**, 0 invalid calls, 13.1 min of run time (P2.1b's took 86, before CUDA graphs). Against P2.1b's adapter: `clause-text` went 13/14 to 14/14 in each mode (1 fixed, 0 broken, McNemar p = 1). Off-topic was 14/14: these runs now end at step 1's `out_of_scope` pick.
+- **Real go/no-go** (`real-go-no-go-dde11d9c1871-c5cf306f32ee-e03c0981507c.csv`): **10/10 in each mode**, 0 invalid calls, 2.0-3.0 s per run. `agent.tool_choice` stays `auto`.
+- **The new trace** (`record-demo-e1044feb534c-c5cf306f32ee-e03c0981507c.jsonl`): 34 runs, 112 calls, about 2-3 min (P2.2b's took 13.5). Every step 1 has a 2-3-token reply (the pick), and every run has one call more than in P2.2b's recording:
+
+| Type | P2.2b's calls per run | P4.8b's | `expected_steps_by_type` |
+|---|---|---|---|
+| csv | 2 x8, 3 x2 | 3 x8, 4 x2 | 2 -> 3 |
+| contracts | 2 x4, 3 x4 | 3 x4, 4 x4 | 3 -> 4 |
+| support | 2 x4, 3 x4 | 3 x4, 4 x4 | 3 -> 4 |
+| arithmetic | 2 x8 | 3 x8 | 2 -> 3 |
+
+- **History budget:** the new trace's longest call is a support run's step 4, 1,075 prompt and 142 reply tokens (1,217, against P2.2b's 1,419). 4,096 - 1,217 leaves 2,879, so `history_budget_tokens` stays 2,600.
+Notes:
+- Decisions (the user, 2026-11-24, card 70):
+  - The profiles' table comes from the new trace alone. `test_expected_steps` now counts only the recorded demo trace a profile replays (`app.demo_controls.trace`). P2.2b's stays for `baseline-check`, `drain-real` and `convert-apb`. Counted together, they gave contracts and support 3.
+  - `test_convert` checks the converted trace's tokenizer (base model and revision) and that its adapter name has the `thesis-<12 hex>` form. Its meta names `5554fcf81b09`, the adapter served while it was converted; a LoRA adapter leaves the tokenizer as it is. (Offered: converting it again, under the same name as the trace the P3 and P4 replays ran on.)
+- `demo_controls.trace` names the new trace in every profile, so the demo runner replays runs with the routing step. A trace's step 1 carries `expected_steps_default` (2), and later steps carry the scenario's value as it was at recording time.
+- Fixed for P4.8: `record.py`'s `Task` comment said the runtime has no scenario; `loadgen/tests/test_record.py` still imported `offered_tools` (a separate commit).
+- `make lint` with unstaged changes lints the staged copies (pre-commit stashes the rest). Its mypy cache then reported `offered_tools` on the fixed file, until `.mypy_cache` was deleted.
+- Still failing from P4.13c, not fixed (rule 1): `test_kv_capacity[validate-sim-2pods.yaml]`; ruff on `experiment.py:189` and `test_experiment.py:3417`.
+
 ### 2026-11-23 · P4.8 · green on demo (routing step and chat history work; real's current adapter picks out_of_scope until P4.8b retrains it)
 Command: Claude: card 69, tests first (`agent/tests/test_scenarios.py`, `test_history.py`, loop, app and store tests, `app/tests/test_chats.py`, `experiments/tests/`); `uv run --locked pytest` (3,307 passed, P4.13c's `test_kv_capacity[validate-sim-2pods.yaml]` deselected, below); after the chat fixes, `uv run --locked pytest agent app experiments` (1,300 passed) and the UI's `run-view.spec.ts` (47 passed) · the user: `make up PROFILE=demo`, `make go-no-go`; `make up`, a chat on real through `make app-forward` and `make ui PROFILE=real`; again on demo · Claude, on the real pods' Service: one pick call per question and seed with `structured_outputs.choice`, 10 questions x 2 seeds, adapter and base model, a script in the session's scratchpad
 Result:

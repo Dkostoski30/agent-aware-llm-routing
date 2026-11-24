@@ -19,7 +19,7 @@ from agent_runtime.documents import read_run_files
 from agent_runtime.llm import LLMClient
 from agent_runtime.loop import run_task
 from agent_runtime.store import CallRecord, RedisStore, RunRecord
-from agent_runtime.tools import offered_tools
+from agent_runtime.tools import scenario_tools, scenarios
 from jsonschema import Draft202012Validator
 from load_generator.record import (
     Experiment,
@@ -405,12 +405,14 @@ def test_every_demo_task_is_a_valid_run_request() -> None:
 )
 def test_a_demo_tasks_files_bring_its_types_tools(task_type: str, tool: str) -> None:
     """A contract without type: text would be read as a CSV and offer the wrong tools, and the trace
-    would hold another scenario's traffic without saying so."""
+    would hold another scenario's traffic without saying so. The task types are the scenarios step
+    1 picks (D13): the files must allow the type's scenario, and its tools hold the tool."""
     config = load_config(REAL_PROFILE)
     tasks = [task for task in load_experiment(DEMO).tasks if task.task_type == task_type]
     for task in tasks:
         tables, documents = read_run_files(task.files, config.max_files, config.max_file_bytes)
-        assert tool in offered_tools(config.tool_choice, tables, documents)
+        scenario = next(s for s in scenarios(tables, documents) if s == task_type)
+        assert tool in scenario_tools(scenario, config.tool_choice, tables, documents)
 
 
 # The trace's file.

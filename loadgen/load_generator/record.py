@@ -55,7 +55,8 @@ class RecordError(Exception):
 
 @dataclass(frozen=True)
 class Task:
-    # The trace's task_type: the runtime has no scenario until P4.8 (D13), the experiment file says.
+    # The trace's task_type, as the experiment file says. Step 1 picks the run's scenario since P4.8
+    # (D13); the trace keeps the type the run was asked as.
     task_type: str
     text: str
     seed: int

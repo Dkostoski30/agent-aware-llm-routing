@@ -10,6 +10,8 @@ from load_generator.plan import load_trace
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRACES = REPO_ROOT / "experiments" / "results" / "traces"
 RECORDED_TRACE = TRACES / "record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl"
+# make record names its traces after the experiment file (experiments/record-demo.yaml).
+RECORDED_PREFIX = "record-demo-"
 
 
 @pytest.mark.parametrize(
@@ -48,11 +50,16 @@ def test_the_recorded_demo_runs_give_these_values() -> None:
 @pytest.mark.parametrize("profile", ["real", "sim", "demo"])
 def test_the_profiles_hold_the_medians_of_the_committed_traces(profile: str) -> None:
     """make convert prints these values and they are pasted, since rewriting a profile with PyYAML
-    would lose its comments. So a trace added without its values fails here (D1, D11)."""
-    runs = [
-        (run.task_type, len(run.calls))
+    would lose its comments. So a trace added without its values fails here (D1, D11). Of the
+    recorded demo traces only the one the profile replays counts (app.demo_controls.trace): P4.8b
+    recorded the runs again with step 1's pick, and P2.2b's recording stays for the experiments
+    that replayed it."""
+    loaded = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())
+    demo_trace = REPO_ROOT / loaded["app"]["demo_controls"]["trace"]
+    traces = [
+        trace
         for trace in sorted(TRACES.glob("*.jsonl"))
-        for run in load_trace(trace)
+        if not trace.name.startswith(RECORDED_PREFIX) or trace == demo_trace
     ]
-    section = yaml.safe_load((REPO_ROOT / "config" / f"{profile}.yaml").read_text())["agent"]
-    assert section["expected_steps_by_type"] == expected_steps(runs)
+    runs = [(run.task_type, len(run.calls)) for trace in traces for run in load_trace(trace)]
+    assert loaded["agent"]["expected_steps_by_type"] == expected_steps(runs)

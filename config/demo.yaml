@@ -238,15 +238,16 @@ agent:
   # (P1.3b, experiments/log.md). What a run sends until it knows its scenario (D13).
   expected_steps_default: 2
   # Each task type's median calls per run, rounded up (D1, loadgen/load_generator/expected_steps.py), over the traces in
-  # experiments/results/traces/: record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl for the first four,
-  # convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl for the others. A test fails if these differ. The runtime sends its
-  # scenario's from step 2, once step 1 has picked it (D13, P4.8); make convert writes them into its traces. The demo
-  # trace's runs have no pick, so the first four are one call short until P4.8b records it again.
+  # experiments/results/traces/: record-demo-e1044feb534c-c5cf306f32ee-e03c0981507c.jsonl for the first four
+  # (P4.8b's recording, whose runs start with step 1's pick), convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl for the
+  # others. A test fails if these differ. The runtime sends its scenario's from step 2, once step 1 has picked it (D13,
+  # P4.8); make convert writes them into its traces. P2.2b's recording, without the pick, stays for the experiments
+  # that replayed it and no longer counts.
   expected_steps_by_type:
-    csv: 2
-    contracts: 3
-    support: 3
-    arithmetic: 2
+    csv: 3
+    contracts: 4
+    support: 4
+    arithmetic: 3
     hotpotqa: 2
     gaia_dev: 4
     tau2_airline: 9
@@ -265,9 +266,10 @@ agent:
   # P4.8, so the runtime sends the sentence the adapter is trained on.
   out_of_scope_reply: I can only do arithmetic and answer questions about attached CSV files, orders and contracts.
   # The chat's earlier turns a run's prompt may hold, in tokens (D13, agent_runtime/history.py): model.max_model_len
-  # less the longest call of the demo trace above (record-demo-e1044feb534c-...: a support run's step 3, 1,277 prompt
-  # and 142 reply tokens), so a run never overflows because of its history. 4,096 - 1,419 = 2,677, rounded down.
-  # Step 1's prompt has no tools, so it is shorter than any later step's. P4.8b checks it on the re-recorded trace.
+  # less the longest call of P2.2b's demo trace (record-demo-e1044feb534c-d86ed436c5b2-...: a support run's step 3,
+  # 1,277 prompt and 142 reply tokens), so a run never overflows because of its history. 4,096 - 1,419 = 2,677,
+  # rounded down. P4.8b's trace above is shorter (a support run's step 4, 1,075 and 142), so the budget stays. Step 1's
+  # prompt has no tools, so it is shorter than any later step's.
   history_budget_tokens: 2600
   # Carried over from real: P0.4's p95 of 9.5 s (4 requests in flight per replica) was measured on the 0.6B, and the
   # 1.7B single replica is not measured under load yet (P1.6b). 120 s is still more than 10x that p95, so it bounds a
@@ -372,8 +374,8 @@ app:
     # Where make demo-runner listens on the node; the app backend reaches it through infra/manifests/demo-runner.yaml.
     # Any port free on the node beside replay.tracker_port (9400), which the replay the runner starts listens on.
     runner_port: 9401
-    # The demo scenarios' runs recorded on the real model (P2.2b), the trace experiments/drain-real.yaml replays: its
-    # csv, contracts, support and arithmetic runs are what the chat itself answers.
-    trace: experiments/results/traces/record-demo-e1044feb534c-d86ed436c5b2-5554fcf81b09.jsonl
+    # The demo scenarios' runs recorded on the real model, each starting with step 1's pick (P4.8b): its csv,
+    # contracts, support and arithmetic runs are what the chat itself answers.
+    trace: experiments/results/traces/record-demo-e1044feb534c-c5cf306f32ee-e03c0981507c.jsonl
     # Names in replay.patterns: steady is the row's 20 tasks, burst the load that spills and queues (P3.6).
     patterns: [steady, burst]
