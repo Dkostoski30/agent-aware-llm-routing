@@ -1,0 +1,542 @@
+{
+  "experiment": "p5-1b-d",
+  "hash": "c5b5b63e187d",
+  "profile": "real",
+  "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 13,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1b-d-c5b5b63e187d-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1b-d-c5b5b63e187d-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "source": {
+    "commit": "33eb174d4360c3894a304d30bfdc8cc792848891",
+    "uncommitted": [
+      "docs/task-cards/74-P5.1b-headline-square.md",
+      "docs/task-cards/75-P5.1c-ablation-square.md",
+      "experiments/graphs/p5-1b-a-512039c434a9.png",
+      "experiments/graphs/p5-1b-b-7a8cf978ba57.png",
+      "experiments/graphs/p5-1b-c-450d56b98774.png",
+      "experiments/p5-1b-a.yaml",
+      "experiments/p5-1b-b.yaml",
+      "experiments/p5-1b-c.yaml",
+      "experiments/p5-1b-d.yaml",
+      "experiments/p5-1c-a.yaml",
+      "experiments/p5-1c-b.yaml",
+      "experiments/p5-1c-c.yaml",
+      "experiments/p5-1c-d.yaml",
+      "experiments/results/p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-7fm9k.log",
+      "experiments/results/p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-hqzn4.log",
+      "experiments/results/p5-1b-a-512039c434a9-default-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-default.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-gpu.csv",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-picker.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-7bs8w.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-xwpbn.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-plugin.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-jcvnz.log",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-r24sk.log",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-4sbnr.log",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-fhx9k.log",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-windows-gpu.csv",
+      "experiments/results/p5-1b-a-512039c434a9.csv",
+      "experiments/results/p5-1b-a-512039c434a9.meta.json",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-gpu.csv",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-windows-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-cvcbj.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-m6vwq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-ctddc.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-tt47t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-4h95t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-kcbhn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-5jdq6.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-ls84p.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-nl6mn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-w45gv.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-sqqc7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-vk5zg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-c75l5.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-fjpl7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.meta.json",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.png",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-vllm-vllm-f854886dd-ljwt4.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-vllm-vllm-f854886dd-sccwb.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-gpu.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-picker.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-vllm-vllm-56d44bc94-c4zzk.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-vllm-vllm-56d44bc94-dwq6p.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-vllm-vllm-5f797d65c8-hrzhg.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-vllm-vllm-5f797d65c8-rdnhq.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-vllm-vllm-555c6999f7-pfwz9.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-vllm-vllm-555c6999f7-xhx5f.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-windows-gpu.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57.meta.json",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-fwgz2.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-qc27w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-gpu.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-527xt.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-b7rp8.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-windows-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774-default-vllm-vllm-686d86ddf5-6l6xx.log",
+      "experiments/results/p5-1b-c-450d56b98774-default-vllm-vllm-686d86ddf5-b7rbz.log",
+      "experiments/results/p5-1b-c-450d56b98774-default-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-default.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-picker.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-vllm-vllm-558fff74c9-t82bm.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-vllm-vllm-558fff74c9-tw8q5.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-plugin.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-vllm-vllm-5bc9cbb4d4-4hd6f.log",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-vllm-vllm-5bc9cbb4d4-8r79b.log",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-vllm-vllm-78748d9844-2lc9z.log",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-vllm-vllm-78748d9844-gwk6v.log",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-windows-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774.csv",
+      "experiments/results/p5-1b-c-450d56b98774.meta.json",
+      "experiments/series/p5-1b.yaml",
+      "experiments/series/p5-1c.yaml",
+      "experiments/tests/test_p5_squares.py"
+    ],
+    "system_sha256": "b7f1e50f03070761a0ec7d332f3a3dab508cad166bf96eece8838de894c78cf2"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "session-affinity": {
+      "epp_config": "session-affinity.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-f5b8d45d5-42ghr": [
+          914,
+          131,
+          182,
+          139,
+          264
+        ],
+        "vllm-f5b8d45d5-5ddw6": [
+          221,
+          287,
+          223,
+          193,
+          205
+        ]
+      },
+      "started": 1795609541.4139576,
+      "ended": 1795610062.6585503,
+      "clock_jumps": 15,
+      "calls": 473,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-f5b8d45d5-5ddw6": 314,
+        "vllm-f5b8d45d5-42ghr": 159
+      },
+      "pod_switch_share": 0.2521186440677966,
+      "max_gap_deviation_ms": 2338,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 18,
+        "total_ms": 7246,
+        "max_ms": 2338
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-d-c5b5b63e187d-session-affinity-vllm-vllm-f5b8d45d5-42ghr.log",
+        "p5-1b-d-c5b5b63e187d-session-affinity-vllm-vllm-f5b8d45d5-5ddw6.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-d-c5b5b63e187d-session-affinity-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-f5b8d45d5-42ghr": 0.0,
+              "vllm-f5b8d45d5-5ddw6": 10.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-f5b8d45d5-42ghr": 0.0,
+              "vllm-f5b8d45d5-5ddw6": 7.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-f5b8d45d5-42ghr": 7.0,
+              "vllm-f5b8d45d5-5ddw6": 0.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-f5b8d45d5-42ghr": 0.0,
+              "vllm-f5b8d45d5-5ddw6": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-fcf6bcbb6-ww9tz": [
+          870,
+          174,
+          131,
+          153,
+          190
+        ],
+        "vllm-fcf6bcbb6-z9nj8": [
+          144,
+          183,
+          183,
+          188,
+          178
+        ]
+      },
+      "started": 1795610435.5543776,
+      "ended": 1795610960.7483387,
+      "clock_jumps": 16,
+      "calls": 473,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-fcf6bcbb6-ww9tz": 223,
+        "vllm-fcf6bcbb6-z9nj8": 250
+      },
+      "pod_switch_share": 0.2902542372881356,
+      "max_gap_deviation_ms": 272,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 21,
+        "total_ms": 2153,
+        "max_ms": 272
+      },
+      "picker_log": "p5-1b-d-c5b5b63e187d-plugin-picker.log",
+      "vllm_logs": [
+        "p5-1b-d-c5b5b63e187d-plugin-vllm-vllm-fcf6bcbb6-ww9tz.log",
+        "p5-1b-d-c5b5b63e187d-plugin-vllm-vllm-fcf6bcbb6-z9nj8.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-d-c5b5b63e187d-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-fcf6bcbb6-ww9tz": 5.0,
+              "vllm-fcf6bcbb6-z9nj8": 4.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-fcf6bcbb6-ww9tz": 3.0,
+              "vllm-fcf6bcbb6-z9nj8": 6.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-fcf6bcbb6-ww9tz": 5.0,
+              "vllm-fcf6bcbb6-z9nj8": 5.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-fcf6bcbb6-ww9tz": 1.0,
+              "vllm-fcf6bcbb6-z9nj8": 2.0
+            }
+          }
+        ]
+      }
+    },
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-b689f4b6f-9z2m6": [
+          12135,
+          545,
+          145,
+          186,
+          1195
+        ],
+        "vllm-b689f4b6f-m7d9m": [
+          509,
+          144,
+          193,
+          170,
+          139
+        ]
+      },
+      "started": 1795611400.5855143,
+      "ended": 1795611927.9994056,
+      "clock_jumps": 15,
+      "calls": 473,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-b689f4b6f-9z2m6": 222,
+        "vllm-b689f4b6f-m7d9m": 251
+      },
+      "pod_switch_share": 0.4915254237288136,
+      "max_gap_deviation_ms": 90,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 4,
+        "total_ms": 307,
+        "max_ms": 90
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-d-c5b5b63e187d-round-robin-vllm-vllm-b689f4b6f-9z2m6.log",
+        "p5-1b-d-c5b5b63e187d-round-robin-vllm-vllm-b689f4b6f-m7d9m.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-d-c5b5b63e187d-round-robin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-b689f4b6f-9z2m6": 6.0,
+              "vllm-b689f4b6f-m7d9m": 7.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-b689f4b6f-9z2m6": 4.0,
+              "vllm-b689f4b6f-m7d9m": 3.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-b689f4b6f-9z2m6": 3.0,
+              "vllm-b689f4b6f-m7d9m": 6.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-b689f4b6f-9z2m6": 0.0,
+              "vllm-b689f4b6f-m7d9m": 1.0
+            }
+          }
+        ]
+      }
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-7b7bf79f9-4jr8w": [
+          1076,
+          195,
+          165,
+          162,
+          154
+        ],
+        "vllm-7b7bf79f9-nzrxk": [
+          201,
+          117,
+          138,
+          104,
+          114
+        ]
+      },
+      "started": 1795612297.9162335,
+      "ended": 1795612822.45376,
+      "clock_jumps": 16,
+      "calls": 473,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7b7bf79f9-4jr8w": 253,
+        "vllm-7b7bf79f9-nzrxk": 220
+      },
+      "pod_switch_share": 0.2521186440677966,
+      "max_gap_deviation_ms": 269,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 6,
+        "total_ms": 803,
+        "max_ms": 269
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-d-c5b5b63e187d-default-vllm-vllm-7b7bf79f9-4jr8w.log",
+        "p5-1b-d-c5b5b63e187d-default-vllm-vllm-7b7bf79f9-nzrxk.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-d-c5b5b63e187d-default-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-7b7bf79f9-4jr8w": 5.0,
+              "vllm-7b7bf79f9-nzrxk": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-7b7bf79f9-4jr8w": 5.0,
+              "vllm-7b7bf79f9-nzrxk": 5.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-7b7bf79f9-4jr8w": 3.0,
+              "vllm-7b7bf79f9-nzrxk": 6.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-7b7bf79f9-4jr8w": 0.0,
+              "vllm-7b7bf79f9-nzrxk": 0.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,426 @@
+{
+  "experiment": "p5-1b-a",
+  "hash": "d40484c4d1af",
+  "profile": "real",
+  "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1b-a-d40484c4d1af-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1b-a-d40484c4d1af-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "source": {
+    "commit": "33eb174d4360c3894a304d30bfdc8cc792848891",
+    "uncommitted": [
+      "docs/task-cards/74-P5.1b-headline-square.md",
+      "experiments/p5-1b-a.yaml",
+      "experiments/p5-1b-b.yaml",
+      "experiments/p5-1b-c.yaml",
+      "experiments/p5-1b-d.yaml",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-cvcbj.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-m6vwq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-ctddc.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-tt47t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-4h95t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-kcbhn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/series/p5-1b.yaml",
+      "experiments/tests/test_p5_squares.py"
+    ],
+    "system_sha256": "b7f1e50f03070761a0ec7d332f3a3dab508cad166bf96eece8838de894c78cf2"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-947fd66bc-nl6mn": [
+          1356,
+          210,
+          129,
+          169,
+          143
+        ],
+        "vllm-947fd66bc-w45gv": [
+          278,
+          149,
+          130,
+          186,
+          132
+        ]
+      },
+      "started": 1795552427.6289349,
+      "ended": 1795552959.8472693,
+      "clock_jumps": 17,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-947fd66bc-w45gv": 274,
+        "vllm-947fd66bc-nl6mn": 299
+      },
+      "pod_switch_share": 0.29545454545454547,
+      "max_gap_deviation_ms": 630,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 15,
+        "total_ms": 2804,
+        "max_ms": 630
+      },
+      "picker_log": "p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "vllm_logs": [
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-dslbq.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-wnj5w.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-nl6mn.log",
+        "p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-w45gv.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-947fd66bc-nl6mn": 4.0,
+              "vllm-947fd66bc-w45gv": 3.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-947fd66bc-nl6mn": 5.0,
+              "vllm-947fd66bc-w45gv": 4.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-947fd66bc-nl6mn": 2.0,
+              "vllm-947fd66bc-w45gv": 3.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-947fd66bc-nl6mn": 2.0,
+              "vllm-947fd66bc-w45gv": 2.0
+            }
+          }
+        ]
+      }
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-86b8b647fd-5jdq6": [
+          2313,
+          197,
+          318,
+          154,
+          152
+        ],
+        "vllm-86b8b647fd-ls84p": [
+          287,
+          231,
+          161,
+          258,
+          180
+        ]
+      },
+      "started": 1795553294.766217,
+      "ended": 1795553831.8747342,
+      "clock_jumps": 16,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-86b8b647fd-ls84p": 288,
+        "vllm-86b8b647fd-5jdq6": 285
+      },
+      "pod_switch_share": 0.23776223776223776,
+      "max_gap_deviation_ms": 1917,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 25,
+        "total_ms": 5050,
+        "max_ms": 1917
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-dslbq.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-wnj5w.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-gzwqc.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-rrx4g.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-5jdq6.log",
+        "p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-ls84p.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-d40484c4d1af-default-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-86b8b647fd-5jdq6": 4.0,
+              "vllm-86b8b647fd-ls84p": 6.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-86b8b647fd-5jdq6": 7.0,
+              "vllm-86b8b647fd-ls84p": 5.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-86b8b647fd-5jdq6": 3.0,
+              "vllm-86b8b647fd-ls84p": 6.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-86b8b647fd-5jdq6": 4.0,
+              "vllm-86b8b647fd-ls84p": 2.0
+            }
+          }
+        ]
+      }
+    },
+    "session-affinity": {
+      "epp_config": "session-affinity.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-6864565544-c75l5": [
+          964,
+          593,
+          212,
+          246,
+          326
+        ],
+        "vllm-6864565544-fjpl7": [
+          1930,
+          270,
+          772,
+          407,
+          278
+        ]
+      },
+      "started": 1795554198.6516056,
+      "ended": 1795554736.2206705,
+      "clock_jumps": 16,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6864565544-fjpl7": 287,
+        "vllm-6864565544-c75l5": 286
+      },
+      "pod_switch_share": 0.29895104895104896,
+      "max_gap_deviation_ms": 729,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 7,
+        "total_ms": 2187,
+        "max_ms": 729
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-dslbq.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-wnj5w.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-c75l5.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-fjpl7.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-gzwqc.log",
+        "p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-rrx4g.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-6864565544-c75l5": 5.0,
+              "vllm-6864565544-fjpl7": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-6864565544-c75l5": 6.0,
+              "vllm-6864565544-fjpl7": 5.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-6864565544-c75l5": 2.0,
+              "vllm-6864565544-fjpl7": 4.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-6864565544-c75l5": 3.0,
+              "vllm-6864565544-fjpl7": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-85bb5588cf-sqqc7": [
+          771,
+          113,
+          372,
+          596,
+          154
+        ],
+        "vllm-85bb5588cf-vk5zg": [
+          277,
+          234,
+          148,
+          170,
+          177
+        ]
+      },
+      "started": 1795555065.948169,
+      "ended": 1795555617.8849394,
+      "clock_jumps": 16,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-85bb5588cf-vk5zg": 285,
+        "vllm-85bb5588cf-sqqc7": 288
+      },
+      "pod_switch_share": 0.583916083916084,
+      "max_gap_deviation_ms": 257,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 6,
+        "total_ms": 819,
+        "max_ms": 257
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-sqqc7.log",
+        "p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-vk5zg.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-d40484c4d1af-round-robin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-85bb5588cf-sqqc7": 6.0,
+              "vllm-85bb5588cf-vk5zg": 4.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-85bb5588cf-sqqc7": 10.0,
+              "vllm-85bb5588cf-vk5zg": 4.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-85bb5588cf-sqqc7": 3.0,
+              "vllm-85bb5588cf-vk5zg": 6.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-85bb5588cf-sqqc7": 3.0,
+              "vllm-85bb5588cf-vk5zg": 2.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

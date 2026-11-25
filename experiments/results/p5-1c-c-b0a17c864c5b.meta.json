@@ -1,0 +1,680 @@
+{
+  "experiment": "p5-1c-c",
+  "hash": "b0a17c864c5b",
+  "profile": "real",
+  "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 10,
+  "runs_discarded": 3,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1c-c-b0a17c864c5b-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1c-c-b0a17c864c5b-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "source": {
+    "commit": "33eb174d4360c3894a304d30bfdc8cc792848891",
+    "uncommitted": [
+      "docs/task-cards/74-P5.1b-headline-square.md",
+      "docs/task-cards/75-P5.1c-ablation-square.md",
+      "experiments/graphs/p5-1b-a-512039c434a9.png",
+      "experiments/graphs/p5-1b-b-7a8cf978ba57.png",
+      "experiments/graphs/p5-1b-c-450d56b98774.png",
+      "experiments/graphs/p5-1b-d-c5b5b63e187d.png",
+      "experiments/graphs/p5-1c-a-c13c5c1f9d7f.png",
+      "experiments/graphs/p5-1c-b-4c3fa25d1e58.png",
+      "experiments/p5-1b-a.yaml",
+      "experiments/p5-1b-b.yaml",
+      "experiments/p5-1b-c.yaml",
+      "experiments/p5-1b-d.yaml",
+      "experiments/p5-1c-a.yaml",
+      "experiments/p5-1c-b.yaml",
+      "experiments/p5-1c-c.yaml",
+      "experiments/p5-1c-d.yaml",
+      "experiments/results/p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-7fm9k.log",
+      "experiments/results/p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-hqzn4.log",
+      "experiments/results/p5-1b-a-512039c434a9-default-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-default.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-gpu.csv",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-picker.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-7bs8w.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-xwpbn.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-512039c434a9-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-plugin.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-jcvnz.log",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-r24sk.log",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-round-robin.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-4sbnr.log",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-fhx9k.log",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-512039c434a9-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-512039c434a9-windows-gpu.csv",
+      "experiments/results/p5-1b-a-512039c434a9.csv",
+      "experiments/results/p5-1b-a-512039c434a9.meta.json",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-gpu.csv",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-windows-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-cvcbj.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-m6vwq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-ctddc.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-tt47t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-4h95t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-kcbhn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-5jdq6.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-ls84p.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-nl6mn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-w45gv.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-sqqc7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-vk5zg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-c75l5.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-fjpl7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.meta.json",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.png",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-vllm-vllm-f854886dd-ljwt4.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-vllm-vllm-f854886dd-sccwb.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-default.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-gpu.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-picker.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-vllm-vllm-56d44bc94-c4zzk.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-vllm-vllm-56d44bc94-dwq6p.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-plugin.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-vllm-vllm-5f797d65c8-hrzhg.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-vllm-vllm-5f797d65c8-rdnhq.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-round-robin.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-vllm-vllm-555c6999f7-pfwz9.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-vllm-vllm-555c6999f7-xhx5f.log",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57-session-affinity.jsonl",
+      "experiments/results/p5-1b-b-7a8cf978ba57-windows-gpu.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57.csv",
+      "experiments/results/p5-1b-b-7a8cf978ba57.meta.json",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-fwgz2.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-qc27w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-gpu.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-527xt.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-b7rp8.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-windows-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774-default-vllm-vllm-686d86ddf5-6l6xx.log",
+      "experiments/results/p5-1b-c-450d56b98774-default-vllm-vllm-686d86ddf5-b7rbz.log",
+      "experiments/results/p5-1b-c-450d56b98774-default-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-default.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-picker.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-vllm-vllm-558fff74c9-t82bm.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-vllm-vllm-558fff74c9-tw8q5.log",
+      "experiments/results/p5-1b-c-450d56b98774-plugin-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-plugin.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-vllm-vllm-5bc9cbb4d4-4hd6f.log",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-vllm-vllm-5bc9cbb4d4-8r79b.log",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-round-robin.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-vllm-vllm-78748d9844-2lc9z.log",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-vllm-vllm-78748d9844-gwk6v.log",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-c-450d56b98774-session-affinity.jsonl",
+      "experiments/results/p5-1b-c-450d56b98774-windows-gpu.csv",
+      "experiments/results/p5-1b-c-450d56b98774.csv",
+      "experiments/results/p5-1b-c-450d56b98774.meta.json",
+      "experiments/results/p5-1b-d-c5b5b63e187d-default-vllm-vllm-7b7bf79f9-4jr8w.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-default-vllm-vllm-7b7bf79f9-nzrxk.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-default-waiting.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d-default.jsonl",
+      "experiments/results/p5-1b-d-c5b5b63e187d-gpu.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d-plugin-picker.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-plugin-vllm-vllm-fcf6bcbb6-ww9tz.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-plugin-vllm-vllm-fcf6bcbb6-z9nj8.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-plugin-waiting.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d-plugin.jsonl",
+      "experiments/results/p5-1b-d-c5b5b63e187d-round-robin-vllm-vllm-b689f4b6f-9z2m6.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-round-robin-vllm-vllm-b689f4b6f-m7d9m.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-round-robin-waiting.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d-round-robin.jsonl",
+      "experiments/results/p5-1b-d-c5b5b63e187d-session-affinity-vllm-vllm-f5b8d45d5-42ghr.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-session-affinity-vllm-vllm-f5b8d45d5-5ddw6.log",
+      "experiments/results/p5-1b-d-c5b5b63e187d-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d-session-affinity.jsonl",
+      "experiments/results/p5-1b-d-c5b5b63e187d-windows-gpu.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d.csv",
+      "experiments/results/p5-1b-d-c5b5b63e187d.meta.json",
+      "experiments/results/p5-1b-square.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-gpu.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-overload-guard-picker.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-overload-guard-vllm-vllm-bcc44649f-5dvff.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-overload-guard-vllm-vllm-bcc44649f-jsvcx.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-overload-guard-waiting.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-overload-guard.jsonl",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-parallel-spill-picker.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-parallel-spill-vllm-vllm-dbbc868cc-6st66.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-parallel-spill-vllm-vllm-dbbc868cc-x6x59.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-parallel-spill-waiting.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-parallel-spill.jsonl",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-priority-picker.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-priority-vllm-vllm-dbf865c4b-25v7k.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-priority-vllm-vllm-dbf865c4b-hmmpp.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-priority-waiting.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-no-priority.jsonl",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-plugin-picker.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-plugin-vllm-vllm-7dbbcbbccf-4c9rb.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-plugin-vllm-vllm-7dbbcbbccf-sk298.log",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-plugin-waiting.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-plugin.jsonl",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f-windows-gpu.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f.csv",
+      "experiments/results/p5-1c-a-c13c5c1f9d7f.meta.json",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-gpu.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-overload-guard-picker.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-overload-guard-vllm-vllm-5c8d66b786-2s59s.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-overload-guard-vllm-vllm-5c8d66b786-hhxp9.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-overload-guard-waiting.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-overload-guard.jsonl",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-parallel-spill-picker.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-parallel-spill-vllm-vllm-74b59bdf46-2vt27.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-parallel-spill-vllm-vllm-74b59bdf46-q2rtt.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-parallel-spill-waiting.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-parallel-spill.jsonl",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-priority-picker.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-priority-vllm-vllm-848d4c6c56-tblz4.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-priority-vllm-vllm-848d4c6c56-zl9f9.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-priority-waiting.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-no-priority.jsonl",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-plugin-picker.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-plugin-vllm-vllm-694d58b88d-75r85.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-plugin-vllm-vllm-694d58b88d-j9fht.log",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-plugin-waiting.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-plugin.jsonl",
+      "experiments/results/p5-1c-b-4c3fa25d1e58-windows-gpu.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58.csv",
+      "experiments/results/p5-1c-b-4c3fa25d1e58.meta.json",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-gpu.csv",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-overload-guard-picker.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-overload-guard-vllm-vllm-67c67c96d7-hzgqh.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-overload-guard-vllm-vllm-67c67c96d7-p5wgx.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-overload-guard-waiting.csv",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-overload-guard.jsonl",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-parallel-spill-picker.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-parallel-spill-vllm-vllm-59b55759d-6v8kf.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-parallel-spill-vllm-vllm-59b55759d-mmn6f.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-parallel-spill-waiting.csv",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-parallel-spill.jsonl",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-priority-picker.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-priority-vllm-vllm-5d5c6959b5-klm4h.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-priority-vllm-vllm-5d5c6959b5-rqv9h.log",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-priority-waiting.csv",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-no-priority.jsonl",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-plugin.jsonl.partial",
+      "experiments/results/p5-1c-failed-1935/p5-1c-c-b0a17c864c5b-windows-gpu.csv",
+      "experiments/series/p5-1b.yaml",
+      "experiments/series/p5-1c.yaml",
+      "experiments/tests/test_p5_squares.py"
+    ],
+    "system_sha256": "b7f1e50f03070761a0ec7d332f3a3dab508cad166bf96eece8838de894c78cf2"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480,
+    600
+  ],
+  "variants": {
+    "no-parallel-spill": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": false,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-7dbfb7bd94-5mpck": [
+          1097,
+          224,
+          200,
+          107,
+          205
+        ],
+        "vllm-7dbfb7bd94-q6k6w": [
+          1191,
+          122,
+          103,
+          155,
+          121
+        ]
+      },
+      "started": 1795632082.3297052,
+      "ended": 1795632711.974933,
+      "clock_jumps": 19,
+      "calls": 494,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7dbfb7bd94-q6k6w": 274,
+        "vllm-7dbfb7bd94-5mpck": 220
+      },
+      "pod_switch_share": 0.2657200811359026,
+      "max_gap_deviation_ms": 153,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 12,
+        "total_ms": 1063,
+        "max_ms": 153
+      },
+      "picker_log": "p5-1c-c-b0a17c864c5b-no-parallel-spill-picker.log",
+      "vllm_logs": [
+        "p5-1c-c-b0a17c864c5b-no-parallel-spill-vllm-vllm-7dbfb7bd94-5mpck.log",
+        "p5-1c-c-b0a17c864c5b-no-parallel-spill-vllm-vllm-7dbfb7bd94-q6k6w.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1c-c-b0a17c864c5b-no-parallel-spill-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-7dbfb7bd94-5mpck": 4.0,
+              "vllm-7dbfb7bd94-q6k6w": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-7dbfb7bd94-5mpck": 1.0,
+              "vllm-7dbfb7bd94-q6k6w": 2.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-7dbfb7bd94-5mpck": 7.0,
+              "vllm-7dbfb7bd94-q6k6w": 5.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-7dbfb7bd94-5mpck": 4.0,
+              "vllm-7dbfb7bd94-q6k6w": 4.0
+            }
+          },
+          {
+            "burst_seconds": 600,
+            "most_waiting": {
+              "vllm-7dbfb7bd94-5mpck": 0.0,
+              "vllm-7dbfb7bd94-q6k6w": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "no-priority": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true,
+        "priority": false
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-67d4598955-jqxwt": [
+          612,
+          160,
+          106,
+          151,
+          181
+        ],
+        "vllm-67d4598955-qcqcx": [
+          135,
+          158,
+          130,
+          229,
+          114
+        ]
+      },
+      "started": 1795633110.3823917,
+      "ended": 1795633741.1861813,
+      "clock_jumps": 19,
+      "calls": 494,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-67d4598955-jqxwt": 281,
+        "vllm-67d4598955-qcqcx": 213
+      },
+      "pod_switch_share": 0.2515212981744422,
+      "max_gap_deviation_ms": 55,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 1,
+        "total_ms": 55,
+        "max_ms": 55
+      },
+      "picker_log": "p5-1c-c-b0a17c864c5b-no-priority-picker.log",
+      "vllm_logs": [
+        "p5-1c-c-b0a17c864c5b-no-priority-vllm-vllm-67d4598955-jqxwt.log",
+        "p5-1c-c-b0a17c864c5b-no-priority-vllm-vllm-67d4598955-qcqcx.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1c-c-b0a17c864c5b-no-priority-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-67d4598955-jqxwt": 3.0,
+              "vllm-67d4598955-qcqcx": 8.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-67d4598955-jqxwt": 3.0,
+              "vllm-67d4598955-qcqcx": 6.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-67d4598955-jqxwt": 6.0,
+              "vllm-67d4598955-qcqcx": 4.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-67d4598955-jqxwt": 4.0,
+              "vllm-67d4598955-qcqcx": 4.0
+            }
+          },
+          {
+            "burst_seconds": 600,
+            "most_waiting": {
+              "vllm-67d4598955-jqxwt": 0.0,
+              "vllm-67d4598955-qcqcx": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "no-overload-guard": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": false,
+        "parallel_spill": true,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-66cbb49bf8-dt5rw": [
+          1070,
+          109,
+          208,
+          116,
+          142
+        ],
+        "vllm-66cbb49bf8-pjjf2": [
+          195,
+          180,
+          166,
+          129,
+          275
+        ]
+      },
+      "started": 1795634108.6223624,
+      "ended": 1795634740.976994,
+      "clock_jumps": 19,
+      "calls": 494,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-66cbb49bf8-dt5rw": 230,
+        "vllm-66cbb49bf8-pjjf2": 264
+      },
+      "pod_switch_share": 0.2839756592292089,
+      "max_gap_deviation_ms": 219,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 4,
+        "total_ms": 468,
+        "max_ms": 219
+      },
+      "picker_log": "p5-1c-c-b0a17c864c5b-no-overload-guard-picker.log",
+      "vllm_logs": [
+        "p5-1c-c-b0a17c864c5b-no-overload-guard-vllm-vllm-66cbb49bf8-dt5rw.log",
+        "p5-1c-c-b0a17c864c5b-no-overload-guard-vllm-vllm-66cbb49bf8-pjjf2.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1c-c-b0a17c864c5b-no-overload-guard-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-66cbb49bf8-dt5rw": 4.0,
+              "vllm-66cbb49bf8-pjjf2": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-66cbb49bf8-dt5rw": 2.0,
+              "vllm-66cbb49bf8-pjjf2": 2.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-66cbb49bf8-dt5rw": 5.0,
+              "vllm-66cbb49bf8-pjjf2": 3.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-66cbb49bf8-dt5rw": 4.0,
+              "vllm-66cbb49bf8-pjjf2": 5.0
+            }
+          },
+          {
+            "burst_seconds": 600,
+            "most_waiting": {
+              "vllm-66cbb49bf8-dt5rw": 0.0,
+              "vllm-66cbb49bf8-pjjf2": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-76c6755bf-pwx4z": [
+          894,
+          103,
+          151,
+          110,
+          188
+        ],
+        "vllm-76c6755bf-zg9tn": [
+          145,
+          135,
+          104,
+          134,
+          140
+        ]
+      },
+      "started": 1795635121.1983259,
+      "ended": 1795635750.3807397,
+      "clock_jumps": 18,
+      "calls": 494,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-76c6755bf-zg9tn": 262,
+        "vllm-76c6755bf-pwx4z": 232
+      },
+      "pod_switch_share": 0.25760649087221094,
+      "max_gap_deviation_ms": 39,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": "p5-1c-c-b0a17c864c5b-plugin-picker.log",
+      "vllm_logs": [
+        "p5-1c-c-b0a17c864c5b-plugin-vllm-vllm-76c6755bf-pwx4z.log",
+        "p5-1c-c-b0a17c864c5b-plugin-vllm-vllm-76c6755bf-zg9tn.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1c-c-b0a17c864c5b-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-76c6755bf-pwx4z": 5.0,
+              "vllm-76c6755bf-zg9tn": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-76c6755bf-pwx4z": 4.0,
+              "vllm-76c6755bf-zg9tn": 1.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-76c6755bf-pwx4z": 5.0,
+              "vllm-76c6755bf-zg9tn": 3.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-76c6755bf-pwx4z": 3.0,
+              "vllm-76c6755bf-zg9tn": 3.0
+            }
+          },
+          {
+            "burst_seconds": 600,
+            "most_waiting": {
+              "vllm-76c6755bf-pwx4z": 0.0,
+              "vllm-76c6755bf-zg9tn": 0.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

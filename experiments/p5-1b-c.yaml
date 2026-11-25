@@ -1,0 +1,55 @@
+# P5.1b: file c of E1's headline square on compiled real pods (docs/task-cards/74-P5.1b-headline-square.md). Four
+# files, a seed each, run the same four variants in the orders of a Williams square; this is row 3. Run all four with
+# make experiment-series NAME=p5-1b, then compare with make square-compare SERIES=p5-1b, the laptop idle and Windows'
+# AC standby off. Results carry this file's hash (D11).
+profile: real
+# P5.1a-2's load (experiments/p5-1a-heavy.yaml), which overloaded both pods after every burst; a test holds it there.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# The squares' seeds 6, 9, 10, 13 in files a-d (card 73), held by a test in experiments/tests/test_p5_squares.py.
+seed: 10
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 3 at seed 10; a test holds it there.
+  runs_discarded: 3
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As P5.1a-2: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused, since the GPU-sharing
+# stalls of 2026-11-12 (P3.7) would read as the picker's result.
+pod_stall_seconds: 30
+# The verdict is make square-compare's against default, fixed before the runs (card 73). The order is the square's row
+# 3 (card 74): A plugin, B default, C round-robin, D session-affinity. Each variant starts one pod, then
+# the second beside it once it is Ready (P4.13c): two compiled pods started together froze in CUDA graph capture for
+# over 15 min in this square's first file b (2026-11-25); one at a time needs the count set, the profile's 2.
+# round-robin as experiments/baseline.yaml; session-affinity, upstream's filter on x-run-id, as p5-1a-spike.yaml; the
+# plugin is affinity, the overload guard, parallel spill and priority at config/real.yaml's thresholds.
+variants:
+  - name: round-robin
+    replicas: 2
+    start: one_at_a_time
+    values: ../infra/helm/router-round-robin-values.yaml
+    epp_config: round-robin.yaml
+  - name: session-affinity
+    replicas: 2
+    start: one_at_a_time
+    values: ../infra/helm/router-session-affinity-values.yaml
+    epp_config: session-affinity.yaml
+  - name: default
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    epp_config: default-plugins.yaml
+  - name: plugin
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+      priority: true
+    epp_config: thesis-plugins.yaml

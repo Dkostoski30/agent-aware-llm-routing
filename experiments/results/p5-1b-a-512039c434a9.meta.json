@@ -1,0 +1,476 @@
+{
+  "experiment": "p5-1b-a",
+  "hash": "512039c434a9",
+  "profile": "real",
+  "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-1b-a-512039c434a9-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-1b-a-512039c434a9-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "source": {
+    "commit": "33eb174d4360c3894a304d30bfdc8cc792848891",
+    "uncommitted": [
+      "docs/task-cards/74-P5.1b-headline-square.md",
+      "docs/task-cards/75-P5.1c-ablation-square.md",
+      "experiments/p5-1b-a.yaml",
+      "experiments/p5-1b-b.yaml",
+      "experiments/p5-1b-c.yaml",
+      "experiments/p5-1b-d.yaml",
+      "experiments/p5-1c-a.yaml",
+      "experiments/p5-1c-b.yaml",
+      "experiments/p5-1c-c.yaml",
+      "experiments/p5-1c-d.yaml",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-gpu.csv",
+      "experiments/results/p5-1b-a-failed-start-1/p5-1b-a-512039c434a9-windows-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-cvcbj.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-555c7757-m6vwq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-ctddc.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-69df99759-tt47t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-4h95t.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-654f878557-kcbhn.log",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-stalled-1/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-5jdq6.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-vllm-vllm-86b8b647fd-ls84p.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-default.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-picker.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-nl6mn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-vllm-vllm-947fd66bc-w45gv.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-plugin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-sqqc7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-vllm-vllm-85bb5588cf-vk5zg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-round-robin.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-5h5dg.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6466dbd654-wnfxn.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-c75l5.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-6864565544-fjpl7.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity-waiting.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-session-affinity.jsonl",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af-windows-gpu.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.csv",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.meta.json",
+      "experiments/results/p5-1b-a-together/p5-1b-a-d40484c4d1af.png",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-fwgz2.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-vllm-vllm-7bf76ddbf5-qc27w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-default.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-gpu.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-dslbq.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-6645676c96-wnj5w.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-527xt.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-695494d7d7-b7rp8.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-gzwqc.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-vllm-vllm-757cc948b8-rrx4g.log",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin-waiting.csv",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-round-robin.jsonl",
+      "experiments/results/p5-1b-b-stalled-1/p5-1b-b-5e045b7ac386-windows-gpu.csv",
+      "experiments/series/p5-1b.yaml",
+      "experiments/series/p5-1c.yaml",
+      "experiments/tests/test_p5_squares.py"
+    ],
+    "system_sha256": "b7f1e50f03070761a0ec7d332f3a3dab508cad166bf96eece8838de894c78cf2"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "plugin": {
+      "epp_config": "thesis-plugins.yaml",
+      "routing": {
+        "plugin": true,
+        "affinity": true,
+        "overload_guard": true,
+        "parallel_spill": true,
+        "priority": true
+      },
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-6c68654877-7bs8w": [
+          2631,
+          331,
+          163,
+          812,
+          430
+        ],
+        "vllm-6c68654877-xwpbn": [
+          483,
+          169,
+          218,
+          127,
+          578
+        ]
+      },
+      "started": 1795597733.0472386,
+      "ended": 1795598270.557895,
+      "clock_jumps": 15,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6c68654877-7bs8w": 251,
+        "vllm-6c68654877-xwpbn": 322
+      },
+      "pod_switch_share": 0.2744755244755245,
+      "max_gap_deviation_ms": 186,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 3,
+        "total_ms": 381,
+        "max_ms": 186
+      },
+      "picker_log": "p5-1b-a-512039c434a9-plugin-picker.log",
+      "vllm_logs": [
+        "p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-7bs8w.log",
+        "p5-1b-a-512039c434a9-plugin-vllm-vllm-6c68654877-xwpbn.log",
+        "p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-gzwqc.log",
+        "p5-1b-a-512039c434a9-plugin-vllm-vllm-757cc948b8-rrx4g.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-512039c434a9-plugin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-6c68654877-7bs8w": 6.0,
+              "vllm-6c68654877-xwpbn": 6.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-6c68654877-7bs8w": 5.0,
+              "vllm-6c68654877-xwpbn": 6.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-6c68654877-7bs8w": 2.0,
+              "vllm-6c68654877-xwpbn": 4.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-6c68654877-7bs8w": 2.0,
+              "vllm-6c68654877-xwpbn": 1.0
+            }
+          }
+        ]
+      }
+    },
+    "default": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-649f64f77-7fm9k": [
+          10583,
+          422,
+          283,
+          277,
+          216
+        ],
+        "vllm-649f64f77-hqzn4": [
+          236,
+          175,
+          183,
+          185,
+          139
+        ]
+      },
+      "started": 1795598738.671813,
+      "ended": 1795599286.5139656,
+      "clock_jumps": 17,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-649f64f77-7fm9k": 252,
+        "vllm-649f64f77-hqzn4": 321
+      },
+      "pod_switch_share": 0.25874125874125875,
+      "max_gap_deviation_ms": 219,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 4,
+        "total_ms": 713,
+        "max_ms": 219
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-7fm9k.log",
+        "p5-1b-a-512039c434a9-default-vllm-vllm-649f64f77-hqzn4.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-512039c434a9-default-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-649f64f77-7fm9k": 4.0,
+              "vllm-649f64f77-hqzn4": 6.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-649f64f77-7fm9k": 6.0,
+              "vllm-649f64f77-hqzn4": 5.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-649f64f77-7fm9k": 4.0,
+              "vllm-649f64f77-hqzn4": 2.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-649f64f77-7fm9k": 4.0,
+              "vllm-649f64f77-hqzn4": 2.0
+            }
+          }
+        ]
+      }
+    },
+    "session-affinity": {
+      "epp_config": "session-affinity.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-68d8597fdf-4sbnr": [
+          1039,
+          270,
+          256,
+          240,
+          182
+        ],
+        "vllm-68d8597fdf-fhx9k": [
+          240,
+          153,
+          104,
+          235,
+          123
+        ]
+      },
+      "started": 1795599664.5057495,
+      "ended": 1795600206.1294148,
+      "clock_jumps": 16,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-68d8597fdf-4sbnr": 308,
+        "vllm-68d8597fdf-fhx9k": 265
+      },
+      "pod_switch_share": 0.25524475524475526,
+      "max_gap_deviation_ms": 190,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 4,
+        "total_ms": 435,
+        "max_ms": 190
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-4sbnr.log",
+        "p5-1b-a-512039c434a9-session-affinity-vllm-vllm-68d8597fdf-fhx9k.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-512039c434a9-session-affinity-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-68d8597fdf-4sbnr": 0.0,
+              "vllm-68d8597fdf-fhx9k": 5.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-68d8597fdf-4sbnr": 1.0,
+              "vllm-68d8597fdf-fhx9k": 8.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-68d8597fdf-4sbnr": 6.0,
+              "vllm-68d8597fdf-fhx9k": 2.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-68d8597fdf-4sbnr": 4.0,
+              "vllm-68d8597fdf-fhx9k": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "round-robin": {
+      "epp_config": "round-robin.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": 2,
+      "start": "one_at_a_time",
+      "profile_sha256": "0f8f85fa752648938a16cc3ebe061107286ab8ac1afaf4a5133b5fdc1357ea78",
+      "warmup_ttft_ms": {
+        "vllm-6bb7656c55-jcvnz": [
+          798,
+          118,
+          144,
+          145,
+          179
+        ],
+        "vllm-6bb7656c55-r24sk": [
+          205,
+          193,
+          130,
+          195,
+          102
+        ]
+      },
+      "started": 1795600572.929309,
+      "ended": 1795601127.4179797,
+      "clock_jumps": 16,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6bb7656c55-jcvnz": 298,
+        "vllm-6bb7656c55-r24sk": 275
+      },
+      "pod_switch_share": 0.5174825174825175,
+      "max_gap_deviation_ms": 440,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 5,
+        "total_ms": 993,
+        "max_ms": 440
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-jcvnz.log",
+        "p5-1b-a-512039c434a9-round-robin-vllm-vllm-6bb7656c55-r24sk.log"
+      ],
+      "autoscale": null,
+      "autoscale_summary": null,
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-1b-a-512039c434a9-round-robin-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-6bb7656c55-jcvnz": 6.0,
+              "vllm-6bb7656c55-r24sk": 6.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-6bb7656c55-jcvnz": 5.0,
+              "vllm-6bb7656c55-r24sk": 6.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-6bb7656c55-jcvnz": 5.0,
+              "vllm-6bb7656c55-r24sk": 5.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-6bb7656c55-jcvnz": 4.0,
+              "vllm-6bb7656c55-r24sk": 3.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

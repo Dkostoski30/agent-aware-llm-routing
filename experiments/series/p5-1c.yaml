@@ -1,0 +1,9 @@
+# P5.1c, E1's ablation square on compiled real pods (docs/task-cards/75-P5.1c-ablation-square.md): four files, a seed
+# each, the variants in a Williams square's orders. Run by make experiment-series NAME=p5-1c and compared by
+# make square-compare SERIES=p5-1c. Every variant is held to the plugin with all its rules on.
+reference: plugin
+files:
+  - p5-1c-a
+  - p5-1c-b
+  - p5-1c-c
+  - p5-1c-d

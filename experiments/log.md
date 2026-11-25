@@ -13,6 +13,108 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-25 · P5.1c · green (the ablation square: no rule shows a difference by the verdict; without priority, 16-19% slower in 3 of 4 files)
+Command: Claude: card 75, tests first (`experiments/tests/test_p5_squares.py`, 19 tests over both squares), files p5-1c-a to p5-1c-d and `experiments/series/p5-1c.yaml` (reference `plugin`) · the user, in P5.1b's block, laptop idle, `LightingService` stopped as admin (P4.13d): `make experiment-series NAME=p5-1c`, from 14:20 local; the user restarted the PC at 17:30 during file c for a break, and resumed at 19:35 (the Unknown pods from before the restart deleted, the pods restarted one at a time, the block's tidy-up, then the same series); square at 21:47. Files a c13c5c1f9d7f (seed 6), b 4c3fa25d1e58 (9), c b0a17c864c5b (10), d 80b098e07859 (13), all on commit 33eb174 with cards 74-75 uncommitted, system hash b7f1e50f0307 in all 8 files of both squares. Then Claude, read only: the report, the picker logs, the `.meta.json` files.
+Result:
+- **Clean:** 16 replays, 0 failed calls, every kept run finished, no stall, 15-19 clock jumps per replay.
+- **Each variant ran the rules it names:** in plugin, no-overload-guard and no-parallel-spill every pick carries the priority rule's value (474-574 of 474-574 per replay, set-routing's probe included); in no-priority none; no "Priority not written" in any picker log. no-overload-guard has no `spill` or `remap` picks and no-parallel-spill no `parallel-*` picks.
+- **Total run time (s), file by file in run order:**
+
+  | file | 1st | 2nd | 3rd | 4th |
+  |---|---|---|---|---|
+  | a | plugin 1,042.0 | no-overload-guard 948.4 | no-priority 1,043.7 | no-parallel-spill 942.2 |
+  | b | no-overload-guard 850.1 | no-parallel-spill 867.8 | plugin 831.7 | no-priority 961.9 |
+  | c | no-parallel-spill 995.2 | no-priority 1,130.8 | no-overload-guard 948.3 | plugin 954.4 |
+  | d | no-priority 869.8 | plugin 738.7 | no-parallel-spill 743.1 | no-overload-guard 787.6 |
+
+- **The verdict (`make square-compare SERIES=p5-1c`, `p5-1c-square.csv`; a positive gap is faster than the plugin):**
+  - no-overload-guard: +9.0%, -2.2%, +0.6%, -6.6%; mean +0.2%, spread 15.6%: no difference shown.
+  - no-priority: -0.2%, -15.7%, -18.5%, -17.7%; mean -13.0%, spread 18.3%: no difference shown.
+  - no-parallel-spill: +9.6%, -4.3%, -4.3%, -0.6%; mean +0.1%, spread 13.9%: no difference shown.
+  - By position, each total over its file's mean: 1st 1.028, 2nd 1.002, 3rd 0.971, 4th 0.999.
+- **Where no-priority loses, it is first tokens:** its first-token total against the plugin's +2.2% in a, +30.7% in b, +41.0% in c, +32.6% in d; generation -7% to +8%. Hit rate 0.577-0.606 against the plugin's 0.626-0.655.
+- **The plugin in both sittings (decision 5, reported, not judged):** P5.1b against P5.1c, same seeds, same variant: a 1,049.7 against 1,042.0 s (-0.7%), b 825.8 against 831.7 (+0.7%), c 932.2 against 954.4 (+2.4%), d 824.3 against 738.7 (-10.4%). Between sittings the host moved one file by 10%.
+- **Waiting after the bursts, the plugin's replay:** more than 1 call waiting on a pod after every burst but d's at 480 s (1 and 0) and c's at 600 s (0 and 0, the one run seed 10 starts there): those two are their files' limit.
+- **Per variant** (total run time; late starts; most waiting per pod within 60 s after the bursts at 120/240/360/480/600 s; picks by reason):
+  - a plugin: 1,042.0 s; 0 late; 4/3, 5/4, 3/2, 2/2; first 46, pinned 149, spill 85, remap 3, parallel-stay 225, parallel-spill 21.
+  - a no-overload-guard: 948.4 s; 3 late, 0.2 s; 5/2, 5/5, 2/4, 2/3; first 46, pinned 167, parallel-stay 245, parallel-spill 71.
+  - a no-priority: 1,043.7 s; 5 late, 2.2 s; 5/3, 5/5, 3/3, 1/2; first 46, pinned 136, spill 93, remap 1, parallel-stay 227, parallel-spill 26.
+  - a no-parallel-spill: 942.2 s; 5 late, 0.6 s; 3/5, 3/5, 4/6, 3/2; first 46, pinned 378, spill 101, remap 4.
+  - b no-overload-guard: 850.1 s; 0 late; 5/5, 3/0, 4/4, 0/0; first 45, pinned 136, parallel-stay 198, parallel-spill 62.
+  - b no-parallel-spill: 867.8 s; 19 late, 13.0 s, at most 3,041 ms; 4/4, 2/2, 5/3, 1/0; first 45, pinned 341, spill 53, remap 2.
+  - b plugin: 831.7 s; 11 late, 2.1 s; 5/4, 1/2, 5/4, 2/0; first 45, pinned 118, spill 54, remap 2, parallel-stay 196, parallel-spill 26.
+  - b no-priority: 961.9 s; 10 late, 2.4 s; 5/6, 0/3, 5/5, 2/0; first 45, pinned 122, spill 27, remap 4, parallel-stay 216, parallel-spill 27.
+  - c no-parallel-spill: 995.2 s; 12 late, 1.1 s; 4/5, 1/2, 7/5, 4/4, 0/0; first 47, pinned 279, spill 129, remap 3.
+  - c no-priority: 1,130.8 s; 1 late, 0.1 s; 3/8, 3/6, 6/4, 4/4, 0/0; first 47, pinned 100, spill 79, remap 1, parallel-stay 201, parallel-spill 30.
+  - c no-overload-guard: 948.3 s; 4 late, 0.5 s; 4/5, 2/2, 5/3, 4/5, 0/0; first 47, pinned 125, parallel-stay 208, parallel-spill 78.
+  - c plugin: 954.4 s; 0 late; 5/5, 4/1, 5/3, 3/3, 0/0; first 47, pinned 83, spill 108, remap 2, parallel-stay 186, parallel-spill 32.
+  - d no-priority: 869.8 s; 0 late; 3/5, 3/5, 4/4, 0/0; first 46, pinned 91, spill 53, remap 3, parallel-stay 216, parallel-spill 27.
+  - d plugin: 738.7 s; 0 late; 4/3, 2/3, 4/5, 1/0; first 46, pinned 86, spill 96, parallel-stay 185, parallel-spill 23.
+  - d no-parallel-spill: 743.1 s; 4 late, 0.4 s; 6/2, 2/4, 4/4, 2/0; first 46, pinned 326, spill 64.
+  - d no-overload-guard: 787.6 s; 3 late, 0.6 s; 3/3, 4/4, 6/4, 0/3; first 46, pinned 110, parallel-stay 203, parallel-spill 77.
+Notes:
+- **What it shows:** by the verdict fixed before the runs, no rule shows that it helps. Priority comes closest: without it the runs were 16-19% slower in files b, c and d, through first tokens, and equal in file a (-0.2%), where the plugin ran first in both squares. The overload guard and parallel spill change the picks (the guard off: 76-88 of 390-483 later steps moved, against 100-155) and not the total run time: their gaps change sign from file to file around a mean of 0.1-0.2%.
+- **File b's first try stopped at its start at 15:25**, with no message but make's `Error 1` right after "series: running p5-1c-b.yaml". The tidy-up found nothing to move, and the second try ran b clean. The journal shows a pod created at 15:23:38 and removed 36 s later, and no error; cause not found, as for file a's first start in P5.1b.
+- **The break:** at the restart file c had no-parallel-spill, no-priority and no-overload-guard finished and the plugin at run 24 of 50. The tidy-up moved them to `experiments/results/p5-1c-failed-1935/`, kept, and file c ran again whole after the restart. After the restart the cluster had started both vLLM pods at once, beside the two dead ones from before, now Unknown. The block deleted the dead pods and restarted the pods one at a time before the series.
+- **File d's Windows GPU memory log is empty:** typeperf ended early with exit 1 (its `.meta.json` has `windows_gpu_log_ended_early_with: 1`), after WSL's `UtilAcceptVsock: accept4 failed 110` during file c. The NVIDIA GPU log is whole. In the other 7 files of both squares Windows' shared GPU memory stayed at 107-167 MiB, so no spill.
+
+### 2026-11-25 · P5.1b · green (the headline square: session-affinity faster than default, round-robin slower, the plugin no difference shown)
+Command: Claude: card 74, tests first (`experiments/tests/test_p5_squares.py`), files p5-1b-a to p5-1b-d and `experiments/series/p5-1b.yaml` (reference `default`) · the user, laptop idle, Windows' AC standby off, `LightingService` stopped as admin (P4.13d). Sitting 1, file a, pods started together: a stall on the first try (P4.13d), then clean (2026-11-24, hash d40484c4d1af). File b's first try, 2026-11-25: the plugin's pods froze. The user then decided that every variant of both squares starts one pod at a time (`start: one_at_a_time`, `replicas: 2`) and that files a-d run again. File a's first try under it stopped in its start at 09:00 (`p5-1b-a-failed-start-1/`, 2 GPU logs). Claude ran the start's steps by hand and all of them passed (check_ready 21.6 s, scale to 1 24.7 s, restart 137 s, scale to 2 151.8 s). Then one block for both squares, with a tidy-up and up to 3 tries per series: `make experiment-series NAME=p5-1b` from about 10:00 local, file a done 11:05, b 12:07, c 13:17, d 14:20. Files a 512039c434a9 (seed 6), b 7a8cf978ba57 (9), c 450d56b98774 (10), d c5b5b63e187d (13), on commit 33eb174 with cards 74-75 uncommitted, system hash b7f1e50f0307. Then Claude, read only: the report, the picker logs, the `.meta.json` files.
+Result:
+- **Clean:** 16 replays, 0 failed calls, every kept run finished, no stall, no failed try, 15-19 clock jumps per replay.
+- **Sitting 1's rule held in every file:** every pick of the plugin carries the priority rule's value (574, 475, 495 and 474 of as many), and no "Priority not written".
+- **Total run time (s), file by file in run order:**
+
+  | file | 1st | 2nd | 3rd | 4th |
+  |---|---|---|---|---|
+  | a | plugin 1,049.7 | default 1,026.0 | session-affinity 871.0 | round-robin 1,278.4 |
+  | b | default 998.2 | round-robin 1,226.4 | plugin 825.8 | session-affinity 864.4 |
+  | c | round-robin 1,249.5 | session-affinity 934.9 | default 1,117.5 | plugin 932.2 |
+  | d | session-affinity 757.7 | plugin 824.3 | round-robin 1,018.0 | default 837.0 |
+
+- **The verdict (`make square-compare SERIES=p5-1b`, `p5-1b-square.csv`; a positive gap is faster than default):**
+  - plugin: -2.3%, +17.3%, +16.6%, +1.5%; mean +8.3%, spread 19.6%: no difference shown.
+  - session-affinity: +15.1%, +13.4%, +16.3%, +9.5%; mean +13.6%, spread 6.9%: **faster**.
+  - round-robin: -24.6%, -22.9%, -11.8%, -21.6%; mean -20.2%, spread 12.8%: **slower**.
+  - By position, each total over its file's mean: 1st 1.019, 2nd 1.017, 3rd 0.977, 4th 0.987.
+- **Hit rate and moved later steps:** session-affinity 0.632-0.706, 0 moved in every file; plugin 0.633-0.646, 114-155 moved; default 0.586-0.617, 165-174; round-robin 0.438-0.510, 159-195.
+- **First tokens:** the plugin's first-token total against default's -2.0% in a, -28.3% in b, -27.9% in c, -10.3% in d, lower in all four. Generation +4.6% in a, +2.8% in b, +1.8% in c, +2.3% in d (higher in all four).
+- **The plugin against session-affinity (not a verdict of the card, reported):** session-affinity faster by 17.0% in a and 8.1% in d, the plugin by 4.5% in b, equal in c (0.3%).
+- **Waiting after the bursts, default's replay (decision 3):** more than 1 call waiting on a pod after every burst but d's at 480 s (0 and 0) and c's at 600 s (0 and 0, the one run seed 10 starts there): those two are their files' limit.
+- **Per variant** (total run time; late starts; most waiting per pod within 60 s after the bursts at 120/240/360/480/600 s; the plugin's picks by reason):
+  - a plugin: 1,049.7 s; 3 late, 0.4 s; 6/6, 5/6, 2/4, 2/1; first 46, pinned 126, spill 91, remap 2, parallel-stay 230, parallel-spill 34.
+  - a default: 1,026.0 s; 4 late, 0.7 s; 4/6, 6/5, 4/2, 4/2.
+  - a session-affinity: 871.0 s; 4 late, 0.4 s; 0/5, 1/8, 6/2, 4/0.
+  - a round-robin: 1,278.4 s; 5 late, 1.0 s; 6/6, 5/6, 5/5, 4/3.
+  - b default: 998.2 s; 3 late, 0.2 s; 6/6, 2/1, 6/7, 2/0.
+  - b round-robin: 1,226.4 s; 14 late, 3.3 s; 5/6, 2/1, 7/7, 0/2.
+  - b plugin: 825.8 s; 1 late, 0.1 s; 4/4, 0/1, 4/5, 0/0; first 45, pinned 111, spill 58, remap 1, parallel-stay 190, parallel-spill 36.
+  - b session-affinity: 864.4 s; 18 late, 14.0 s, at most 1,452 ms; 5/4, 2/0, 11/2, 2/0.
+  - c round-robin: 1,249.5 s; 2 late, 0.1 s; 5/6, 5/4, 6/6, 5/5, 0/0.
+  - c session-affinity: 934.9 s; 2 late, 0.1 s; 8/5, 2/4, 7/3, 3/3, 0/0.
+  - c default: 1,117.5 s; 9 late, 1.4 s; 6/5, 2/4, 5/6, 8/3, 0/0.
+  - c plugin: 932.2 s; 1 late, 0.1 s; 8/2, 3/4, 4/7, 3/4, 0/0; first 47, pinned 93, spill 76, parallel-stay 223, parallel-spill 19.
+  - d session-affinity: 757.7 s; 18 late, 7.2 s, at most 2,338 ms; 0/10, 0/7, 7/0, 0/0.
+  - d plugin: 824.3 s; 21 late, 2.2 s; 5/4, 3/6, 5/5, 1/2; first 46, pinned 90, spill 64, remap 2, parallel-stay 217, parallel-spill 17.
+  - d round-robin: 1,018.0 s; 4 late, 0.3 s; 6/7, 4/3, 3/6, 0/1.
+  - d default: 837.0 s; 6 late, 0.8 s; 5/5, 5/5, 3/6, 0/0.
+Notes:
+- **What it shows:** keeping a run on one pod beats the default picker on these real pods, in every file and by more than the files' spread. Upstream's filter, which never moves a run, did it. The plugin, which keeps runs too but moves 114-155 later steps on the guard and the spills, was faster than default in b and c by 17% and not in a and d, so its gap does not clear the spread. Its first tokens were lower than default's in all four files, and its generation was higher in all four. Round-robin, which spreads every call, is slower in every file.
+- **File a's plugin results also hold two pod logs from 2026-11-24 20:29** (`-plugin-vllm-vllm-757cc948b8-*`): pods from before a restart, still listed when the variant saved its logs. They are not this replay's pods; the replay's are `6c68654877-*`.
+- **The tries before the square are kept:** `p5-1b-a-stalled-1/` and `p5-1b-a-together/` (P4.13d), `p5-1b-b-stalled-1/` (hash 5e045b7ac386: file b's first try, default and round-robin clean, then the plugin's two pods, started together, froze after JIT warm-up in CUDA graph capture and turned Ready only after the 15 min the experiment waits), `p5-1b-a-failed-start-1/`. The together run of file a (hash d40484c4d1af: plugin 1,100.6 s, default 1,148.4, session-affinity 1,084.5, round-robin 1,289.6; hit rate 0.628, 0.613, 0.648, 0.455) is a different start and hash, so not in the square.
+- Windows' shared GPU memory stayed at 107-120 MiB in all four files.
+- **Reported, not fixed:** `make test`'s UI part fails in a new shell with `ng: node: not found`. `~/.bashrc` line 121 runs `source <(ng completion script)` before nvm is loaded in `~/.profile`. This is outside the repo.
+
+### 2026-11-24 · P4.13d · green (ASUS's lighting add-on leaked memory on the NVIDIA GPU until the 4 GB card spilled; stopped before every sitting)
+Command: during P5.1b's sitting 1, the user (laptop idle throughout) and Claude: Windows `typeperf "\GPU Process Memory(*)\Dedicated Usage"` per process and `tasklist`, against the pods' GPU log; then `LightingService` stopped as admin and the GPU watched with the cluster up; then file a of P5.1b again. The per-process logs are in `~` (`p5-1b-a-gpu-process.txt`, `p5-1b-a-tasklist-*.csv`, `p4-13d-check.txt`), outside the repo.
+Result:
+- **The stall it caused:** file a's first try (hash d40484c4d1af, 2026-11-24 17:26-18:28): plugin, default and session-affinity clean, the priority rule's value on 573 of 573 picks. Round-robin stalled from its first minute of load at 100% GPU and ~35 W: 19 of 69 started calls finished, and the run stopped on the stall check. Kept in `experiments/results/p5-1b-a-stalled-1/`.
+- **The cause:** ASUS's AURA lighting add-on, `LM_Support.exe`, run by the `LightingService` service, holds memory on the NVIDIA GPU. Its memory grew 51 -> 145 MiB in 15 min, through pod restarts, until the 4 GB card spilled into shared memory.
+- **With the service stopped:** the GPU held 3,585 MiB flat for 13 min, and file a ran clean, pods started together: all four variants 573 of 573 calls, no stall. Kept in `experiments/results/p5-1b-a-together/`.
+Notes:
+- The service starts with Windows. P5.1b's and P5.1c's run blocks check, through `sc.exe query LightingService` and `tasklist.exe`, that it is stopped and that `LM_Support.exe` is gone, and run nothing otherwise. That check lives in the run blocks, not in `make experiment`. A guard there would change the system hash, so it waits until after the squares and is its own commit.
+- Two earlier tries of sitting 1 stopped at the start on WSL's `UtilAcceptVsock: accept4 failed 110` in the Windows GPU check, which comes with the VM under memory pressure. A restart cleared it.
+
 ### 2026-11-24 · P5.0 · green (the squares' tooling: a series from one command, the square's comparison and verdict, each file's source, late starts and waiting)
 Command: Claude: card 73, tests first; `make test` (3,409 Python, Go, 22 training, 258 UI specs; 1 warning, FastAPI's TestClient deprecation in the app tests, there before) and `make lint` (every hook) · the user, one block on `feature/phase-5`, the cluster up on sim since 12:28 from a first try that came before the code: `make experiment-series NAME=p5-0-sim-check` twice. Files p5-0-sim-a (hash aa4b71ff5d10: sim, converted trace, `burst-fan-out-heavy`, seed 6, `default` then `plugin`) and p5-0-sim-b (e7f3aaddbe75: seed 9, `plugin` then `default`), replays 13:26-14:12 local. Then Claude, read only: the square CSV and both `.meta.json` files.
 Result:

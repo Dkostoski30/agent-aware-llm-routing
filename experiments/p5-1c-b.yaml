@@ -1,0 +1,74 @@
+# P5.1c: file b of E1's ablation square on compiled real pods (docs/task-cards/75-P5.1c-ablation-square.md): the
+# plugin, and the plugin with one rule off each, held to the plugin. Four files, a seed each, the variants in the orders
+# of a Williams square; this is row 2. Run all four with make experiment-series NAME=p5-1c, then compare with
+# make square-compare SERIES=p5-1c, the laptop idle, Windows' AC standby off and ASUS's LightingService stopped
+# (P4.13d).
+# Results carry this file's hash (D11).
+profile: real
+# Card 74's load (experiments/p5-1b-b.yaml), P5.1a-2's but for the seed; a test holds it there.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# The squares' seeds 6, 9, 10, 13 in files a-d (card 73), held by a test in experiments/tests/test_p5_squares.py.
+seed: 9
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 120 s, 5 at seed 9; a test holds it there.
+  runs_discarded: 5
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As P5.1a-2: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused, since the GPU-sharing
+# stalls of 2026-11-12 (P3.7) would read as the picker's result.
+pod_stall_seconds: 30
+# The verdict is make square-compare's against the plugin, fixed before the runs (card 73): slower means the rule the
+# variant turns off helps. The order is the square's row 2 (card 75): A plugin, B no-overload-guard,
+# C no-parallel-spill, D no-priority. Each variant starts one pod, then the second beside it once it is Ready (P4.13c),
+# as card 74's (2026-11-25); one at a time needs the count set, the profile's 2. Every variant is thesis-plugins.yaml
+# at config/real.yaml's thresholds; affinity stays on, which the overload guard and parallel spill need.
+variants:
+  - name: no-overload-guard
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: false
+      parallel_spill: true
+      priority: true
+    epp_config: thesis-plugins.yaml
+  - name: no-parallel-spill
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: false
+      priority: true
+    epp_config: thesis-plugins.yaml
+  - name: plugin
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+      priority: true
+    epp_config: thesis-plugins.yaml
+  - name: no-priority
+    replicas: 2
+    start: one_at_a_time
+    values: null
+    routing:
+      plugin: true
+      affinity: true
+      overload_guard: true
+      parallel_spill: true
+      priority: false
+    epp_config: thesis-plugins.yaml

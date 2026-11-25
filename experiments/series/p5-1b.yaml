@@ -1,0 +1,9 @@
+# P5.1b, E1's headline square on compiled real pods (docs/task-cards/74-P5.1b-headline-square.md): four files, a seed
+# each, the variants in a Williams square's orders. Run by make experiment-series NAME=p5-1b and compared by
+# make square-compare SERIES=p5-1b. Every variant is held to the default picker.
+reference: default
+files:
+  - p5-1b-a
+  - p5-1b-b
+  - p5-1b-c
+  - p5-1b-d
