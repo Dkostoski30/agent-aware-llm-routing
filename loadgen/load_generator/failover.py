@@ -20,14 +20,28 @@ with at least one call running on the killed pod at the kill and no run failed b
 it, it is the control: counted, not judged. Decided with the user,
 docs/task-cards/60-P4.4-failover.md.
 
+A file may name a list of seeds in place of one, each with the order its variants run in, and a
+variant with no kill (P5.3, docs/task-cards/77-P5.3-failover.md). Each seed is then its own run,
+its results named with the seed and its .meta.json written after its last variant; a seed whose
+.meta.json exists is skipped, so the same command picks up a run that stopped, and a seed left
+halfway is refused before anything runs. The no-kill variant is the reference: each kill
+variant's runs are paired with the same runs in it, and the difference is the recovery cost,
+apart for the runs with a call on the killed pod at the kill, the runs only pinned there, and the
+rest, whose difference is the noise and the one pod lost. After the last seed, every seed's
+numbers go into <name>-<hash>-summary.csv, and each variant's completion over the seeds is
+printed.
+
 Usage: python -m load_generator.failover EXPERIMENT
 """
 
 import argparse
 import contextlib
+import csv
+import dataclasses
 import hashlib
 import json
 import re
+import statistics
 import subprocess
 import sys
 import threading
@@ -45,11 +59,13 @@ from load_generator.experiment import (
     EPP_DEPLOYMENT,
     SCALE_TIMEOUT,
     SIM_PROFILE,
+    SOURCE_ROOT,
     VLLM_DEPLOYMENT,
     VLLM_SELECTOR,
     plugin_on,
     pods_to_warm,
     set_routing,
+    source_state,
 )
 from load_generator.pod_removed import (
     FINISHED_BEFORE,
@@ -111,6 +127,9 @@ class FailoverVariant:
     name: str
     # The replay's replay.retry for this variant: off is the replay as before P4.4.
     retry: bool
+    # False: the replay runs with no pod killed, the reference the kill variants' runs are paired
+    # with (P5.3).
+    kill: bool = True
 
 
 @dataclass(frozen=True)
@@ -126,13 +145,41 @@ class FailoverExperiment:
     kill_after_seconds: float
     wait_for_calls_seconds: float
     settle_seconds: float
+    # In the order they run.
     variants: list[FailoverVariant]
+    # What its results are named: <name>-<hash> for a file of one seed, as P4.4's, and
+    # <name>-<hash>-s<seed> for each seed of a file of seeds.
+    stem: str
 
 
-def load_failover(path: Path) -> FailoverExperiment:
+def _variants(sections: Sequence[Mapping[str, Any]]) -> list[FailoverVariant]:
+    variants = []
+    for section in sections:
+        name, retry, kill = section["name"], section["retry"], section.get("kill", True)
+        if not isinstance(retry, bool):
+            raise FailoverError(f"variant {name}: retry must be true or false")
+        if not isinstance(kill, bool):
+            raise FailoverError(f"variant {name}: kill must be true or false")
+        if not kill and not retry:
+            raise FailoverError(
+                f"variant {name}: the no-kill variant is the retry's reference, so it retries too"
+            )
+        variants.append(FailoverVariant(name, retry, kill))
+    names = [variant.name for variant in variants]
+    if not names or len(set(names)) != len(names):
+        raise FailoverError(f"the variants need names, each once, got {names}")
+    if sum(not variant.kill for variant in variants) > 1:
+        raise FailoverError("at most one variant runs with no kill: the one reference")
+    if not any(variant.kill for variant in variants):
+        raise FailoverError("no variant kills a pod")
+    return variants
+
+
+def _experiment(
+    path: Path, spec: Mapping[str, Any], seed: int, variants: list[FailoverVariant], stem: str
+) -> FailoverExperiment:
     """A missing key raises KeyError. Rules the profile lacks are refused by set-routing.sh, before
     any replay."""
-    spec = yaml.safe_load(path.read_text())
     routing = spec["routing"]
     if not isinstance(routing, dict) or not all(isinstance(on, bool) for on in routing.values()):
         raise FailoverError(f"routing must map rules to true or false, got {routing}")
@@ -147,14 +194,6 @@ def load_failover(path: Path) -> FailoverExperiment:
     trace = (path.parent / spec["trace"]).resolve()
     if not trace.exists():
         raise FailoverError(f"no trace {spec['trace']}")
-    variants = []
-    for section in spec["variants"]:
-        if not isinstance(section["retry"], bool):
-            raise FailoverError(f"variant {section['name']}: retry must be true or false")
-        variants.append(FailoverVariant(section["name"], section["retry"]))
-    names = [variant.name for variant in variants]
-    if not names or len(set(names)) != len(names):
-        raise FailoverError(f"the variants need names, each once, got {names}")
     return FailoverExperiment(
         name=path.stem,
         hash=experiment_hash(path),
@@ -162,12 +201,53 @@ def load_failover(path: Path) -> FailoverExperiment:
         routing=routing,
         trace=trace,
         pattern=spec["pattern"],
-        seed=spec["seed"],
+        seed=seed,
         kill_after_seconds=spec["kill_after_seconds"],
         wait_for_calls_seconds=spec["wait_for_calls_seconds"],
         settle_seconds=spec["settle_seconds"],
         variants=variants,
+        stem=stem,
     )
+
+
+def load_failover(path: Path) -> FailoverExperiment:
+    """A file of one seed, P4.4's form, its variants in the file's order."""
+    spec = yaml.safe_load(path.read_text())
+    if "seeds" in spec:
+        raise FailoverError(f"{path.name} names seeds: each is its own experiment")
+    stem = f"{path.stem}-{experiment_hash(path)}"
+    return _experiment(path, spec, spec["seed"], _variants(spec["variants"]), stem)
+
+
+def load_failover_seeds(path: Path) -> list[FailoverExperiment]:
+    """Each seed's experiment, in the file's order of seeds (P5.3); a file of one seed is one."""
+    spec = yaml.safe_load(path.read_text())
+    if "seeds" not in spec:
+        return [load_failover(path)]
+    if "seed" in spec:
+        raise FailoverError("a file names one seed or a list of seeds, not both")
+    variants = {variant.name: variant for variant in _variants(spec["variants"])}
+    seeds = [entry["seed"] for entry in spec["seeds"]]
+    if not seeds or len(set(seeds)) != len(seeds):
+        raise FailoverError(f"the seeds must be named, each once, got {seeds}")
+    stem = f"{path.stem}-{experiment_hash(path)}"
+    experiments = []
+    for entry in spec["seeds"]:
+        order = entry["order"]
+        if sorted(order) != sorted(variants):
+            raise FailoverError(
+                f"seed {entry['seed']}: the order must name each variant once, got {order}"
+            )
+        experiments.append(
+            _experiment(
+                path,
+                spec,
+                entry["seed"],
+                [variants[name] for name in order],
+                f"{stem}-s{entry['seed']}",
+            )
+        )
+    return experiments
 
 
 def variant_profile(profile: Mapping[str, Any], retry: bool) -> dict[str, Any]:
@@ -232,6 +312,8 @@ class FailoverReport:
     # attempt names no pod: the picker's pick of it stands for it, else the run's pin at the kill
     # (P3.4); a first call has no pin (failover-576b813b6b4c).
     on_killed: list[str]
+    # The runs of those calls, each once.
+    on_killed_runs: list[str]
     # Retries printed during the variant, for any reason.
     retries: int
     # Runs with a call running at the kill or sent during the settle that failed for a reason other
@@ -253,6 +335,134 @@ class FailoverReport:
     @property
     def passed(self) -> bool:
         return self.retry and not self.void and not self.failed_by_kill
+
+    @property
+    def verdict(self) -> str:
+        if not self.retry:
+            return "control"
+        if self.void:
+            return "void"
+        return "passed" if self.passed else "failed"
+
+
+def completion(
+    lines: Sequence[Mapping[str, Any]], reasons: Mapping[tuple[str, int], Sequence[str]]
+) -> tuple[int, int, list[str]]:
+    """The runs, those with no failed call, and those whose failed calls all failed on their
+    deadline: overload, not the kill."""
+    runs = {line["run_id"] for line in lines}
+    failed_runs = {line["run_id"] for line in lines if "duration_ms" not in line}
+    deadline_runs = sorted(
+        run
+        for run in failed_runs
+        if all(
+            text == DEADLINE_REASON
+            for line in lines
+            if line["run_id"] == run and "duration_ms" not in line
+            for text in reasons.get((run, line["step"]), [NO_REASON])
+        )
+    )
+    return len(runs), len(runs - failed_runs), deadline_runs
+
+
+def retry_lost_ms(lines: Sequence[Mapping[str, Any]], log: str) -> dict[tuple[str, int], int]:
+    """Each retried step's time from its first attempt to its last, by run and step: the failed
+    attempts and the backoffs. On the wall clock, as the retry line's sent time and ts_start are,
+    so a step of the VM's clock (P2.3) inside it is in it too. A fanned-out step's calls share a
+    key and one retry line's attempts, so its time ends at the latest of their starts."""
+    starts = retry_starts(log)
+    last: dict[tuple[str, int], int] = {}
+    for line in lines:
+        key = (line["run_id"], line["step"])
+        if key in starts:
+            last[key] = max(last.get(key, line["ts_start"]), line["ts_start"])
+    return {key: last[key] - min(starts[key]) for key in last}
+
+
+def run_times_ms(lines: Sequence[Mapping[str, Any]], log: str) -> dict[str, int | None]:
+    """Each run's time from its first call to its last reply, None for a run with a failed call:
+    each step's slowest call and its gap, on the replay's monotonic clock, as
+    results.run_completion_ms counts it. A later call's gap runs from the step before's end to its
+    last attempt (replay._call), so it holds a retry's lost time; a first call's gap is 0, so a
+    retried first call's lost time is added from retry_lost_ms."""
+    steps: dict[str, dict[int, int]] = {}
+    failed = set()
+    for line in lines:
+        by_step = steps.setdefault(line["run_id"], {})
+        if "duration_ms" not in line:
+            failed.add(line["run_id"])
+            continue
+        took = line["gap_before_ms"] + line["duration_ms"]
+        by_step[line["step"]] = max(by_step.get(line["step"], 0), took)
+    lost = retry_lost_ms(lines, log)
+    return {
+        run_id: None
+        if run_id in failed
+        else sum(by_step.values()) + lost.get((run_id, min(by_step)), 0)
+        for run_id, by_step in steps.items()
+    }
+
+
+@dataclass(frozen=True)
+class GroupCost:
+    # The group's runs that finished in both replays, and their extra time over the no-kill's.
+    runs: int
+    median_ms: float | None
+    max_ms: int | None
+
+
+@dataclass(frozen=True)
+class RecoveryCost:
+    """A kill variant's runs against the same runs in the no-kill variant at its seed (P5.3)."""
+
+    # Runs with a call running on the killed pod at the kill.
+    on_killed: GroupCost
+    # Runs pinned to the killed pod at the kill and not finished, with no call running on it: their
+    # later steps lose their cached context.
+    pinned: GroupCost
+    # The rest: the noise between two replays and the one pod left carrying the load.
+    others: GroupCost
+    # Runs that did not finish in one of the two, which have no time to pair.
+    unpaired: list[str]
+    # Steps sent again, and their lost time in all (retry_lost_ms).
+    retried_steps: int
+    lost_ms: int
+
+
+def _group(extra: Mapping[str, int], runs: set[str]) -> GroupCost:
+    values = [extra[run] for run in runs if run in extra]
+    if not values:
+        return GroupCost(0, None, None)
+    return GroupCost(len(values), statistics.median(values), max(values))
+
+
+def recovery_cost(
+    killed: Mapping[str, int | None],
+    reference: Mapping[str, int | None],
+    on_killed_runs: Sequence[str],
+    affected: Sequence[str],
+    lost: Mapping[tuple[str, int], int],
+) -> RecoveryCost:
+    """killed and reference are run_times_ms of the kill variant and the no-kill one: the same
+    runs, the same seed. Each run is in one group, the first it fits."""
+    extra = {}
+    unpaired = []
+    for run, took in sorted(killed.items()):
+        before = reference.get(run)
+        if took is None or before is None:
+            unpaired.append(run)
+        else:
+            extra[run] = took - before
+    hit = set(on_killed_runs)
+    pinned = set(affected) - hit
+    return RecoveryCost(
+        on_killed=_group(extra, hit),
+        pinned=_group(extra, pinned),
+        others=_group(extra, set(extra) - hit - pinned),
+        unpaired=unpaired,
+        retried_steps=len(lost),
+        lost_ms=sum(lost.values()),
+    )
 
 
 def _outcome(line: Mapping[str, Any], retries: int, reasons: Sequence[str]) -> str:
@@ -277,6 +487,7 @@ def build_failover_report(
     pins = pinned_pods(lines, killed_ms)
     picks = picked_before(picker, killed_ms)
     on_killed = []
+    on_killed_runs = set()
     by_kill = set()
     for line in lines:
         key = (line["run_id"], line["step"])
@@ -298,18 +509,8 @@ def build_failover_report(
         if group == RUNNING_AT_DELETE and pod == killed_pod:
             outcome = _outcome(line, len(attempts), texts)
             on_killed.append(f"{line['run_id']} step {line['step']}: {outcome}")
-    runs = {line["run_id"] for line in lines}
-    failed_runs = {line["run_id"] for line in lines if "duration_ms" not in line}
-    deadline_runs = sorted(
-        run
-        for run in failed_runs
-        if all(
-            text == DEADLINE_REASON
-            for line in lines
-            if line["run_id"] == run and "duration_ms" not in line
-            for text in reasons.get((run, line["step"]), [NO_REASON])
-        )
-    )
+            on_killed_runs.add(line["run_id"])
+    runs, done, deadline_runs = completion(lines, reasons)
     going_on = {
         line["run_id"] for line in lines if group_of(line, killed_ms, settle_ms) != FINISHED_BEFORE
     }
@@ -324,10 +525,11 @@ def build_failover_report(
     return FailoverReport(
         killed_pod=killed_pod,
         retry=retry,
-        runs=len(runs),
-        done=len(runs - failed_runs),
+        runs=runs,
+        done=done,
         deadline_runs=deadline_runs,
         on_killed=on_killed,
+        on_killed_runs=sorted(on_killed_runs),
         retries=sum(len(attempts) for attempts in starts.values()),
         failed_by_kill=sorted(by_kill),
         affected=affected,
@@ -349,15 +551,36 @@ def report_lines(variant: str, report: FailoverReport) -> list[str]:
         f"  runs pinned to it at the kill: {len(report.affected)} {report.affected}; "
         f"remapped off it: {len(report.remapped)} {report.remapped}",
     ]
-    if not report.retry:
-        lines.append(f"{variant}: control, {completion}, {by_kill}")
-    elif report.passed:
-        lines.append(f"{variant}: passed, {completion}")
-    elif report.void:
-        lines.append(f"{variant}: void, no call was running on the killed pod at the kill")
-    else:
-        lines.append(f"{variant}: failed, {completion}, {by_kill}")
+    said = {
+        "control": f"control, {completion}, {by_kill}",
+        "passed": f"passed, {completion}",
+        "void": "void, no call was running on the killed pod at the kill",
+        "failed": f"failed, {completion}, {by_kill}",
+    }
+    lines.append(f"{variant}: {said[report.verdict]}")
     return lines
+
+
+def _seconds(milliseconds: float | None) -> str:
+    return "-" if milliseconds is None else f"{milliseconds / 1000:.1f} s"
+
+
+def recovery_lines(reference: str, cost: RecoveryCost) -> list[str]:
+    groups = [
+        ("a call on the killed pod at the kill", cost.on_killed),
+        ("pinned there only", cost.pinned),
+        ("the rest", cost.others),
+    ]
+    return [
+        f"  recovery against {reference}, extra time per run:",
+        *(
+            f"    {name}: {group.runs} runs, median {_seconds(group.median_ms)}, "
+            f"max {_seconds(group.max_ms)}"
+            for name, group in groups
+        ),
+        f"    not finished in one of the two: {len(cost.unpaired)} {cost.unpaired}",
+        f"    steps sent again: {cost.retried_steps}, lost {_seconds(cost.lost_ms)} in all",
+    ]
 
 
 def _now_ms() -> int:
@@ -441,7 +664,7 @@ def run_variant(
     profile: Mapping[str, Any],
     results: Path,
 ) -> VariantResult:
-    stem = f"{experiment.name}-{experiment.hash}-{variant.name}"
+    stem = f"{experiment.stem}-{variant.name}"
     out = results / f"{stem}.jsonl"
     # Every variant starts from empty caches and the profile's pods, the last kill's replacement
     # included.
@@ -453,6 +676,7 @@ def run_variant(
     # After set-routing.sh, as P3.4's: live_pins compares each line's own timestamp with this.
     since = datetime.now(UTC).isoformat()
     state = Kill(ready, since)
+    # The no-kill variant's timer kills nothing and is never started.
     timer = threading.Timer(
         experiment.kill_after_seconds, kill_pod, (state, experiment.wait_for_calls_seconds)
     )
@@ -463,7 +687,8 @@ def run_variant(
         contextlib.redirect_stdout(Tee(sys.stdout, log)),
         contextlib.redirect_stderr(Tee(sys.stderr, log)),
     ):
-        timer.start()
+        if variant.kill:
+            timer.start()
         try:
             lines = replay_to_file(
                 variant_profile(profile, variant.retry),
@@ -474,23 +699,25 @@ def run_variant(
                 plugin_on(profile["routing"], experiment.routing),
             )
         finally:
-            timer.cancel()
-            timer.join()
+            if variant.kill:
+                timer.cancel()
+                timer.join()
     # Kept before anything else can fail: switching the routing back restarts the picker, and its
     # log with it (P3.4's second review).
     picker = kubectl("logs", f"deployment/{EPP_DEPLOYMENT}", f"--since-time={since}")
     picker_path = results / f"{stem}-picker.log"
     picker_path.write_text(picker)
-    if not state.started:
-        raise FailoverError(
-            f"the replay ended before the kill at {experiment.kill_after_seconds} s"
-        )
     replacement_error = None
-    try:
-        kubectl("rollout", "status", VLLM_DEPLOYMENT, f"--timeout={SCALE_TIMEOUT}")
-    except subprocess.CalledProcessError as error:
-        replacement_error = kubectl_failure(error)
-        print(f"failover: the replacement pod: {replacement_error}", flush=True)
+    if variant.kill:
+        if not state.started:
+            raise FailoverError(
+                f"the replay ended before the kill at {experiment.kill_after_seconds} s"
+            )
+        try:
+            kubectl("rollout", "status", VLLM_DEPLOYMENT, f"--timeout={SCALE_TIMEOUT}")
+        except subprocess.CalledProcessError as error:
+            replacement_error = kubectl_failure(error)
+            print(f"failover: the replacement pod: {replacement_error}", flush=True)
     return VariantResult(
         variant,
         state,
@@ -521,11 +748,37 @@ def run_failover(
     return done
 
 
-def variant_summary(result: VariantResult, report: FailoverReport | None) -> dict[str, Any]:
+@dataclass(frozen=True)
+class NoKillReport:
+    """The no-kill variant's own numbers, as a kill variant's report counts them."""
+
+    runs: int
+    done: int
+    deadline_runs: list[str]
+    retries: int
+
+    @property
+    def completion_rate(self) -> float:
+        return self.done / self.runs
+
+
+def no_kill_report(lines: Sequence[Mapping[str, Any]], log: str) -> NoKillReport:
+    runs, done, deadline_runs = completion(lines, failure_reasons(log))
+    retries = sum(len(attempts) for attempts in retry_starts(log).values())
+    return NoKillReport(runs, done, deadline_runs, retries)
+
+
+def variant_summary(
+    result: VariantResult,
+    report: FailoverReport | NoKillReport | None,
+    recovery: RecoveryCost | None,
+) -> dict[str, Any]:
+    """report is None for a kill variant whose kill did not happen."""
     kill = result.kill
     summary: dict[str, Any] = {
         "name": result.variant.name,
         "retry": result.variant.retry,
+        "kill": result.variant.kill,
         "killed_pod": kill.pod,
         "live_pins_at_kill": kill.pins,
         "picker_log_since": kill.since,
@@ -533,66 +786,109 @@ def variant_summary(result: VariantResult, report: FailoverReport | None) -> dic
         "kill_error": kill.error,
         "replacement_error": result.replacement_error,
         "picker_restarts": result.picker_restarts,
-        "passed": report is not None and report.passed,
+        "passed": isinstance(report, FailoverReport) and report.passed,
     }
-    if report is not None:
+    if isinstance(report, NoKillReport):
         summary.update(
+            verdict="reference",
+            runs=report.runs,
+            done=report.done,
+            completion_rate=report.completion_rate,
+            deadline_runs=report.deadline_runs,
+            retries=report.retries,
+        )
+    elif isinstance(report, FailoverReport):
+        summary.update(
+            verdict=report.verdict,
             runs=report.runs,
             done=report.done,
             completion_rate=report.completion_rate,
             deadline_runs=report.deadline_runs,
             on_killed=report.on_killed,
+            on_killed_runs=report.on_killed_runs,
             retries=report.retries,
             failed_by_kill=report.failed_by_kill,
             affected_runs=report.affected,
             remapped_runs=report.remapped,
             void=report.void,
         )
+    else:
+        summary["verdict"] = "void"
+    if recovery is not None:
+        summary["recovery"] = dataclasses.asdict(recovery)
     return summary
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="P4.4: a replay with a pod killed, retried or not")
-    parser.add_argument("experiment", type=Path)
-    args = parser.parse_args()
+def _on(flag: bool) -> str:
+    return "on" if flag else "off"
 
-    experiment = load_failover(args.experiment)
-    profile_path = REPO_ROOT / "config" / f"{experiment.profile}.yaml"
-    profile_text = profile_path.read_text()
-    profile = yaml.safe_load(profile_text)
-    results = REPO_ROOT / "experiments" / "results"
-    stem = f"{experiment.name}-{experiment.hash}"
-    found = sorted(results.glob(f"{stem}*"))
-    if found:
-        raise FailoverError(f"results of this file exist, delete them to run it again: {found}")
+
+def variant_report(
+    seed: int, result: VariantResult, settle_ms: int
+) -> FailoverReport | NoKillReport | None:
+    """Printed as it is made. None for a kill variant whose kill did not happen."""
+    variant, kill = result.variant, result.kill
+    log = log_path(result.out).read_text()
+    print(
+        f"failover: seed {seed}, {variant.name}, "
+        f"retry {_on(variant.retry)}, kill {_on(variant.kill)}"
+    )
+    print(f"  picker restarts during the replay: {result.picker_restarts}")
+    if not variant.kill:
+        plain = no_kill_report(result.lines, log)
+        print(
+            f"{variant.name}: reference, completion {plain.done} of {plain.runs} runs "
+            f"({100 * plain.completion_rate:.1f}%), retries {plain.retries}, "
+            f"failed on their deadline only {plain.deadline_runs}"
+        )
+        return plain
+    if kill.pod is None or kill.killed_ms is None:
+        print(f"{variant.name}: void, no pod held a live pin, so none was killed")
+        return None
+    report = build_failover_report(
+        result.lines, log, result.picker, kill.pod, kill.killed_ms, settle_ms, variant.retry
+    )
+    for line in report_lines(variant.name, report):
+        print(line)
+    return report
+
+
+def run_seed(
+    experiment: FailoverExperiment,
+    profile: Mapping[str, Any],
+    profile_text: str,
+    results: Path,
+) -> dict[str, Any]:
+    """One seed's variants, its report and its .meta.json, which is returned."""
     settle_ms = round(experiment.settle_seconds * 1000)
+    done = run_failover(experiment, profile, results)
+    reports = [variant_report(experiment.seed, result, settle_ms) for result in done]
+    references = [result for result in done if not result.variant.kill]
+    reference_times = (
+        run_times_ms(references[0].lines, log_path(references[0].out).read_text())
+        if references
+        else None
+    )
     summaries = []
-    judged = []
-    for result in run_failover(experiment, profile, results):
-        name = result.variant.name
-        kill = result.kill
-        print(f"failover: {name}, retry {'on' if result.variant.retry else 'off'}")
-        print(f"  picker restarts during the replay: {result.picker_restarts}")
-        report = None
-        if kill.pod is None or kill.killed_ms is None:
-            print(f"{name}: void, no pod held a live pin, so none was killed")
-        else:
-            report = build_failover_report(
-                result.lines,
-                log_path(result.out).read_text(),
-                result.picker,
-                kill.pod,
-                kill.killed_ms,
-                settle_ms,
-                result.variant.retry,
+    for result, report in zip(done, reports, strict=True):
+        recovery = None
+        if reference_times is not None and isinstance(report, FailoverReport):
+            log = log_path(result.out).read_text()
+            recovery = recovery_cost(
+                run_times_ms(result.lines, log),
+                reference_times,
+                report.on_killed_runs,
+                report.affected,
+                retry_lost_ms(result.lines, log),
             )
-            for line in report_lines(name, report):
+            print(f"failover: seed {experiment.seed}, {result.variant.name}")
+            for line in recovery_lines(references[0].variant.name, recovery):
                 print(line)
-        judged.append(not result.variant.retry or (report is not None and report.passed))
-        summaries.append(variant_summary(result, report))
+        summaries.append(variant_summary(result, report, recovery))
     meta = {
         "experiment": experiment.name,
         "hash": experiment.hash,
+        "source": source_state(SOURCE_ROOT),
         "profile": experiment.profile,
         "profile_sha256": hashlib.sha256(profile_text.encode()).hexdigest(),
         "trace": experiment.trace.name,
@@ -608,11 +904,151 @@ def main() -> None:
         },
         "variants": summaries,
     }
-    meta_path = results / f"{stem}.meta.json"
+    meta_path = results / f"{experiment.stem}.meta.json"
     with meta_path.open("x") as file:
         json.dump(meta, file, indent=2)
         file.write("\n")
-    print(f"failover: wrote {stem}-<variant>.jsonl, .jsonl.log, -picker.log and {meta_path.name}")
+    print(
+        f"failover: wrote {experiment.stem}-<variant>.jsonl, .jsonl.log, -picker.log and "
+        f"{meta_path.name}"
+    )
+    return meta
+
+
+SUMMARY_FIELDS = (
+    "seed",
+    "variant",
+    "retry",
+    "kill",
+    "verdict",
+    "runs",
+    "done",
+    "completion_rate",
+    "failed_by_kill",
+    "deadline_runs",
+    "calls_on_killed_pod",
+    "retries",
+    "on_killed_runs",
+    "on_killed_median_s",
+    "on_killed_max_s",
+    "pinned_runs",
+    "pinned_median_s",
+    "pinned_max_s",
+    "others_runs",
+    "others_median_s",
+    "others_max_s",
+    "unpaired_runs",
+    "retried_steps",
+    "lost_s",
+)
+
+
+def _in_seconds(milliseconds: float | None) -> float | None:
+    return None if milliseconds is None else milliseconds / 1000
+
+
+def summary_row(seed: int, variant: Mapping[str, Any]) -> dict[str, Any]:
+    """One seed's variant from its .meta.json; a number it has not got is a blank."""
+    row: dict[str, Any] = {
+        "seed": seed,
+        "variant": variant["name"],
+        "retry": variant["retry"],
+        "kill": variant["kill"],
+        "verdict": variant["verdict"],
+        "runs": variant.get("runs"),
+        "done": variant.get("done"),
+        "completion_rate": variant.get("completion_rate"),
+        "deadline_runs": len(variant.get("deadline_runs", [])),
+        "retries": variant.get("retries"),
+    }
+    if "failed_by_kill" in variant:
+        row["failed_by_kill"] = len(variant["failed_by_kill"])
+        row["calls_on_killed_pod"] = len(variant["on_killed"])
+    recovery = variant.get("recovery")
+    if recovery is not None:
+        for group in ("on_killed", "pinned", "others"):
+            row[f"{group}_runs"] = recovery[group]["runs"]
+            row[f"{group}_median_s"] = _in_seconds(recovery[group]["median_ms"])
+            row[f"{group}_max_s"] = _in_seconds(recovery[group]["max_ms"])
+        row["unpaired_runs"] = len(recovery["unpaired"])
+        row["retried_steps"] = recovery["retried_steps"]
+        row["lost_s"] = _in_seconds(recovery["lost_ms"])
+    return row
+
+
+def write_summary(path: Path, metas: Sequence[Mapping[str, Any]]) -> None:
+    """Written again after every run, from the seeds' .meta.json files alone."""
+    with path.open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=SUMMARY_FIELDS)
+        writer.writeheader()
+        for meta in metas:
+            for variant in meta["variants"]:
+                writer.writerow(summary_row(meta["seed"], variant))
+
+
+def completion_over_seeds(
+    metas: Sequence[Mapping[str, Any]],
+) -> dict[str, tuple[float, float, float]]:
+    """Each variant's completion rate over the seeds that counted it: mean, lowest, highest."""
+    rates: dict[str, list[float]] = {}
+    for meta in metas:
+        for variant in meta["variants"]:
+            if "completion_rate" in variant:
+                rates.setdefault(variant["name"], []).append(variant["completion_rate"])
+    return {
+        name: (statistics.mean(values), min(values), max(values)) for name, values in rates.items()
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="P4.4: a replay with a pod killed, retried or not")
+    parser.add_argument("experiment", type=Path)
+    args = parser.parse_args()
+
+    experiments = load_failover_seeds(args.experiment)
+    first = experiments[0]
+    profile_path = REPO_ROOT / "config" / f"{first.profile}.yaml"
+    profile_text = profile_path.read_text()
+    profile = yaml.safe_load(profile_text)
+    results = REPO_ROOT / "experiments" / "results"
+    finished = {}
+    for experiment in experiments:
+        meta_path = results / f"{experiment.stem}.meta.json"
+        if meta_path.exists():
+            finished[experiment.seed] = json.loads(meta_path.read_text())
+            continue
+        found = sorted(results.glob(f"{experiment.stem}*"))
+        if found:
+            raise FailoverError(
+                f"seed {experiment.seed} stopped halfway, delete its results to run it again: "
+                f"{found}"
+            )
+    if len(finished) == len(experiments):
+        raise FailoverError(
+            f"results of this file exist for every seed, delete them to run it again: "
+            f"{sorted(results.glob(f'{first.name}-{first.hash}*'))}"
+        )
+    metas = []
+    for experiment in experiments:
+        if experiment.seed in finished:
+            print(f"failover: seed {experiment.seed} finished before, skipped")
+            metas.append(finished[experiment.seed])
+        else:
+            metas.append(run_seed(experiment, profile, profile_text, results))
+    summary_path = results / f"{first.name}-{first.hash}-summary.csv"
+    write_summary(summary_path, metas)
+    print(f"failover: over {len(metas)} seeds, wrote {summary_path.name}")
+    for name, (mean, low, high) in completion_over_seeds(metas).items():
+        print(
+            f"  {name}: completion mean {100 * mean:.1f}%, "
+            f"{100 * low:.1f}-{100 * high:.1f}% over the seeds"
+        )
+    judged = [
+        variant["verdict"] == "passed"
+        for meta in metas
+        for variant in meta["variants"]
+        if variant["kill"] and variant["retry"]
+    ]
     if not all(judged):
         raise SystemExit(1)
 

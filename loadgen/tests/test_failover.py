@@ -17,15 +17,21 @@ import pytest
 import yaml
 from load_generator.failover import (
     FailoverError,
+    GroupCost,
     Kill,
     build_failover_report,
     check_pool,
+    completion_over_seeds,
     kill_pod,
     load_failover,
+    load_failover_seeds,
     main,
+    recovery_cost,
     report_lines,
+    retry_lost_ms,
     retry_starts,
     run_failover,
+    run_times_ms,
     variant_profile,
 )
 from load_generator.record import REPO_ROOT
@@ -628,3 +634,277 @@ def test_a_retried_call_is_placed_by_its_pick_not_its_runs_pin() -> None:
     spilled = json.loads(picked("a", KEPT, "spilled", at=at_ms(KILLED_MS - 3_000)))
     picker = "\n".join([REMAPPED_PICKER, json.dumps(spilled)])
     assert report(SAVED, SAVED_LOG, picker).on_killed == []
+
+
+# P5.3 (card 77): one file over several seeds, each in its own order, with a no-kill variant that
+# the kill variants' runs are paired with for their recovery cost.
+
+SEEDS_VARIANTS = [
+    {"name": "retry-off", "retry": False},
+    {"name": "retry-on", "retry": True},
+    {"name": "no-kill", "retry": True, "kill": False},
+]
+SEEDS = [
+    {"seed": 6, "order": ["retry-off", "retry-on", "no-kill"]},
+    {"seed": 9, "order": ["no-kill", "retry-off", "retry-on"]},
+]
+
+
+def seeds_file(tmp_path: Path, **changes: Any) -> Path:
+    """experiment_file's file with SEEDS in place of its one seed, then the changes."""
+    path = experiment_file(tmp_path)
+    spec = yaml.safe_load(path.read_text())
+    del spec["seed"]
+    spec.update(variants=SEEDS_VARIANTS, seeds=SEEDS)
+    spec.update(changes)
+    path.write_text(yaml.safe_dump(spec))
+    return path
+
+
+def test_a_file_of_seeds_is_one_experiment_per_seed_in_its_order(tmp_path: Path) -> None:
+    experiments = load_failover_seeds(seeds_file(tmp_path))
+    assert [experiment.seed for experiment in experiments] == [6, 9]
+    assert [[v.name for v in experiment.variants] for experiment in experiments] == [
+        ["retry-off", "retry-on", "no-kill"],
+        ["no-kill", "retry-off", "retry-on"],
+    ]
+    digest = experiments[0].hash
+    assert [experiment.stem for experiment in experiments] == [
+        f"failover-{digest}-s6",
+        f"failover-{digest}-s9",
+    ]
+    no_kill = next(v for v in experiments[0].variants if v.name == "no-kill")
+    assert (no_kill.retry, no_kill.kill) == (True, False)
+    assert all(v.kill for v in experiments[0].variants if v.name != "no-kill")
+
+
+def test_a_file_of_one_seed_keeps_its_results_name(tmp_path: Path) -> None:
+    """P4.4's form, whose results are named without the seed (failover-aa3c44493359-*)."""
+    (experiment,) = load_failover_seeds(experiment_file(tmp_path))
+    assert experiment.stem == f"failover-{experiment.hash}"
+    assert experiment == load_failover(experiment_file(tmp_path))
+
+
+def test_load_failover_refuses_a_file_of_seeds(tmp_path: Path) -> None:
+    with pytest.raises(FailoverError, match="seeds"):
+        load_failover(seeds_file(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"seed": 6},
+        {"seeds": []},
+        {"seeds": [{"seed": 6, "order": ["retry-off", "retry-on"]}]},
+        {"seeds": [{"seed": 6, "order": ["retry-off", "retry-on", "no-kill", "no-kill"]}]},
+        {"seeds": [{"seed": 6, "order": ["retry-off", "retry-on", "other"]}]},
+        {"seeds": [SEEDS[0], SEEDS[0]]},
+        {"variants": [*SEEDS_VARIANTS[:2], {"name": "no-kill", "retry": False, "kill": False}]},
+        {
+            "variants": [*SEEDS_VARIANTS, {"name": "no-kill-2", "retry": True, "kill": False}],
+            "seeds": [{"seed": 6, "order": ["retry-off", "retry-on", "no-kill", "no-kill-2"]}],
+        },
+        {"variants": [SEEDS_VARIANTS[2]], "seeds": [{"seed": 6, "order": ["no-kill"]}]},
+        {"variants": [*SEEDS_VARIANTS[:2], {"name": "no-kill", "retry": True, "kill": "no"}]},
+    ],
+    ids=[
+        "seed and seeds",
+        "no seeds",
+        "an order without a variant",
+        "a variant twice in an order",
+        "an order naming no variant",
+        "a seed twice",
+        "a no-kill without the retry",
+        "two no-kill variants",
+        "nothing killed",
+        "kill not true or false",
+    ],
+)
+def test_a_file_of_seeds_that_could_not_show_a_failover_is_refused(
+    tmp_path: Path, changes: dict[str, Any]
+) -> None:
+    with pytest.raises(FailoverError):
+        load_failover_seeds(seeds_file(tmp_path, **changes))
+
+
+def timed(run: str, step: int, start: int, gap: int, duration: int | None) -> dict[str, Any]:
+    """A replay line with its gap after the step before, on the replay's monotonic clock: for a
+    retried call, from that step's end to its last attempt (replay._call)."""
+    return {**call(run, step, start, duration, KEPT if duration else None), "gap_before_ms": gap}
+
+
+def test_a_runs_time_is_its_steps_slowest_calls_and_gaps() -> None:
+    lines = [
+        timed("a", 1, 0, 0, 1_000),
+        timed("a", 2, 3_000, 2_000, 4_000),
+        timed("a", 2, 3_500, 2_500, 1_000),
+        timed("a", 3, 9_000, 1_000, 500),
+        timed("b", 1, 0, 0, 2_000),
+        timed("b", 2, 5_000, 3_000, None),
+    ]
+    assert run_times_ms(lines, "") == {"a": 1_000 + 6_000 + 1_500, "b": None}
+
+
+def test_a_retried_first_calls_lost_time_is_added_and_a_later_ones_is_in_its_gap() -> None:
+    """A first call's gap is 0 whatever happened, so its failed attempt and backoff are read from
+    the retry line's sent time, on the wall clock as ts_start. A later call's gap already runs to
+    its last attempt."""
+    lines = [
+        timed("a", 1, 10_000, 0, 1_000),
+        timed("a", 2, 20_000, 9_000, 1_000),
+    ]
+    log = "\n".join([retried("a", 1, 1, 2_000), retried("a", 2, 1, 14_000)])
+    assert run_times_ms(lines, log) == {"a": 8_000 + 1_000 + 9_000 + 1_000}
+
+
+def test_each_retried_steps_lost_time_runs_from_its_first_attempt_to_its_last() -> None:
+    """A fanned-out step's calls share a key: the lost time ends at the latest of their starts."""
+    lines = [
+        timed("a", 1, 10_000, 0, 1_000),
+        timed("a", 2, 20_000, 9_000, 1_000),
+        timed("a", 2, 13_000, 2_000, 1_000),
+        timed("b", 1, 5_000, 0, 1_000),
+    ]
+    log = "\n".join(
+        [retried("a", 1, 1, 2_000), retried("a", 2, 1, 12_000), retried("a", 2, 2, 16_000)]
+    )
+    assert retry_lost_ms(lines, log) == {("a", 1): 8_000, ("a", 2): 8_000}
+
+
+def test_the_recovery_cost_pairs_each_run_with_its_no_kill_time_by_group() -> None:
+    """Runs with a call on the killed pod at the kill, runs only pinned there, and the rest, each
+    counted once; a run that did not finish on either side is named, not paired."""
+    killed: dict[str, int | None] = {"hit": 30_000, "hit2": 22_000, "pinned": 15_000}
+    killed.update({"other": 11_000, "lost": None, "lost-before": 9_000})
+    reference: dict[str, int | None] = {"hit": 10_000, "hit2": 12_000, "pinned": 12_000}
+    reference.update({"other": 10_000, "lost": 9_000, "lost-before": None})
+    cost = recovery_cost(
+        killed,
+        reference,
+        on_killed_runs=["hit", "hit2"],
+        affected=["hit", "pinned"],
+        lost={("hit", 2): 8_000, ("hit2", 1): 6_000},
+    )
+    assert cost.on_killed == GroupCost(runs=2, median_ms=15_000, max_ms=20_000)
+    assert cost.pinned == GroupCost(runs=1, median_ms=3_000, max_ms=3_000)
+    assert cost.others == GroupCost(runs=1, median_ms=1_000, max_ms=1_000)
+    assert cost.unpaired == ["lost", "lost-before"]
+    assert (cost.retried_steps, cost.lost_ms) == (2, 14_000)
+
+
+def test_a_group_with_no_paired_run_has_no_figures() -> None:
+    cost = recovery_cost({"a": 1_000}, {"a": 900}, [], [], {})
+    assert cost.on_killed == GroupCost(runs=0, median_ms=None, max_ms=None)
+    assert cost.others == GroupCost(runs=1, median_ms=100, max_ms=100)
+
+
+def test_a_no_kill_variant_kills_nothing_and_waits_for_no_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = FakeCluster(monkeypatch, replay_seconds=0.2)
+    experiment = load_failover_seeds(seeds_file(tmp_path, kill_after_seconds=0.01))[1]
+    results = run_failover(experiment, PROFILE, tmp_path)
+    assert [result.variant.name for result in results] == ["no-kill", "retry-off", "retry-on"]
+    assert [result.kill.pod for result in results] == [None, KILLED, KILLED]
+    assert [p["replay"]["retry"] for p in cluster.profiles] == [True, False, True]
+    assert cluster.calls.count(("kubectl", "delete", "pod")) == 2
+    assert cluster.calls.count(("kubectl", "rollout", "status")) == 2
+    assert (tmp_path / f"{experiment.stem}-no-kill-picker.log").exists()
+
+
+class SeedsCluster(FakeCluster):
+    """FakeCluster's replay with each line's gap, which the recovery cost reads."""
+
+    def replay(self, profile: dict[str, Any], *args: Any) -> list[dict[str, Any]]:
+        lines = super().replay(profile, *args)
+        return [{**line, "gap_before_ms": 0 if line["step"] == 1 else 1_000} for line in lines]
+
+
+def seeds_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """main on a file of seeds 6 and 9, in place of main_setup's file of one."""
+    path = main_setup(tmp_path, monkeypatch)
+    assert seeds_file(tmp_path, kill_after_seconds=0.01) == path
+    monkeypatch.setattr(
+        "load_generator.failover.source_state",
+        lambda root: {"commit": "c0ffee", "uncommitted": [], "system_sha256": "5157e3"},
+    )
+    return path
+
+
+def test_main_writes_each_seeds_results_with_its_recovery_and_a_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    SeedsCluster(monkeypatch, replay_seconds=0.2)
+    path = seeds_main(tmp_path, monkeypatch)
+    main()
+    digest = load_failover_seeds(path)[0].hash
+    results = tmp_path / "experiments" / "results"
+    for seed in (6, 9):
+        meta = json.loads((results / f"failover-{digest}-s{seed}.meta.json").read_text())
+        assert meta["seed"] == seed
+        assert meta["source"]["system_sha256"] == "5157e3"
+        by_name = {variant["name"]: variant for variant in meta["variants"]}
+        assert by_name["no-kill"]["kill"] is False
+        assert by_name["no-kill"]["verdict"] == "reference"
+        assert by_name["retry-on"]["verdict"] == "passed"
+        assert by_name["retry-off"]["verdict"] == "control"
+        assert by_name["retry-on"]["recovery"]["on_killed"]["runs"] == 1
+        assert "recovery" not in by_name["no-kill"]
+        for variant in ("retry-off", "retry-on", "no-kill"):
+            assert (results / f"failover-{digest}-s{seed}-{variant}.jsonl.log").exists()
+            assert (results / f"failover-{digest}-s{seed}-{variant}-picker.log").exists()
+    summary = (results / f"failover-{digest}-summary.csv").read_text().splitlines()
+    assert summary[0].startswith("seed,variant,retry,kill,verdict,runs,done,completion_rate")
+    assert len(summary) == 1 + 2 * 3
+
+
+def test_main_skips_a_finished_seed_and_runs_the_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster = SeedsCluster(monkeypatch, replay_seconds=0.2)
+    path = seeds_main(tmp_path, monkeypatch)
+    main()
+    digest = load_failover_seeds(path)[0].hash
+    results = tmp_path / "experiments" / "results"
+    for name in results.glob(f"failover-{digest}-s9*"):
+        name.unlink()
+    replays = cluster.calls.count(("replay",))
+    main()
+    assert cluster.calls.count(("replay",)) - replays == 3
+    assert "failover: seed 6 finished before, skipped" in capsys.readouterr().out
+    assert (results / f"failover-{digest}-s9.meta.json").exists()
+
+
+def test_main_refuses_a_seed_left_halfway_before_anything_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = SeedsCluster(monkeypatch, replay_seconds=0.2)
+    path = seeds_main(tmp_path, monkeypatch)
+    digest = load_failover_seeds(path)[0].hash
+    results = tmp_path / "experiments" / "results"
+    (results / f"failover-{digest}-s9-no-kill.jsonl.log").write_text("")
+    with pytest.raises(FailoverError, match="seed 9"):
+        main()
+    assert cluster.calls == []
+
+
+def test_the_summary_gives_each_variants_completion_over_the_seeds() -> None:
+    """The mean, then the lowest and the highest, of each variant's completion rate."""
+
+    def variant(name: str, done: int) -> dict[str, Any]:
+        return {"name": name, "runs": 50, "done": done, "completion_rate": done / 50}
+
+    metas = [
+        {"seed": 6, "variants": [variant("retry-off", 45), variant("retry-on", 50)]},
+        {"seed": 9, "variants": [variant("retry-off", 48), variant("retry-on", 49)]},
+    ]
+    assert completion_over_seeds(metas) == {
+        "retry-off": pytest.approx((0.93, 0.9, 0.96)),
+        "retry-on": pytest.approx((0.99, 0.98, 1.0)),
+    }
+
+
+def test_a_void_variant_has_no_completion_to_count() -> None:
+    """No pod was killed, so no report counted its runs."""
+    metas = [{"seed": 6, "variants": [{"name": "retry-on", "killed_pod": None}]}]
+    assert completion_over_seeds(metas) == {}

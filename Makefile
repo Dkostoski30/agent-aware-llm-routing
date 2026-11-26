@@ -411,7 +411,9 @@ drain-check:
 # A replay with the vLLM pod most runs are pinned to killed partway (force-deleted, no drain), per variant with the
 # replay's retry off or on (P4.4): how many runs complete. The replay's lines, its printed lines, the picker's log per
 # variant and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the file's profile;
-# it puts the profile's routing back after.
+# it puts the profile's routing back after. A file may list seeds, each its own run with its own order and .meta.json,
+# and a variant with no kill, which the kill variants' runs are paired with for their recovery cost (P5.3); a seed
+# finished before is skipped, and every seed's numbers go into <name>-<hash>-summary.csv.
 failover-check:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make failover-check EXPERIMENT=experiments/failover.yaml"; exit 2; fi
 	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.failover $(EXPERIMENT)

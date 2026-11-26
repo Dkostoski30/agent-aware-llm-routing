@@ -1,0 +1,47 @@
+# P5.3: E3, a pod killed mid-replay with the replay's retry off and on, over four seeds, on simulated pods
+# (docs/task-cards/77-P5.3-failover.md). P4.4's experiments/failover.yaml ran this at one seed on P3.9b's lighter
+# burst. Run with make failover-check EXPERIMENT=experiments/p5-3-failover.yaml after make down and
+# make up PROFILE=sim, the laptop idle and Windows' AC standby off. The questions: how many runs complete with and
+# without the retry, and what does the kill cost the runs it hit? Results carry this file's hash (D11).
+profile: sim
+# Simulated pods only (decided 2026-11-26): P4.4 ran on them, and a kill on real pods would need make experiment's
+# real-pod checks, which make failover-check has not got. The simulated times are optimistic (Gate 2, P2.9).
+# The plugin with affinity, so the pod killed is the one most runs are pinned to, and the runs it held are counted.
+routing:
+  plugin: true
+  affinity: true
+# P5's squares' trace and load (cards 74-76): 50 runs, a burst of 10 every 120 s from 120 s, half the bursts' runs
+# fanned out. The profile's 2 pods, no autoscaler; the ReplicaSet replaces the killed pod, which the simulator's
+# 140 s cold start keeps out until after the third burst at 360 s, so one pod carries that burst alone.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# 5 s into the second burst at 240 s, at every seed (a test holds it): both pods warm and holding the first burst's
+# runs, the second burst's first calls queued. As P4.4's kill came 5 s into its first burst.
+kill_after_seconds: 245
+# P4.4's: one burst's runs last longer than this, so a pod with a pin is found unless the replay is idle.
+wait_for_calls_seconds: 60
+# P4.4's (P3.4's settle): the picker's informer plus the 2.5 s the VM's wall clock can step (P2.3).
+settle_seconds: 5
+# retry-off is the replay as before P4.4, the control; retry-on the agent's rule (agent.llm_retries,
+# agent.llm_retry_backoff_seconds); no-kill the same replay with nothing killed, which each kill variant's runs are
+# paired with for the recovery cost.
+variants:
+  - name: retry-off
+    retry: false
+  - name: retry-on
+    retry: true
+  - name: no-kill
+    retry: true
+    kill: false
+# The squares' seeds (card 73). Seeds 6, 9 and 10 are the rows of a 3x3 Latin square, so each variant runs once in each
+# place; seed 13 puts no-kill before retry-on, so retry-on, whose runs are paired with no-kill's, runs before it at two
+# seeds and after it at two (the plan approved 2026-11-26; a test holds both).
+seeds:
+  - seed: 6
+    order: [retry-off, retry-on, no-kill]
+  - seed: 9
+    order: [no-kill, retry-off, retry-on]
+  - seed: 10
+    order: [retry-on, no-kill, retry-off]
+  - seed: 13
+    order: [no-kill, retry-on, retry-off]
