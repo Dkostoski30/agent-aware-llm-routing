@@ -1,0 +1,42 @@
+# P5.2: a replay with a scale-down in it, on real pods (docs/task-cards/76-P5.2-autoscaling.md): burst-gap's two bursts
+# are 720 s apart, so a pod added for the first can be removed before the second, while the replay still runs; P3.10's
+# and P4.5's replays ended before the 300 s window let any autoscaler scale down. Reported, not judged (decided
+# 2026-11-25): when each autoscaler first scaled down, the kept runs it interrupted, the idle pod-minutes. One seed, one
+# order. Run with make experiment NAME=p5-2-scale-down-real after make down and make up. Results carry this file's hash (D11).
+profile: real
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+# Two bursts of 10 runs with burst-fan-out-heavy's fan-out, and between them 391 s with no run arriving at seed 6, for
+# the scale-down window and a sync (config: replay.patterns.burst-gap); a test holds the gap.
+pattern: burst-gap
+# The squares' first seed, for which burst-gap is sized.
+seed: 6
+# vLLM's log line "GPU KV cache size: 4,384 tokens" for the real profile, model.kv_cache_tokens; a test holds it there.
+kv_capacity_tokens_per_pod: 4384
+warmup:
+  # The runs that start before the first burst at 720 s, 1 at seed 6; a test holds it there.
+  runs_discarded: 1
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# As P4.5 and P5.1: a replay in which a pod with calls made no tokens for six 5 s scrapes is refused, since the
+# GPU-sharing stalls of 2026-11-12 (P3.7) would read as the autoscaler's result. The second pod shares the GPU.
+pod_stall_seconds: 30
+# All on the default picker (D2), each at autoscaling.min_replicas after a restart, in the real square's file a order.
+variants:
+  - name: cpu
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: cpu
+  - name: pressure
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: pressure
+  - name: remaining
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: remaining
+  - name: queue
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: queue

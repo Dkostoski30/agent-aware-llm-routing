@@ -1,0 +1,13 @@
+# P5.2, E2's real 1<->2 square (docs/task-cards/76-P5.2-autoscaling.md): four files, a seed each,
+# the autoscalers in a Williams square's orders. Run by make experiment-series NAME=p5-2-real and compared by
+# make autoscale-square SERIES=p5-2-real. Every variant is held to the queue, KEDA's usual signal.
+reference: queue
+files:
+  - p5-2-real-a
+  - p5-2-real-b
+  - p5-2-real-c
+  - p5-2-real-d
+autoscale:
+  # On real 1<->2 neither autoscaler can ask for fewer than 2 pods (P4.5), so idle pod-minutes are reported, not
+  # judged (decided 2026-11-25).
+  idle_judged: false

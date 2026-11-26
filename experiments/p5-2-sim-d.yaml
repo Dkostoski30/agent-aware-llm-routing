@@ -1,0 +1,32 @@
+# P5.2: file d of E2's square on simulated pods at scale, up to autoscaling.max_replicas
+# (docs/task-cards/76-P5.2-autoscaling.md). Four files, a seed each, run remaining work against the queue in alternate
+# orders; cpu and pressure do not run on the simulator (D5; P3.7b, no KV admission). Run all four with
+# make experiment-series NAME=p5-2-sim after make up PROFILE=sim, then make autoscale-square SERIES=p5-2-sim. Results
+# carry this file's hash (D11).
+profile: sim
+# The real square's trace and load, so both profiles see one load (decided 2026-11-25); a test holds it there.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# The squares' seeds 6, 9, 10, 13 in files a-d (card 73), held by a test in experiments/tests/test_p5_2.py.
+seed: 13
+# The simulated pod's cache, simulator.kv_cache_blocks 512 x block_size 16 (config/sim.yaml); a test holds it there.
+kv_capacity_tokens_per_pod: 8192
+warmup:
+  # The runs that start before the first burst at 120 s, 4 at seed 13; a test holds it there.
+  runs_discarded: 4
+  # As experiments/baseline.yaml, whose warm-up times showed 5 calls enough (P2.5, Gate 2).
+  calls_per_pod: 5
+  words: 200
+  completion_tokens: 16
+# Both on the default picker: autoscaling does not depend on the plugin (D2). Each starts at autoscaling.min_replicas
+# after a restart, so the second finds nothing the first left. The verdict is make autoscale-square's against queue,
+# fixed before the runs (card 76).
+variants:
+  - name: queue
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: queue
+  - name: remaining
+    values: null
+    epp_config: default-plugins.yaml
+    autoscaler: remaining

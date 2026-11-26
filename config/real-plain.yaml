@@ -273,6 +273,20 @@ replay:
       fan_out:
         share: 0.5
         k: 2
+    # P5.2's replay with a scale-down in it (card 76): burst-fan-out-heavy's bursts of 10 runs and fan-out, 720 s apart,
+    # at a base rate low enough that no run arrives for 391 s before the second burst at seed 6: the scale-down window
+    # (autoscaling.scale_down_stabilization_seconds, 300) and an HPA sync, since one new run of 12 expected steps asks
+    # remaining work for a second pod and restarts the window. 22 runs at seed 6: one at 0 s, the first burst, one at
+    # 1,049 s, the second burst, and none after. Sized at seed 6 only; a test holds the gap. The same in every profile.
+    burst-gap:
+      runs: 22
+      rate_per_second: 0.001
+      burst:
+        runs: 10
+        every_seconds: 720
+      fan_out:
+        share: 0.5
+        k: 2
     # For the converted traces (P2.4), whose runs are longer, so steady's rate would likely overload 2 pods. A first guess,
     # not the same load as steady: on 2 pods at seed 6, the done-when's by its rule for a mix of types, it measured 1.68 calls
     # in flight on average, at most 5, slowest 87 s, against steady's 0.70 at seed 1 (log). 20 of 879 runs leave the seed a

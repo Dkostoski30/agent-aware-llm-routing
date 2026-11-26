@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare experiment-series square-compare warmup-report autoscale-compare pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare experiment-series square-compare warmup-report autoscale-compare autoscale-square pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -366,6 +366,14 @@ square-compare:
 autoscale-compare:
 	@if [ -z "$(META)" ]; then echo "usage: make autoscale-compare META=\"<a.meta.json> <b.meta.json> ...\" [OUT=experiments/results/autoscale-real-1to2-compare.csv]"; exit 2; fi
 	PYTHONPATH=loadgen uv run --locked python -m load_generator.autoscale_compare $(META) --out $(or $(OUT),experiments/results/autoscale-real-1to2-compare.csv)
+
+# An autoscalers' square again, from its files' CSVs and .meta.json files alone, no cluster (P5.2, card 76): square-compare's
+# report and verdict, then per file each autoscaled variant's numbers, and each variant against the reference on when spec
+# replicas rose and on idle pod-minutes (unless the series' autoscale section says not to judge them). Writes
+# experiments/results/$(SERIES)-autoscale.csv and $(SERIES)-square.csv.
+autoscale-square:
+	@if [ -z "$(SERIES)" ]; then echo "usage: make autoscale-square SERIES=p5-2-real"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.autoscale_square experiments/series/$(SERIES).yaml
 
 # Where runs' first calls went while a pod KEDA added was new, per variant of an experiment whose variants all run the
 # plugin (P4.2): <RESULT>-warmup.csv and <RESULT>-warmup-pods.csv beside its files, from the files alone (no cluster).

@@ -1,5 +1,6 @@
 """make experiment-series (P5.0, card 73): a series' experiment files one after another, then their
-square's comparison (make square-compare).
+square's comparison (make square-compare), or for a series with an autoscale section the
+autoscalers' (make autoscale-square, P5.2), which holds it.
 
 A series is experiments/series/<name>.yaml (square_compare.load_series): the files of one square in
 the order they run, and the variant the others are held to. Each file runs as make experiment runs
@@ -15,6 +16,7 @@ import argparse
 from collections.abc import Callable
 from pathlib import Path
 
+from load_generator import autoscale_square
 from load_generator.experiment import Outputs, file_outputs, run_file
 from load_generator.record import REPO_ROOT
 from load_generator.square_compare import Series, load_series, print_comparison
@@ -39,14 +41,22 @@ def run_series(
         run(path)
 
 
+def print_report(path: Path) -> None:
+    autoscaled = autoscale_square.load_autoscale_series(path)
+    if autoscaled is None:
+        print_comparison(load_series(path))
+    else:
+        autoscale_square.print_comparison(autoscaled)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="P5.0: a series' experiment files, then its square."
     )
     parser.add_argument("series", type=Path)
-    series = load_series(parser.parse_args().series)
-    run_series(series, lambda path: file_outputs(path, REPO_ROOT), run_file, print)
-    print_comparison(series)
+    path = parser.parse_args().series
+    run_series(load_series(path), lambda file: file_outputs(file, REPO_ROOT), run_file, print)
+    print_report(path)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+# P5.2, E2's simulated square (docs/task-cards/76-P5.2-autoscaling.md): four files, a seed each,
+# the autoscalers in a alternating orders. Run by make experiment-series NAME=p5-2-sim and compared by
+# make autoscale-square SERIES=p5-2-sim. Every variant is held to the queue, KEDA's usual signal.
+reference: queue
+files:
+  - p5-2-sim-a
+  - p5-2-sim-b
+  - p5-2-sim-c
+  - p5-2-sim-d
+autoscale:
+  # Up to 8 simulated pods, where remaining work asked for fewer pods than the queue in P3.10, so idle pod-minutes
+  # are judged.
+  idle_judged: true
