@@ -1,0 +1,595 @@
+{
+  "experiment": "p5-2-scale-down-real",
+  "hash": "ad0ec6e190d2",
+  "profile": "real",
+  "profile_sha256": "bc0e6da511d77b880fac7e7fdce98509905aa561eac704c71f8c4a1cdb1ae663",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-gap",
+  "seed": 6,
+  "runs_discarded": 1,
+  "kv_capacity_tokens_per_pod": 4384,
+  "gpu_log": "p5-2-scale-down-real-ad0ec6e190d2-gpu.csv",
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": "p5-2-scale-down-real-ad0ec6e190d2-windows-gpu.csv",
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": 30,
+  "source": {
+    "commit": "4d7f46320f702f91bf3da52b99a904c6315230ad",
+    "uncommitted": [
+      "experiments/graphs/p5-2-real-a-1ec495dfcf6b.png",
+      "experiments/graphs/p5-2-real-b-f7339381e7c6.png",
+      "experiments/graphs/p5-2-real-c-3d2050027e6d.png",
+      "experiments/graphs/p5-2-real-d-27e6bebda8f3.png",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-autoscale-summary.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-vllm-vllm-bff944dd9-kkl2p.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-vllm-vllm-bff944dd9-xbx97.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-gpu.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-vllm-vllm-958599b4-jn7x8.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-vllm-vllm-958599b4-wbqbc.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-vllm-vllm-6c47d46b54-5ql7h.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-vllm-vllm-6c47d46b54-jf95r.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-vllm-vllm-5c8f9c79-8qd56.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-vllm-vllm-5c8f9c79-cl4pr.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-windows-gpu.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b.meta.json",
+      "experiments/results/p5-2-real-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-autoscale-summary.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-vllm-vllm-69d9655f7f-blp44.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-vllm-vllm-69d9655f7f-t9g4r.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-gpu.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-vllm-vllm-5996f4dd4-ckflq.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-vllm-vllm-5996f4dd4-p28nj.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-vllm-vllm-759c755656-6rqjr.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-vllm-vllm-759c755656-6wmjb.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-vllm-vllm-66c647b576-4dk59.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-vllm-vllm-66c647b576-ftq5w.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-windows-gpu.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6.meta.json",
+      "experiments/results/p5-2-real-c-3d2050027e6d-autoscale-summary.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-vllm-vllm-7b76b5fdc4-6dg7m.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-vllm-vllm-7b76b5fdc4-hn7hc.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-gpu.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-vllm-vllm-56c57974d5-gbx7d.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-vllm-vllm-56c57974d5-qzkcs.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-vllm-vllm-7994654f5c-5tgfd.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-vllm-vllm-7994654f5c-8n5gn.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-vllm-vllm-8d8f7c6dd-6brh5.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-vllm-vllm-8d8f7c6dd-bn7xg.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-windows-gpu.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d.meta.json",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-autoscale-summary.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-vllm-vllm-5595754448-5jx72.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-vllm-vllm-5595754448-qnz5w.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-gpu.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-vllm-vllm-f9bccf47b-chmcm.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-vllm-vllm-f9bccf47b-xcxjb.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-vllm-vllm-5446cfdb66-7gt9s.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-vllm-vllm-5446cfdb66-tvm57.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-vllm-vllm-7f7c8fd6f7-66r4t.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-vllm-vllm-7f7c8fd6f7-d9q4n.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-windows-gpu.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3.meta.json",
+      "experiments/results/p5-2-real-square.csv"
+    ],
+    "system_sha256": "9b0fc7aaa42ccf35634485f1b67389ecead517af215e680e22e03d7ad457e01a"
+  },
+  "bursts_seconds": [
+    720,
+    1440
+  ],
+  "variants": {
+    "cpu": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "bc0e6da511d77b880fac7e7fdce98509905aa561eac704c71f8c4a1cdb1ae663",
+      "warmup_ttft_ms": {
+        "vllm-bd9854758-p976t": [
+          513,
+          175,
+          104,
+          100,
+          100
+        ]
+      },
+      "started": 1795688520.7006006,
+      "ended": 1795690057.89991,
+      "clock_jumps": 46,
+      "calls": 253,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-bd9854758-p976t": 253
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 27,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-2-scale-down-real-ad0ec6e190d2-cpu-vllm-vllm-bd9854758-fhqbz.log",
+        "p5-2-scale-down-real-ad0ec6e190d2-cpu-vllm-vllm-bd9854758-p976t.log"
+      ],
+      "autoscale": {
+        "autoscaler": "cpu",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-cpu-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 750.0,
+          "scale_up_seconds": 20.0,
+          "queue_seconds": 745.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": true,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 750.0,
+          "scale_up_seconds": 20.0,
+          "ready_seconds": 145.0,
+          "scale_down_seconds": 365.0,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "rising": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "after": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "restarts_during_load": 0,
+          "restarts": 1
+        }
+      },
+      "autoscale_summary": {
+        "runs": 21,
+        "finished_runs": 21,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 31142,
+        "completion_p95_ms": 51371,
+        "completion_total_ms": 539580,
+        "makespan_ms": 775140,
+        "runs_per_minute": 1.6255128105890548,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 125.0,
+        "idle_pod_minutes": 36.5
+      },
+      "cpu_hpa": "p5-2-scale-down-real-ad0ec6e190d2-cpu-cpu-hpa.csv",
+      "waiting": {
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-cpu-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 720,
+            "most_waiting": {
+              "vllm-bd9854758-p976t": 10.0
+            }
+          },
+          {
+            "burst_seconds": 1440,
+            "most_waiting": {
+              "vllm-bd9854758-p976t": 11.0
+            }
+          }
+        ]
+      }
+    },
+    "pressure": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "bc0e6da511d77b880fac7e7fdce98509905aa561eac704c71f8c4a1cdb1ae663",
+      "warmup_ttft_ms": {
+        "vllm-7ddf4ccf-z5mqp": [
+          454,
+          139,
+          113,
+          137,
+          128
+        ]
+      },
+      "started": 1795690336.4701223,
+      "ended": 1795691872.8434403,
+      "clock_jumps": 46,
+      "calls": 253,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-7ddf4ccf-z5mqp": 252,
+        "vllm-7ddf4ccf-vxg7j": 1
+      },
+      "pod_switch_share": 0.007936507936507936,
+      "max_gap_deviation_ms": 19,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-2-scale-down-real-ad0ec6e190d2-pressure-vllm-vllm-7ddf4ccf-z5mqp.log",
+        "p5-2-scale-down-real-ad0ec6e190d2-pressure-vllm-vllm-7ddf4ccf-zzjcj.log"
+      ],
+      "autoscale": {
+        "autoscaler": "pressure",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-pressure-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 745.0,
+          "scale_up_seconds": 760.0,
+          "queue_seconds": 745.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 745.0,
+          "scale_up_seconds": 760.0,
+          "ready_seconds": 885.0,
+          "scale_down_seconds": 1090.0,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 51,
+            "ttft_p50_ms": 2922
+          },
+          "rising": {
+            "calls": 24,
+            "ttft_p50_ms": 2672
+          },
+          "after": {
+            "calls": 2,
+            "ttft_p50_ms": 339
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 21,
+        "finished_runs": 21,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 27961,
+        "completion_p95_ms": 51268,
+        "completion_total_ms": 524322,
+        "makespan_ms": 775591,
+        "runs_per_minute": 1.6245675878136803,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 125.0,
+        "idle_pod_minutes": 27.166666666666668
+      },
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-pressure-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 720,
+            "most_waiting": {
+              "vllm-7ddf4ccf-z5mqp": 7.0
+            }
+          },
+          {
+            "burst_seconds": 1440,
+            "most_waiting": {
+              "vllm-7ddf4ccf-z5mqp": 11.0
+            }
+          }
+        ]
+      }
+    },
+    "remaining": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "bc0e6da511d77b880fac7e7fdce98509905aa561eac704c71f8c4a1cdb1ae663",
+      "warmup_ttft_ms": {
+        "vllm-6dd7cd4d88-hvffx": [
+          538,
+          102,
+          111,
+          104,
+          101
+        ]
+      },
+      "started": 1795692130.0374794,
+      "ended": 1795693670.6830182,
+      "clock_jumps": 46,
+      "calls": 253,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6dd7cd4d88-hvffx": 253
+      },
+      "pod_switch_share": 0.0,
+      "max_gap_deviation_ms": 14,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-2-scale-down-real-ad0ec6e190d2-remaining-vllm-vllm-6dd7cd4d88-hvffx.log",
+        "p5-2-scale-down-real-ad0ec6e190d2-remaining-vllm-vllm-6dd7cd4d88-x2ldd.log"
+      ],
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-remaining-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 745.0,
+          "scale_up_seconds": 765.0,
+          "queue_seconds": 750.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 745.0,
+          "scale_up_seconds": 765.0,
+          "ready_seconds": 885.0,
+          "scale_down_seconds": 1070.0,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 52,
+            "ttft_p50_ms": 3157
+          },
+          "rising": {
+            "calls": 23,
+            "ttft_p50_ms": 2719
+          },
+          "after": {
+            "calls": 0,
+            "ttft_p50_ms": null
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 21,
+        "finished_runs": 21,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 30370,
+        "completion_p95_ms": 49808,
+        "completion_total_ms": 523051,
+        "makespan_ms": 773334,
+        "runs_per_minute": 1.6293089402509136,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 120.0,
+        "idle_pod_minutes": 27.0
+      },
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-remaining-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 720,
+            "most_waiting": {
+              "vllm-6dd7cd4d88-hvffx": 10.0
+            }
+          },
+          {
+            "burst_seconds": 1440,
+            "most_waiting": {
+              "vllm-6dd7cd4d88-hvffx": 10.0
+            }
+          }
+        ]
+      }
+    },
+    "queue": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "real",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "bc0e6da511d77b880fac7e7fdce98509905aa561eac704c71f8c4a1cdb1ae663",
+      "warmup_ttft_ms": {
+        "vllm-6c7d76ff9b-kr4j8": [
+          449,
+          159,
+          134,
+          119,
+          107
+        ]
+      },
+      "started": 1795693943.147216,
+      "ended": 1795695486.1947057,
+      "clock_jumps": 46,
+      "calls": 253,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-6c7d76ff9b-kr4j8": 252,
+        "vllm-6c7d76ff9b-cd7hq": 1
+      },
+      "pod_switch_share": 0.007936507936507936,
+      "max_gap_deviation_ms": 7,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": [
+        "p5-2-scale-down-real-ad0ec6e190d2-queue-vllm-vllm-6c7d76ff9b-kr4j8.log",
+        "p5-2-scale-down-real-ad0ec6e190d2-queue-vllm-vllm-6c7d76ff9b-q6gw2.log"
+      ],
+      "autoscale": {
+        "autoscaler": "queue",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 2,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300,
+          "cpu_target_percent": 80
+        },
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-queue-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 750.0,
+          "scale_up_seconds": 760.0,
+          "queue_seconds": 750.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false,
+        "context_threshold": 4384,
+        "scale_up_windows": {
+          "context_seconds": 750.0,
+          "scale_up_seconds": 760.0,
+          "ready_seconds": 885.0,
+          "scale_down_seconds": 1090.0,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 43,
+            "ttft_p50_ms": 2984
+          },
+          "rising": {
+            "calls": 32,
+            "ttft_p50_ms": 2991
+          },
+          "after": {
+            "calls": 2,
+            "ttft_p50_ms": 208
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 21,
+        "finished_runs": 21,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 30595,
+        "completion_p95_ms": 50050,
+        "completion_total_ms": 517947,
+        "makespan_ms": 773642,
+        "runs_per_minute": 1.6286602847311806,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 125.0,
+        "idle_pod_minutes": 27.333333333333332
+      },
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-2-scale-down-real-ad0ec6e190d2-queue-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 720,
+            "most_waiting": {
+              "vllm-6c7d76ff9b-kr4j8": 11.0
+            }
+          },
+          {
+            "burst_seconds": 1440,
+            "most_waiting": {
+              "vllm-6c7d76ff9b-kr4j8": 10.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

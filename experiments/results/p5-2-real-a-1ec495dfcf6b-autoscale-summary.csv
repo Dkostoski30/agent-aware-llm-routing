@@ -1,0 +1,5 @@
+variant,autoscaler,runs,finished_runs,failed_runs,interrupted_runs,completion_p50_ms,completion_p95_ms,completion_total_ms,makespan_ms,runs_per_minute,scaled_before_replay,time_to_capacity_seconds,idle_pod_minutes
+cpu,cpu,46,46,0,0,18723,63880,1079624,398932,6.91847232109733,False,130.0,9.083333333333334
+pressure,pressure,46,46,0,0,15353,54734,958303,397669,6.940445445835607,False,130.0,8.333333333333334
+remaining,remaining,46,46,0,0,16509,59408,1016701,395330,6.981509118963904,False,125.0,7.916666666666667
+queue,queue,46,46,0,0,15365,60852,985523,393804,7.008562635219551,False,130.0,7.833333333333333

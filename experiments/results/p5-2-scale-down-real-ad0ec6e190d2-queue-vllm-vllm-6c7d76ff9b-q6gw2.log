@@ -1,0 +1,11 @@
+2026-11-26T13:18:08.273347600+01:00 With `vllm serve`, you should provide the model as a positional argument or in a config file instead of via the `--model` option. The `--model` option will be removed in a future version.
+2026-11-26T13:18:08.305421477+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347] 
+2026-11-26T13:18:08.305449209+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347]        █     █     █▄   ▄█
+2026-11-26T13:18:08.305452482+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.31.0
+2026-11-26T13:18:08.305455406+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347]   █▄█▀ █     █     █     █  model   Qwen/Qwen3-0.6B-GPTQ-Int8
+2026-11-26T13:18:08.305457863+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+2026-11-26T13:18:08.305459952+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:347] 
+2026-11-26T13:18:08.314957909+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [api_utils.py:286] non-default args: {'model_tag': 'Qwen/Qwen3-0.6B-GPTQ-Int8', 'lora_modules': [LoRAModulePath(name='thesis-e03c0981507c', path='/adapters/thesis-e03c0981507c', base_model_name=None, is_3d_lora_weight=False)], 'enable_auto_tool_choice': True, 'tool_call_parser': 'hermes', 'enable_prompt_tokens_details': True, 'fingerprint_mode': 'custom', 'fingerprint_value': 'vllm-6c7d76ff9b-q6gw2', 'model': 'Qwen/Qwen3-0.6B-GPTQ-Int8', 'revision': 'd3f20e7e71825fe57ad32705b396e9e156279107', 'tokenizer_revision': 'd3f20e7e71825fe57ad32705b396e9e156279107', 'max_model_len': 4096, 'gpu_memory_utilization': 0.42, 'kv_cache_memory_bytes': 503316480, 'enable_prefix_caching': True, 'enable_lora': True, 'scheduling_policy': 'priority', 'cudagraph_capture_sizes': [1, 2, 4, 8]}
+2026-11-26T13:18:08.317947527+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [arg_utils.py:901] HF_HUB_OFFLINE is True, replace model_id [Qwen/Qwen3-0.6B-GPTQ-Int8] to model_path [/hf/hub/models--Qwen--Qwen3-0.6B-GPTQ-Int8/snapshots/d3f20e7e71825fe57ad32705b396e9e156279107]
+2026-11-26T13:18:08.416231678+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [model.py:699] Resolved architecture: Qwen3ForCausalLM
+2026-11-26T13:18:08.416864590+01:00 (APIServer pid=1) INFO 11-26 12:18:08 [model.py:2109] Using max model len 4096

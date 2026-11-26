@@ -1,0 +1,458 @@
+{
+  "experiment": "p5-2-sim-a",
+  "hash": "c051ad6022cb",
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "runs_discarded": 4,
+  "kv_capacity_tokens_per_pod": 8192,
+  "gpu_log": null,
+  "gpu_log_ended_early_with": null,
+  "windows_gpu_log": null,
+  "windows_gpu_log_ended_early_with": null,
+  "not_worse_tolerance": null,
+  "faster_by": null,
+  "reference_variant": null,
+  "pod_stall_seconds": null,
+  "source": {
+    "commit": "4d7f46320f702f91bf3da52b99a904c6315230ad",
+    "uncommitted": [
+      "experiments/graphs/p5-2-real-a-1ec495dfcf6b.png",
+      "experiments/graphs/p5-2-real-b-f7339381e7c6.png",
+      "experiments/graphs/p5-2-real-c-3d2050027e6d.png",
+      "experiments/graphs/p5-2-real-d-27e6bebda8f3.png",
+      "experiments/graphs/p5-2-scale-down-real-ad0ec6e190d2.png",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-autoscale-summary.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-vllm-vllm-bff944dd9-kkl2p.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-vllm-vllm-bff944dd9-xbx97.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-cpu.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-gpu.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-vllm-vllm-958599b4-jn7x8.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-vllm-vllm-958599b4-wbqbc.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-pressure.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-vllm-vllm-6c47d46b54-5ql7h.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-vllm-vllm-6c47d46b54-jf95r.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-queue.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-vllm-vllm-5c8f9c79-8qd56.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-vllm-vllm-5c8f9c79-cl4pr.log",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining-waiting.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-remaining.jsonl",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b-windows-gpu.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b.csv",
+      "experiments/results/p5-2-real-a-1ec495dfcf6b.meta.json",
+      "experiments/results/p5-2-real-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-autoscale-summary.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-vllm-vllm-69d9655f7f-blp44.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-vllm-vllm-69d9655f7f-t9g4r.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-cpu.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-gpu.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-vllm-vllm-5996f4dd4-ckflq.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-vllm-vllm-5996f4dd4-p28nj.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-pressure.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-vllm-vllm-759c755656-6rqjr.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-vllm-vllm-759c755656-6wmjb.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-queue.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-vllm-vllm-66c647b576-4dk59.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-vllm-vllm-66c647b576-ftq5w.log",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining-waiting.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6-remaining.jsonl",
+      "experiments/results/p5-2-real-b-f7339381e7c6-windows-gpu.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6.csv",
+      "experiments/results/p5-2-real-b-f7339381e7c6.meta.json",
+      "experiments/results/p5-2-real-c-3d2050027e6d-autoscale-summary.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-vllm-vllm-7b76b5fdc4-6dg7m.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-vllm-vllm-7b76b5fdc4-hn7hc.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-cpu.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-gpu.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-vllm-vllm-56c57974d5-gbx7d.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-vllm-vllm-56c57974d5-qzkcs.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-pressure.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-vllm-vllm-7994654f5c-5tgfd.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-vllm-vllm-7994654f5c-8n5gn.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-queue.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-vllm-vllm-8d8f7c6dd-6brh5.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-vllm-vllm-8d8f7c6dd-bn7xg.log",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining-waiting.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d-remaining.jsonl",
+      "experiments/results/p5-2-real-c-3d2050027e6d-windows-gpu.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d.csv",
+      "experiments/results/p5-2-real-c-3d2050027e6d.meta.json",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-autoscale-summary.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-vllm-vllm-5595754448-5jx72.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-vllm-vllm-5595754448-qnz5w.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-cpu.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-gpu.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-vllm-vllm-f9bccf47b-chmcm.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-vllm-vllm-f9bccf47b-xcxjb.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-pressure.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-vllm-vllm-5446cfdb66-7gt9s.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-vllm-vllm-5446cfdb66-tvm57.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-queue.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-autoscale.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-vllm-vllm-7f7c8fd6f7-66r4t.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-vllm-vllm-7f7c8fd6f7-d9q4n.log",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining-waiting.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-remaining.jsonl",
+      "experiments/results/p5-2-real-d-27e6bebda8f3-windows-gpu.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3.csv",
+      "experiments/results/p5-2-real-d-27e6bebda8f3.meta.json",
+      "experiments/results/p5-2-real-square.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-autoscale-summary.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu-autoscale.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu-cpu-hpa.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu-vllm-vllm-bd9854758-fhqbz.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu-vllm-vllm-bd9854758-p976t.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu-waiting.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-cpu.jsonl",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-gpu.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-pressure-autoscale.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-pressure-vllm-vllm-7ddf4ccf-z5mqp.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-pressure-vllm-vllm-7ddf4ccf-zzjcj.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-pressure-waiting.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-pressure.jsonl",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-queue-autoscale.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-queue-vllm-vllm-6c7d76ff9b-kr4j8.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-queue-vllm-vllm-6c7d76ff9b-q6gw2.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-queue-waiting.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-queue.jsonl",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-remaining-autoscale.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-remaining-vllm-vllm-6dd7cd4d88-hvffx.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-remaining-vllm-vllm-6dd7cd4d88-x2ldd.log",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-remaining-waiting.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-remaining.jsonl",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2-windows-gpu.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2.csv",
+      "experiments/results/p5-2-scale-down-real-ad0ec6e190d2.meta.json"
+    ],
+    "system_sha256": "9b0fc7aaa42ccf35634485f1b67389ecead517af215e680e22e03d7ad457e01a"
+  },
+  "bursts_seconds": [
+    120,
+    240,
+    360,
+    480
+  ],
+  "variants": {
+    "remaining": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+      "warmup_ttft_ms": {
+        "vllm-68c8c7d65-d479x": [
+          186,
+          148,
+          148,
+          149,
+          148
+        ]
+      },
+      "started": 1795709858.800337,
+      "ended": 1795710372.640313,
+      "clock_jumps": 15,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-68c8c7d65-d479x": 428,
+        "vllm-68c8c7d65-xdrnv": 34,
+        "vllm-68c8c7d65-xd6dt": 91,
+        "vllm-68c8c7d65-vjspc": 20
+      },
+      "pod_switch_share": 0.15734265734265734,
+      "max_gap_deviation_ms": 3,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "remaining",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "p5-2-sim-a-c051ad6022cb-remaining-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 130.0,
+          "scale_up_seconds": 145.0,
+          "queue_seconds": 130.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false,
+        "context_threshold": 8192,
+        "scale_up_windows": {
+          "context_seconds": 130.0,
+          "scale_up_seconds": 145.0,
+          "ready_seconds": 295.0,
+          "scale_down_seconds": 455.0,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 49,
+            "ttft_p50_ms": 3334
+          },
+          "rising": {
+            "calls": 236,
+            "ttft_p50_ms": 1308
+          },
+          "after": {
+            "calls": 81,
+            "ttft_p50_ms": 153
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 46,
+        "finished_runs": 46,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 7715,
+        "completion_p95_ms": 34257,
+        "completion_total_ms": 549145,
+        "makespan_ms": 372882,
+        "runs_per_minute": 7.401805396881588,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 150.0,
+        "idle_pod_minutes": 15.75
+      },
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-2-sim-a-c051ad6022cb-remaining-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-68c8c7d65-d479x": 12.0,
+              "vllm-68c8c7d65-vjspc": 0.0,
+              "vllm-68c8c7d65-xd6dt": 0.0,
+              "vllm-68c8c7d65-xdrnv": 0.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-68c8c7d65-d479x": 10.0,
+              "vllm-68c8c7d65-vjspc": 0.0,
+              "vllm-68c8c7d65-xd6dt": 0.0,
+              "vllm-68c8c7d65-xdrnv": 0.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-68c8c7d65-d479x": 2.0,
+              "vllm-68c8c7d65-vjspc": 2.0,
+              "vllm-68c8c7d65-xd6dt": 0.0,
+              "vllm-68c8c7d65-xdrnv": 0.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-68c8c7d65-d479x": 1.0,
+              "vllm-68c8c7d65-xd6dt": 4.0,
+              "vllm-68c8c7d65-xdrnv": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "queue": {
+      "epp_config": "default-plugins.yaml",
+      "routing": null,
+      "profile": "sim",
+      "replicas": null,
+      "start": "together",
+      "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+      "warmup_ttft_ms": {
+        "vllm-55b5cfddcc-lcm6x": [
+          150,
+          149,
+          148,
+          147,
+          148
+        ]
+      },
+      "started": 1795710584.738941,
+      "ended": 1795711091.3473108,
+      "clock_jumps": 14,
+      "calls": 573,
+      "failed_calls": 0,
+      "calls_per_pod": {
+        "vllm-55b5cfddcc-lcm6x": 388,
+        "vllm-55b5cfddcc-v9np2": 28,
+        "vllm-55b5cfddcc-vj49z": 10,
+        "vllm-55b5cfddcc-dpj99": 78,
+        "vllm-55b5cfddcc-n6nbg": 12,
+        "vllm-55b5cfddcc-tgcp9": 40,
+        "vllm-55b5cfddcc-khs4x": 17
+      },
+      "pod_switch_share": 0.1958041958041958,
+      "max_gap_deviation_ms": 12,
+      "late_starts": {
+        "tolerance_ms": 50,
+        "calls": 0,
+        "total_ms": 0,
+        "max_ms": null
+      },
+      "picker_log": null,
+      "vllm_logs": null,
+      "autoscale": {
+        "autoscaler": "queue",
+        "section": {
+          "min_replicas": 1,
+          "max_replicas": 8,
+          "remaining_work_target": 10,
+          "queue_target": 1,
+          "pressure_target": 1.0,
+          "scale_down_stabilization_seconds": 300
+        },
+        "csv": "p5-2-sim-a-c051ad6022cb-queue-autoscale.csv",
+        "crossings": {
+          "remaining_seconds": 130.0,
+          "scale_up_seconds": 145.0,
+          "queue_seconds": 135.0,
+          "scaled_before_replay": false
+        },
+        "scale_up_before_queue": false,
+        "context_threshold": 8192,
+        "scale_up_windows": {
+          "context_seconds": 130.0,
+          "scale_up_seconds": 145.0,
+          "ready_seconds": 295.0,
+          "scale_down_seconds": null,
+          "scaled_before_replay": false,
+          "before": {
+            "calls": 49,
+            "ttft_p50_ms": 3522
+          },
+          "rising": {
+            "calls": 236,
+            "ttft_p50_ms": 1297
+          },
+          "after": {
+            "calls": 198,
+            "ttft_p50_ms": 152
+          },
+          "restarts_during_load": 0,
+          "restarts": 0
+        }
+      },
+      "autoscale_summary": {
+        "runs": 46,
+        "finished_runs": 46,
+        "failed_runs": 0,
+        "interrupted_runs": 0,
+        "completion_p50_ms": 6667,
+        "completion_p95_ms": 33950,
+        "completion_total_ms": 529105,
+        "makespan_ms": 369862,
+        "runs_per_minute": 7.462242674294736,
+        "scaled_before_replay": false,
+        "time_to_capacity_seconds": 150.0,
+        "idle_pod_minutes": 26.166666666666668
+      },
+      "cpu_hpa": null,
+      "waiting": {
+        "csv": "p5-2-sim-a-c051ad6022cb-queue-waiting.csv",
+        "window_seconds": 60,
+        "peaks": [
+          {
+            "burst_seconds": 120,
+            "most_waiting": {
+              "vllm-55b5cfddcc-dpj99": 0.0,
+              "vllm-55b5cfddcc-lcm6x": 12.0,
+              "vllm-55b5cfddcc-n6nbg": 0.0,
+              "vllm-55b5cfddcc-tgcp9": 0.0,
+              "vllm-55b5cfddcc-v9np2": 0.0,
+              "vllm-55b5cfddcc-vj49z": 0.0
+            }
+          },
+          {
+            "burst_seconds": 240,
+            "most_waiting": {
+              "vllm-55b5cfddcc-dpj99": 0.0,
+              "vllm-55b5cfddcc-khs4x": 0.0,
+              "vllm-55b5cfddcc-lcm6x": 12.0,
+              "vllm-55b5cfddcc-n6nbg": 0.0,
+              "vllm-55b5cfddcc-n8z9x": 0.0,
+              "vllm-55b5cfddcc-tgcp9": 0.0,
+              "vllm-55b5cfddcc-v9np2": 0.0,
+              "vllm-55b5cfddcc-vj49z": 0.0
+            }
+          },
+          {
+            "burst_seconds": 360,
+            "most_waiting": {
+              "vllm-55b5cfddcc-dpj99": 0.0,
+              "vllm-55b5cfddcc-khs4x": 0.0,
+              "vllm-55b5cfddcc-lcm6x": 0.0,
+              "vllm-55b5cfddcc-n6nbg": 0.0,
+              "vllm-55b5cfddcc-n8z9x": 0.0,
+              "vllm-55b5cfddcc-tgcp9": 0.0,
+              "vllm-55b5cfddcc-v9np2": 0.0,
+              "vllm-55b5cfddcc-vj49z": 0.0
+            }
+          },
+          {
+            "burst_seconds": 480,
+            "most_waiting": {
+              "vllm-55b5cfddcc-dpj99": 0.0,
+              "vllm-55b5cfddcc-khs4x": 0.0,
+              "vllm-55b5cfddcc-lcm6x": 0.0,
+              "vllm-55b5cfddcc-n6nbg": 0.0,
+              "vllm-55b5cfddcc-n8z9x": 0.0,
+              "vllm-55b5cfddcc-tgcp9": 0.0,
+              "vllm-55b5cfddcc-v9np2": 0.0,
+              "vllm-55b5cfddcc-vj49z": 0.0
+            }
+          }
+        ]
+      }
+    }
+  }
+}

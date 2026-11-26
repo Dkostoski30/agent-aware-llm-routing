@@ -13,6 +13,52 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-26 · P5.2 · green (E2: no autoscaler finishes faster than the queue; on the simulator remaining work costs 41% fewer idle pod-minutes; every autoscaler scaled down mid-replay with no run interrupted)
+Command: Claude: card 76, tests first (`loadgen/tests/test_autoscale_square.py`, `experiments/tests/test_p5_2.py`; `uv run --locked pytest` 3,510 passed), committed 4d7f463 on the guard's 6a08ed9 · the user, laptop idle, `LightingService` stopped: sitting 1, `make experiment NAME=p5-2-real-a` (2026-11-25 23:40 to 00:30, before the commits, the same files on disk); then one block from 08:40 on 2026-11-26, `make experiment-series NAME=p5-2-real` (b, c, d), `make experiment NAME=p5-2-scale-down-real`, `make up PROFILE=sim` (failed, below), and a second block from 16:50, `make up PROFILE=sim`, `make experiment-series NAME=p5-2-sim`, `make experiment NAME=p5-2-scale-down-sim`, `make autoscale-square` for both series. Files real a 1ec495dfcf6b (seed 6), b f7339381e7c6 (9), c 3d2050027e6d (10), d 27e6bebda8f3 (13), scale-down ad0ec6e190d2; sim a c051ad6022cb, b 6bedc4a76651, c b633aa84e4cf, d 063a680471fd, scale-down d35e313af6e9; system hash 9b0fc7aaa42c in all ten. Then Claude, read only: the logs, both reports, the `.meta.json` and autoscale CSVs.
+Result:
+- **Clean:** 34 replays, 0 failed calls, 0 failed and 0 interrupted kept runs, no stall; the KEDA operator restarted once, during the real scale-down's cpu variant, and never in a square.
+- **Sitting 1's rule held:** in real file a every second pod was Ready 125-130 s after the rise (limit 300 s), so the rest ran. Over the real square, 120-160 s.
+- **Real 1<->2 square, against queue** (`p5-2-real-autoscale.csv`, `p5-2-real-square.csv`; a positive gap is better than queue):
+
+  | | total run time per file | mean, spread | verdict | spec rose | verdict |
+  |---|---|---|---|---|---|
+  | cpu | -9.5, -1.2, +2.8, -6.2% | -3.5%, 12.4% | no difference shown | 35 s in every file, against 85-145 s | **earlier** (+71.4%, spread 17.0%) |
+  | pressure | +2.8, -2.8, +5.1, -5.6% | -0.1%, 10.7% | no difference shown | 140-145 s; queue 85 s in b | no difference shown |
+  | remaining | -3.2, +3.4, +1.2, -4.3% | -0.7%, 7.7% | no difference shown | 145 s; queue 85 s in b | no difference shown |
+
+  Idle pod-minutes, reported (decision 5): cpu 8.58-12.42, pressure 7.25-11.50, remaining 7.08-10.92, queue 7.33-11.08. By position, each total over its file's mean: 1st 1.030, 2nd 0.995, 3rd 0.987, 4th 0.988.
+- **Sim square at scale, against queue** (`p5-2-sim-autoscale.csv`):
+
+  | | per file | mean, spread | verdict |
+  |---|---|---|---|
+  | total run time | -3.8, -2.2, -6.0, -2.0% | -3.5%, 4.0% | no difference shown |
+  | spec rose | 0, -3.6, 0, +3.3% | -0.1%, 6.9% | no difference shown |
+  | idle pod-minutes | 15.75 against 26.17, 15.42 against 21.58, 17.75 against 36.50, 13.50 against 25.00 | +41.4%, 22.8% | **fewer** |
+
+  The most pods asked for: remaining 3-4, queue 6-8 (the ceiling in three files). By position: 1st 1.007, 2nd 0.993.
+- **The scale-down replays** (`burst-gap`, seed 6; seconds from the replay's start, bursts at 720 and 1,440 s):
+
+  | | rose | Ready | first scale-down | rose again | interrupted kept runs | idle pod-min |
+  |---|---|---|---|---|---|---|
+  | real cpu | 20 s | 145 s | 365 s | 765 s | 0 of 21 | 36.50 |
+  | real pressure | 760 s | 885 s | 1,090 s | 1,490 s | 0 of 21 | 27.17 |
+  | real remaining | 765 s | 885 s | 1,070 s | 1,505 s | 0 of 21 | 27.00 |
+  | real queue | 760 s | 885 s | 1,090 s | 1,510 s | 0 of 21 | 27.33 |
+  | sim remaining | 765 s | 925 s | 1,085 s | - | 0 of 21 | 32.42 |
+  | sim queue | 770 s | 925 s | 1,085 s | - | 0 of 21 | 35.08 |
+
+  On sim, remaining asked for at most 4 pods and queue 5.
+- **Simulated against real, the simulated numbers optimistic (Gate 2, P2.9):** run time p50 on sim 5.2-8.2 s against 12.2-26.3 s on real, and on sim remaining is slower than queue in every file (by 2-6%) where on real the sign changes from file to file; idle time is judged on sim only, where the ceiling lets an autoscaler ask for fewer pods.
+Notes:
+- **What it shows.** At real 1<->2 on compiled pods the four autoscalers finish alike: CPU gets its second pod ~110 s earlier in every file and still does not finish faster, because a burst on compiled pods is mostly done before any second pod is Ready (120-160 s after the rise). On simulated pods up to 8, remaining work and the queue finish alike within the verdict (remaining slower by 2-6% in all four files, short of "slower" since the mean 3.5% is under the spread 4.0%), and remaining asks for half the pods at 41% fewer idle pod-minutes: P3.10's lead (31-56% on one seed per pattern) holds over four seeds. The thesis claim it supports is cost, not speed.
+- **CPU scales down while runs are active.** In the real scale-down file cpu went 1 -> 2 at 20 s and back to 1 at 365 s, then 2 again at 765 s and 1 at 1,435 s. P3.10's and P4.5's reading, that CPU "cannot scale down while anything runs", held on eager pods, where one busy pod read ~100% throughout; compiled pods idle between calls, so CPU falls under its target. That sentence comes out of the thesis text.
+- **Every autoscaler scaled down mid-replay with 0 interrupted runs**, the first replays to do so (P4.3's drain under an autoscaler's own scale-down). The second rise came too late: the second burst's runs had finished by ~1,495 s, before a new pod could be Ready, so on this load the window turns a pod back into a cold start.
+- **Real a and b have no Windows GPU memory log.** At each file's start WSL's `UtilAcceptVsock: accept4 failed 110` killed the typeperf that the log starts (its process defunct, the CSV empty; `windows_gpu_log_ended_early_with: 1`), with 4.8 GB available, so not memory pressure. c, d and the scale-down files have theirs, with no spill. Two in a row after 1 in 8 in the squares; the guard's two Windows calls just before may be the cause, not shown. A retry for the log's start is a change to `loadgen/` and waits until after P5's series.
+- **The first block's `make up PROFILE=sim` failed on the network:** `tls: first record does not look like a TLS handshake` from `prometheus-community.github.io` while installing monitoring. The sim tries then found no cluster and stopped at once, with no results. The second block wrapped `make up` in the same retries and got through on its first try. As P3.10's DNS failures.
+- **Clock jumps** 14-19 per square replay and 45-46 per scale-down replay, about 1.6 a minute in both: the scale-down replays are ~28 min long, not a strained host.
+- **Real file a ran before the commits,** on c4aed75 with cards 76 and the guard uncommitted. Committing changed no file on disk, so its system hash equals the others' and the comparison took it.
+- The guard refused file b's first try at 08:35, `LightingService is RUNNING` after a restart; stopped as admin, the next try ran.
+
 ### 2026-11-25 · P4.13d follow-up · green (`make experiment` refuses to start beside the GPU blockers; the live check passed on a working host)
 Command: Claude, tests first: 14 new tests in `loadgen/tests/test_experiment.py`, which failed before the code; then the whole Python suite (`uv run --locked pytest`: 3,452 passed, 1 warning, FastAPI's TestClient deprecation, there before); pre-commit on the changed files; 8 changes to rule lines in the check, each caught by a test, one only after a case was added (`sc.exe` failing after it printed a state). Then the live check on this host, read only.
 Result:
