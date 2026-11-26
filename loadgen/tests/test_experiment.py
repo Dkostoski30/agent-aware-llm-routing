@@ -196,8 +196,13 @@ class FakeCluster:
         fail_windows_gpu_check: bool = False,
         windows_gpu_exit: int | None = None,
         waiting_rows: Sequence[WaitingRow] = (),
+        fail_blocker_check: bool = False,
     ) -> None:
         self.asked: list[str] = []
+        # The GPU blocker check (P4.13d), with how many cluster steps and GPU log steps came before
+        # it, apart from asked as the GPU log's are.
+        self.blockers: list[tuple[str, int, int]] = []
+        self.fail_blocker_check = fail_blocker_check
         # The waiting series' asks, (since, until), apart from asked as the GPU log's are (P5.0).
         self.waiting_asked: list[tuple[float, float]] = []
         self.waiting_rows = waiting_rows
@@ -280,6 +285,11 @@ class FakeCluster:
     def clock_jumps(self, since: float, until: float) -> int:
         self.asked.append(f"jumps {since:.0f} {until:.0f}")
         return 3
+
+    def check_gpu_blockers(self) -> None:
+        self.blockers.append(("check", len(self.asked), len(self.gpu)))
+        if self.fail_blocker_check:
+            raise ExperimentError("LightingService is RUNNING")
 
     def check_gpu(self) -> None:
         self.gpu.append(("gpu check", len(self.asked)))
@@ -3583,6 +3593,130 @@ def test_a_windows_gpu_check_that_fails_or_samples_nothing_is_an_error(
     monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
     with pytest.raises(ExperimentError, match="typeperf"):
         LiveCluster(experiment, {}).check_windows_gpu()
+
+
+def test_a_real_profile_checks_the_gpu_blockers_after_readiness_and_before_the_gpu_checks(
+    tmp_path: Path,
+) -> None:
+    """P4.13d: a Windows program on the GPU is refused before anything restarts or is logged."""
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.blockers == [("check", 1, 0)]
+    assert cluster.gpu[0] == ("gpu check", 1)
+
+
+def test_a_sim_only_experiment_checks_no_gpu_blockers(tmp_path: Path) -> None:
+    experiment = loaded(tmp_path, profile="sim")
+    cluster = FakeCluster()
+    run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.blockers == []
+
+
+def test_a_gpu_blocker_stops_the_experiment_before_any_restart_or_gpu_check(
+    tmp_path: Path,
+) -> None:
+    experiment = loaded(tmp_path)
+    cluster = FakeCluster(fail_blocker_check=True)
+    with pytest.raises(ExperimentError, match="LightingService"):
+        run_experiment(experiment, outputs(experiment, tmp_path), cluster, ticking_clock())
+    assert cluster.asked == ["check"]
+    assert cluster.gpu == []
+    assert cluster.windows_gpu == []
+
+
+SC_STOPPED = (
+    "\nSERVICE_NAME: LightingService \n"
+    "        TYPE               : 10  WIN32_OWN_PROCESS  \n"
+    "        STATE              : 1  STOPPED \n"
+    "        WIN32_EXIT_CODE    : 0  (0x0)\n"
+)
+SC_RUNNING = SC_STOPPED.replace("1  STOPPED", "4  RUNNING")
+# sc.exe exits 1060, which WSL hands on as 1060 mod 256 (checked 2026-11-25).
+SC_NOT_INSTALLED = (
+    "[SC] EnumQueryServicesStatus:OpenService FAILED 1060:\n\n"
+    "The specified service does not exist as an installed service.\n\n"
+)
+TASKLIST_NONE = "INFO: No tasks are running which match the specified criteria.\n"
+TASKLIST_FOUND = '"LM_Support.exe","10664","Console","1","145,032 K"\n'
+BLOCKER = {"service": "LightingService", "process": "LM_Support.exe"}
+
+
+def blocker_cluster(tmp_path: Path) -> LiveCluster:
+    return LiveCluster(loaded(tmp_path), {"real": {"host": {"gpu_blockers": [BLOCKER]}}})
+
+
+def windows_tools(
+    monkeypatch: pytest.MonkeyPatch, sc: tuple[int, str], tasklist: tuple[int, str]
+) -> list[list[str]]:
+    """sc.exe and tasklist.exe answering as given; the commands handed to them, in order."""
+    handed: list[list[str]] = []
+
+    def run(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        handed.append(args)
+        code, stdout = sc if args[0] == "sc.exe" else tasklist
+        return subprocess.CompletedProcess(args, code, stdout=stdout)
+
+    monkeypatch.setattr("load_generator.experiment.subprocess.run", run)
+    return handed
+
+
+@pytest.mark.parametrize(
+    "sc", [(0, SC_STOPPED), (36, SC_NOT_INSTALLED)], ids=["stopped", "not installed"]
+)
+def test_a_stopped_or_missing_service_with_no_process_passes_the_blocker_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sc: tuple[int, str]
+) -> None:
+    handed = windows_tools(monkeypatch, sc, (0, TASKLIST_NONE))
+    blocker_cluster(tmp_path).check_gpu_blockers()
+    assert handed == [
+        ["sc.exe", "query", "LightingService"],
+        ["tasklist.exe", "/FI", "IMAGENAME eq LM_Support.exe", "/FO", "CSV", "/NH"],
+    ]
+
+
+def test_a_running_service_is_a_gpu_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    windows_tools(monkeypatch, (0, SC_RUNNING), (0, TASKLIST_NONE))
+    with pytest.raises(ExperimentError, match="LightingService is RUNNING"):
+        blocker_cluster(tmp_path).check_gpu_blockers()
+
+
+def test_a_running_process_is_a_gpu_blocker_though_its_service_is_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The service stopped does not end a process it started (P4.13d's check looked at both)."""
+    windows_tools(monkeypatch, (0, SC_STOPPED), (0, TASKLIST_FOUND.lower()))
+    with pytest.raises(ExperimentError, match=r"LM_Support\.exe is running"):
+        blocker_cluster(tmp_path).check_gpu_blockers()
+
+
+@pytest.mark.parametrize(
+    ("sc", "tasklist"),
+    [
+        ((1, "UtilAcceptVsock: accept4 failed 110\n"), (0, TASKLIST_NONE)),
+        ((0, "SERVICE_NAME: LightingService\n"), (0, TASKLIST_NONE)),
+        ((1, SC_STOPPED), (0, TASKLIST_NONE)),
+        ((0, SC_STOPPED), (1, "UtilAcceptVsock: accept4 failed 110\n")),
+    ],
+    ids=["sc fails", "sc names no state", "sc fails after a state", "tasklist fails"],
+)
+def test_a_blocker_check_that_cannot_read_windows_is_an_error_not_a_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sc: tuple[int, str],
+    tasklist: tuple[int, str],
+) -> None:
+    windows_tools(monkeypatch, sc, tasklist)
+    with pytest.raises(ExperimentError, match="could not be checked"):
+        blocker_cluster(tmp_path).check_gpu_blockers()
+
+
+@pytest.mark.parametrize("name", ["real", "real-plain", "demo"])
+def test_every_gpu_profile_names_p4_13ds_lighting_service_as_a_gpu_blocker(name: str) -> None:
+    profile = yaml.safe_load((REPO_ROOT / "config" / f"{name}.yaml").read_text())
+    assert BLOCKER in profile["host"]["gpu_blockers"]
 
 
 def windows_gpu_popen(started: list[FakeProcess], exited: int | None) -> Callable[..., Any]:

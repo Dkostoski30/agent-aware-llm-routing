@@ -18,7 +18,9 @@ thesis-plugins.yaml. With the plugin on, the replay sends each run's end to the 
 
 On real pods, nvidia-smi samples the GPU into a file beside the results for the whole run, and is
 checked before anything restarts (P3.7, PLAN.md Phase 5's real-pod comparisons); so does Windows'
-typeperf.exe, for the GPU memory nvidia-smi under WSL does not show (P4.13c). A plugin variant's
+typeperf.exe, for the GPU memory nvidia-smi under WSL does not show (P4.13c). Before both, the
+run is refused while a Windows program the profile's host.gpu_blockers names holds the GPU beside
+the pods, since one leaked until the card spilled and a pod stalled (P4.13d). A plugin variant's
 picker log is kept before the next switch restarts the picker. A file may name a
 not_worse_tolerance, and a faster_by (P3.7b), which go into the .meta.json for make
 experiment-compare's verdicts. A file may name pod_stall_seconds: after each replay Prometheus is
@@ -55,6 +57,7 @@ Usage: python -m load_generator.experiment EXPERIMENT
 
 import argparse
 import asyncio
+import csv
 import dataclasses
 import hashlib
 import json
@@ -199,6 +202,13 @@ WINDOWS_GPU_COUNTERS = (
 # typeperf names each column \\<computer>\<counter>; the name is dropped, so the committed results
 # do not carry it.
 COMPUTER_IN_COLUMN = re.compile(r'"\\\\[^\\"]+\\')
+# A GPU blocker's service (P4.13d) as sc.exe query names its state: the number, then the name,
+# which is not translated.
+SERVICE_STATE = re.compile(r"STATE\s*:\s*\d+\s+(\w+)")
+SERVICE_STOPPED = "STOPPED"
+# sc.exe's error for a service this Windows does not have, in every language: such a host has no
+# blocker to stop.
+SERVICE_NOT_INSTALLED = "FAILED 1060:"
 # How a variant's pods start (P4.13c). Together: the restart recreates every pod at once, as the
 # Deployment is Recreate. One at a time: each pod after the first starts beside a Ready one, as an
 # autoscaler adds them; in P4.13b two compiled pods started together then stalled when both were
@@ -414,6 +424,10 @@ class Cluster(Protocol):
     def replay(self, out: Path, routing: Mapping[str, bool] | None) -> list[dict[str, Any]]: ...
 
     def clock_jumps(self, since: float, until: float) -> int: ...
+
+    # Raises ExperimentError while a Windows program the profile names holds the GPU beside the
+    # pods, or if Windows cannot be asked (P4.13d).
+    def check_gpu_blockers(self) -> None: ...
 
     # Raises ExperimentError if nvidia-smi cannot read the GPU.
     def check_gpu(self) -> None: ...
@@ -1062,6 +1076,7 @@ def run_experiment(
     out.csv.parent.mkdir(parents=True, exist_ok=True)
     cluster.check_ready()
     if experiment.gpu_logged:
+        cluster.check_gpu_blockers()
         cluster.check_gpu()
         cluster.check_windows_gpu()
     # Now and not at the end: the profiles were loaded just before, and a run takes hours.
@@ -1271,6 +1286,37 @@ def count_clock_jumps(since: float, until: float) -> int:
     if done.returncode not in JOURNAL_FOUND_OR_NONE:
         raise ExperimentError(f"journalctl exited with {done.returncode}")
     return sum(CLOCK_JUMP_LINE in line for line in done.stdout.splitlines())
+
+
+def _windows_tool(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, stdout=subprocess.PIPE, text=True, check=False)
+
+
+def service_state(done: subprocess.CompletedProcess[str]) -> str | None:
+    """The state sc.exe query gave its service, None for a service not installed. Anything else,
+    such as WSL interop failing, is an error and not a pass."""
+    if done.returncode != 0 and SERVICE_NOT_INSTALLED in done.stdout:
+        return None
+    state = SERVICE_STATE.search(done.stdout)
+    if done.returncode != 0 or state is None:
+        raise ExperimentError(
+            f"sc.exe exited with {done.returncode} and printed {done.stdout!r}, so the GPU "
+            "blockers could not be checked"
+        )
+    return state.group(1)
+
+
+def process_listed(done: subprocess.CompletedProcess[str], process: str) -> bool:
+    """Whether tasklist.exe's CSV lines name the process; Windows' names ignore case. Its line for
+    no match is not quoted, so it reads as no row of that name."""
+    if done.returncode != 0:
+        raise ExperimentError(
+            f"tasklist.exe exited with {done.returncode} and printed {done.stdout!r}, so the GPU "
+            "blockers could not be checked"
+        )
+    return any(
+        row and row[0].lower() == process.lower() for row in csv.reader(done.stdout.splitlines())
+    )
 
 
 def windows_gpu_csv(raw: str) -> str:
@@ -1484,6 +1530,28 @@ class LiveCluster:
                 f"nvidia-smi exited with {done.returncode} and printed {done.stdout!r}, so the GPU "
                 "could not be logged"
             )
+
+    def check_gpu_blockers(self) -> None:
+        """Each of the GPU profile's host.gpu_blockers: its service is stopped or not installed,
+        and its process is not running (P4.13d). Both, as the squares' run blocks checked: a
+        stopped service does not end a process it started."""
+        real = next(name for name in self.experiment.profiles() if name != SIM_PROFILE)
+        for blocker in self.profiles[real]["host"]["gpu_blockers"]:
+            service, process = blocker["service"], blocker["process"]
+            state = service_state(_windows_tool(["sc.exe", "query", service]))
+            if state not in (None, SERVICE_STOPPED):
+                raise ExperimentError(
+                    f"{service} is {state}, and its {process} holds memory on the GPU beside the "
+                    f"pods (P4.13d); stop it as admin first: sc.exe stop {service}"
+                )
+            listed = _windows_tool(
+                ["tasklist.exe", "/FI", f"IMAGENAME eq {process}", "/FO", "CSV", "/NH"]
+            )
+            if process_listed(listed, process):
+                raise ExperimentError(
+                    f"{process} is running and holds memory on the GPU beside the pods (P4.13d); "
+                    f"end it as admin first: taskkill.exe /F /IM {process}"
+                )
 
     def _gpu_interval(self) -> int:
         """As often as Prometheus reads the pods, so a sample lines up with a queue reading."""

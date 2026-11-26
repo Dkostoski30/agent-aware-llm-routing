@@ -13,6 +13,16 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-25 · P4.13d follow-up · green (`make experiment` refuses to start beside the GPU blockers; the live check passed on a working host)
+Command: Claude, tests first: 14 new tests in `loadgen/tests/test_experiment.py`, which failed before the code; then the whole Python suite (`uv run --locked pytest`: 3,452 passed, 1 warning, FastAPI's TestClient deprecation, there before); pre-commit on the changed files; 8 changes to rule lines in the check, each caught by a test, one only after a case was added (`sc.exe` failing after it printed a state). Then the live check on this host, read only.
+Result:
+- **What it does:** on a GPU profile (real, real-plain, demo), right after the readiness check and before the GPU checks or any restart, `make experiment` asks `sc.exe query <service>` and `tasklist.exe` about every entry of the profile's new `host.gpu_blockers`, today `LightingService` and its `LM_Support.exe`. A service that is not stopped, or the process running, stops the run with the command that ends it. A service that is not installed passes (`FAILED 1060`). A Windows that cannot be asked is an error, not a pass. Sim skips it.
+- **The live check at 23:08 refused:** `sc.exe exited with 1 and printed '', so the GPU blockers could not be checked`. Every WSL call to Windows was failing then, from the shell too (`UtilAcceptVsock:281: accept4 failed 110`), with the VM at 1.1 GB available and 0.9 GB in swap after 3.5 h up and the squares. That is the error branch working. A pass needs WSL interop working again.
+- **The user's live check, later the same night,** `LiveCluster.check_gpu_blockers()` on real with `LightingService` stopped: `blocker check passed`.
+Notes:
+- `host.gpu_blockers` is in the GPU profiles, so their `profile_sha256` moves. Every file run before this commit has the old hash, and every Phase 5 file after it the new one: P5.2's series all run after it.
+- The run blocks' shell check for P4.13d is no longer needed.
+
 ### 2026-11-25 · P5.1c · green (the ablation square: no rule shows a difference by the verdict; without priority, 16-19% slower in 3 of 4 files)
 Command: Claude: card 75, tests first (`experiments/tests/test_p5_squares.py`, 19 tests over both squares), files p5-1c-a to p5-1c-d and `experiments/series/p5-1c.yaml` (reference `plugin`) · the user, in P5.1b's block, laptop idle, `LightingService` stopped as admin (P4.13d): `make experiment-series NAME=p5-1c`, from 14:20 local; the user restarted the PC at 17:30 during file c for a break, and resumed at 19:35 (the Unknown pods from before the restart deleted, the pods restarted one at a time, the block's tidy-up, then the same series); square at 21:47. Files a c13c5c1f9d7f (seed 6), b 4c3fa25d1e58 (9), c b0a17c864c5b (10), d 80b098e07859 (13), all on commit 33eb174 with cards 74-75 uncommitted, system hash b7f1e50f0307 in all 8 files of both squares. Then Claude, read only: the report, the picker logs, the `.meta.json` files.
 Result:

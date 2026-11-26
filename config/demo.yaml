@@ -123,6 +123,16 @@ drain:
   # before the pod left its pool, still on its way, is not cut. A first guess, P3.4's settle: the picker's informer
   # plus the 2.5 s the VM's wall clock can step.
   quiet_seconds: 5
+# The Windows host under WSL (P4.13d). Host state, not a tunable: what make experiment refuses to start beside.
+host:
+  # Windows programs that hold memory on the NVIDIA GPU beside the pods: make experiment checks before anything restarts
+  # that each service is stopped or not installed and its process is not running. ASUS's AURA lighting add-on,
+  # LM_Support.exe, run by the LightingService service, grew 51 -> 145 MiB on the GPU in 15 min until the 4 GB card
+  # spilled into shared memory and a pod stalled mid-replay (experiments/log.md, 2026-11-24). The service starts with
+  # Windows, so it is stopped as admin before each sitting: sc.exe stop LightingService.
+  gpu_blockers:
+    - service: LightingService
+      process: LM_Support.exe
 # Prometheus settings (P1.1).
 monitoring:
   # How often Prometheus reads every pod's /metrics, and so the finest time step of every metric an experiment reads
