@@ -1,0 +1,240 @@
+{
+  "experiment": "p5-3-failover",
+  "hash": "4be74dd7b3f5",
+  "source": {
+    "commit": "c907627ee1378190ff7350e9d41a5415972235ba",
+    "uncommitted": [
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10.meta.json",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s13-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6.meta.json",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9.meta.json"
+    ],
+    "system_sha256": "4191516da9e7d224e057f4b450390f464c20bbfaf876bba07759e9879720a27e"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 13,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-27T00:44:37.254835+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-84cd7656b8-2z2sr",
+      "live_pins_at_kill": {
+        "vllm-84cd7656b8-2z2sr": 6,
+        "vllm-84cd7656b8-bh22c": 3
+      },
+      "picker_log_since": "2026-11-27T00:56:28.637477+00:00",
+      "kill_requested_ms": 1795741247407,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "tau2_retail-873-20 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "tau2_retail-873-20 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "bfcl-589-21 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "bfcl-589-21 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "hotpotqa-195-23 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "hotpotqa-195-23 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "bfcl-594-24 step 2: answered by vllm-84cd7656b8-2z2sr",
+        "tau2_telecom-981-25 step 3: answered by vllm-84cd7656b8-2z2sr",
+        "hotpotqa-85-29 step 2: answered by vllm-84cd7656b8-2z2sr"
+      ],
+      "on_killed_runs": [
+        "bfcl-589-21",
+        "bfcl-594-24",
+        "hotpotqa-195-23",
+        "hotpotqa-85-29",
+        "tau2_retail-873-20",
+        "tau2_telecom-981-25"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-589-21",
+        "bfcl-594-24",
+        "hotpotqa-195-23",
+        "hotpotqa-85-29",
+        "tau2_retail-873-20",
+        "tau2_telecom-981-25"
+      ],
+      "remapped_runs": [
+        "bfcl-589-21",
+        "bfcl-594-24",
+        "hotpotqa-195-23",
+        "tau2_retail-873-20",
+        "tau2_telecom-981-25"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 6,
+          "median_ms": 483.5,
+          "max_ms": 9069
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 44,
+          "median_ms": 16.5,
+          "max_ms": 18590
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-77dbf6f6c9-bwwmr",
+      "live_pins_at_kill": {
+        "vllm-77dbf6f6c9-bwwmr": 5,
+        "vllm-77dbf6f6c9-mvjcs": 4
+      },
+      "picker_log_since": "2026-11-27T01:08:27.527086+00:00",
+      "kill_requested_ms": 1795741966176,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 49,
+      "completion_rate": 0.98,
+      "deadline_runs": [],
+      "on_killed": [
+        "tau2_retail-873-20 step 2: answered by vllm-77dbf6f6c9-bwwmr",
+        "tau2_retail-873-20 step 2: answered by vllm-77dbf6f6c9-bwwmr",
+        "hotpotqa-180-22 step 3: answered by vllm-77dbf6f6c9-bwwmr",
+        "hotpotqa-195-23 step 3: answered by vllm-77dbf6f6c9-bwwmr",
+        "hotpotqa-195-23 step 3: answered by vllm-77dbf6f6c9-bwwmr",
+        "hotpotqa-167-26 step 2: answered by vllm-77dbf6f6c9-bwwmr",
+        "hotpotqa-85-29 step 2: answered by vllm-77dbf6f6c9-bwwmr"
+      ],
+      "on_killed_runs": [
+        "hotpotqa-167-26",
+        "hotpotqa-180-22",
+        "hotpotqa-195-23",
+        "hotpotqa-85-29",
+        "tau2_retail-873-20"
+      ],
+      "retries": 0,
+      "failed_by_kill": [
+        "hotpotqa-85-29"
+      ],
+      "affected_runs": [
+        "hotpotqa-167-26",
+        "hotpotqa-180-22",
+        "hotpotqa-195-23",
+        "hotpotqa-85-29",
+        "tau2_retail-873-20"
+      ],
+      "remapped_runs": [
+        "hotpotqa-167-26",
+        "hotpotqa-195-23",
+        "tau2_retail-873-20"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 4,
+          "median_ms": 2103.0,
+          "max_ms": 8135
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 45,
+          "median_ms": 10,
+          "max_ms": 16505
+        },
+        "unpaired": [
+          "hotpotqa-85-29"
+        ],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    }
+  ]
+}

@@ -13,6 +13,45 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-27 · P5.3 · red (the kill hit 4 to 11 calls at every seed, retry-on completed 200 of 200 runs and retry-off 197, but the retry never fired: every call on the killed pod with the retry on was answered by that pod after the kill)
+Command: Claude: card 77, tests first (`loadgen/tests/test_failover.py` +24, `experiments/tests/test_p5_3.py` 5), committed c907627 · the user, laptop idle, Windows' AC standby off: `make test`, `make lint`, `make down`, `make up PROFILE=sim`, `make failover-check EXPERIMENT=experiments/p5-3-failover.yaml` (2026-11-26 23:46 to 2026-11-27 02:18 local, 12 replays in one go). File hash 4be74dd7b3f5, system hash 4191516da9e7 at all four seeds, commit c907627. Then Claude, read only: the four `.meta.json`, `p5-3-failover-4be74dd7b3f5-summary.csv`, the replay lines and logs.
+Result:
+- **Clean apart from the kill:** 12 replays of 50 runs; 0 runs failed on their deadline, no kill or replacement error, the picker restarted 0 times; every no-kill reference 50 of 50 with 0 retries.
+- **Per seed** (sim, `burst-fan-out-heavy`, 2 pods, affinity on; at 245 s the pod with the most live pins force-deleted with no grace):
+
+  | seed | variant | live pins at the kill | calls on the killed pod at the kill | answered by it | retried | runs failed by the kill | completion | the rule's verdict |
+  |---|---|---|---|---|---|---|---|---|
+  | 6 | retry-off | 5 against 4 | 7 | 7 | 0 | 0 | 50 of 50 | control |
+  | 6 | retry-on | 5 against 4 | 6 | 6 | 0 | 0 | 50 of 50 | passed |
+  | 9 | retry-off | 4 against 1 | 5 | 5 | 0 | 0 | 50 of 50 | control |
+  | 9 | retry-on | 4 against 3 | 4 | 4 | 0 | 0 | 50 of 50 | passed |
+  | 10 | retry-on | 5 against 4 | 7 | 7 | 0 | 0 | 50 of 50 | passed |
+  | 10 | retry-off | 7 against 2 | 11 | 8 | 0 | 2 | 48 of 50 | control |
+  | 13 | retry-on | 6 against 3 | 9 | 9 | 0 | 0 | 50 of 50 | passed |
+  | 13 | retry-off | 5 against 4 | 7 | 7 | 0 | 1 | 49 of 50 | control |
+
+  Over the seeds: retry-on 100% at every seed; retry-off mean 98.5% (96-100%).
+- **The retry never fired.** retry-on sent 0 calls again at every seed. Each call running on the killed pod at the kill, and each sent to it just after, was answered by it 10 ms to 3.0 s after the delete was asked for (26 calls at the kill with the retry on, all answered). P4.4 saw the same window: the old pod keeps serving ~3 s after a force delete. Calls here take a median of 1.0-1.9 s (p90 2.8-4.1 s), so most end inside it. The retry-off losses were the calls that did not: at seed 10, two fanned-out calls of `hotpotqa-22-19` step 2 cut mid-reply and `tau2_retail-861-23` step 2 a gateway 503; at seed 13, `hotpotqa-85-29` step 3, sent to the killed pod 194 ms after the kill (its pin not yet moved, so it is not among the calls running at the kill), one fanned-out call answered and its twin cut mid-reply. With the retry on, no call was cut, so the four "passed" verdicts by the rule fixed before the runs do not show the retry recovering anything.
+- **The recovery cost** (each run's time less its no-kill time, runs finished in both; seconds, median and max):
+
+  | seed | variant | runs with a call on the killed pod | median, max | the rest | median, max | not finished on one side |
+  |---|---|---|---|---|---|---|
+  | 6 | retry-off | 5 | 1.9, 5.6 | 45 | 0.4, 19.0 | 0 |
+  | 6 | retry-on | 5 | 2.4, 19.2 | 45 | 0.4, 18.0 | 0 |
+  | 9 | retry-off | 4 | 3.1, 8.7 | 46 | 0.0, 32.9 | 0 |
+  | 9 | retry-on | 4 | 2.1, 7.9 | 46 | 0.0, 33.7 | 0 |
+  | 10 | retry-on | 5 | 7.7, 10.5 | 45 | 0.0, 19.1 | 0 |
+  | 10 | retry-off | 5 | 1.4, 1.8 | 43 | 1.5, 17.5 | 2 |
+  | 13 | retry-on | 6 | 0.5, 9.1 | 44 | 0.0, 18.6 | 0 |
+  | 13 | retry-off | 4 | 2.1, 8.1 | 45 | 0.0, 16.5 | 1 |
+
+  Every run pinned to the killed pod had a call on it at the kill, so the "pinned, not running" group is empty at every seed; 0 steps were sent again, 0 s lost to retries. The runs hit by the kill took 0.5-7.7 s longer at the median; the rest's max of 16.5-33.7 s is the gap between two replays of the same seed plus one pod carrying the third burst, as large as the kill's own cost. Simulated times, optimistic (Gate 2, P2.9).
+Notes:
+- Decided after the run (the user, 2026-11-27): P5.3 is **not green**, though the rule fixed before the runs passes retry-on at all four seeds, as the retry was not exercised; a follow-up card, P5.3b, is to make the kill cut calls with the retry on. Offered: green with the limit stated, or inconclusive on the retry. P4.4's aa3c44493359 (3 cut calls retried and answered, 30 of 30) stays the evidence that the retry recovers a cut call.
+- What the rule missed: it counted the calls running on the killed pod, not the calls the kill cut, so a seed whose calls all finished in the pod's last seconds passes. The report's on_killed lists both, as "answered by" or "failed".
+- At seed 13's retry-off the variant's `set-routing` got a curl 500 on its first try and passed on its second, before the replay started.
+- The ~3 s window's cause (the kubelet's SIGTERM, then SIGKILL after its minimum grace, with the simulator finishing its streams in between) fits the times and is not checked.
+
 ### 2026-11-26 · P5.2 · green (E2: no autoscaler finishes faster than the queue; on the simulator remaining work costs 41% fewer idle pod-minutes; every autoscaler scaled down mid-replay with no run interrupted)
 Command: Claude: card 76, tests first (`loadgen/tests/test_autoscale_square.py`, `experiments/tests/test_p5_2.py`; `uv run --locked pytest` 3,510 passed), committed 4d7f463 on the guard's 6a08ed9 · the user, laptop idle, `LightingService` stopped: sitting 1, `make experiment NAME=p5-2-real-a` (2026-11-25 23:40 to 00:30, before the commits, the same files on disk); then one block from 08:40 on 2026-11-26, `make experiment-series NAME=p5-2-real` (b, c, d), `make experiment NAME=p5-2-scale-down-real`, `make up PROFILE=sim` (failed, below), and a second block from 16:50, `make up PROFILE=sim`, `make experiment-series NAME=p5-2-sim`, `make experiment NAME=p5-2-scale-down-sim`, `make autoscale-square` for both series. Files real a 1ec495dfcf6b (seed 6), b f7339381e7c6 (9), c 3d2050027e6d (10), d 27e6bebda8f3 (13), scale-down ad0ec6e190d2; sim a c051ad6022cb, b 6bedc4a76651, c b633aa84e4cf, d 063a680471fd, scale-down d35e313af6e9; system hash 9b0fc7aaa42c in all ten. Then Claude, read only: the logs, both reports, the `.meta.json` and autoscale CSVs.
 Result:

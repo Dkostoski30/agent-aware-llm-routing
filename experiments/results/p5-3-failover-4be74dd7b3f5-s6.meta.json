@@ -1,0 +1,202 @@
+{
+  "experiment": "p5-3-failover",
+  "hash": "4be74dd7b3f5",
+  "source": {
+    "commit": "c907627ee1378190ff7350e9d41a5415972235ba",
+    "uncommitted": [
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl.log"
+    ],
+    "system_sha256": "4191516da9e7d224e057f4b450390f464c20bbfaf876bba07759e9879720a27e"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-6fff5fd67d-lxfkv",
+      "live_pins_at_kill": {
+        "vllm-6fff5fd67d-c77pz": 4,
+        "vllm-6fff5fd67d-lxfkv": 5
+      },
+      "picker_log_since": "2026-11-26T22:46:17.786479+00:00",
+      "kill_requested_ms": 1795733435608,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "hotpotqa-145-20 step 3: answered by vllm-6fff5fd67d-lxfkv",
+        "hotpotqa-145-20 step 3: answered by vllm-6fff5fd67d-lxfkv",
+        "bfcl-565-21 step 2: answered by vllm-6fff5fd67d-lxfkv",
+        "bfcl-561-22 step 2: answered by vllm-6fff5fd67d-lxfkv",
+        "bfcl-527-25 step 3: answered by vllm-6fff5fd67d-lxfkv",
+        "hotpotqa-25-28 step 3: answered by vllm-6fff5fd67d-lxfkv",
+        "hotpotqa-25-28 step 3: answered by vllm-6fff5fd67d-lxfkv"
+      ],
+      "on_killed_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "remapped_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "hotpotqa-145-20"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 5,
+          "median_ms": 1916,
+          "max_ms": 5609
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 45,
+          "median_ms": 391,
+          "max_ms": 18968
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-7c8c69f685-n6mkq",
+      "live_pins_at_kill": {
+        "vllm-7c8c69f685-n6mkq": 5,
+        "vllm-7c8c69f685-zcqjv": 4
+      },
+      "picker_log_since": "2026-11-26T22:58:24.572764+00:00",
+      "kill_requested_ms": 1795734160855,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-270-19 step 4: answered by vllm-7c8c69f685-n6mkq",
+        "bfcl-679-24 step 3: answered by vllm-7c8c69f685-n6mkq",
+        "bfcl-527-25 step 3: answered by vllm-7c8c69f685-n6mkq",
+        "gaia_dev-345-26 step 3: answered by vllm-7c8c69f685-n6mkq",
+        "gaia_dev-345-26 step 3: answered by vllm-7c8c69f685-n6mkq",
+        "bfcl-708-27 step 2: answered by vllm-7c8c69f685-n6mkq"
+      ],
+      "on_killed_runs": [
+        "bfcl-527-25",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "gaia_dev-345-26"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-527-25",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "gaia_dev-345-26"
+      ],
+      "remapped_runs": [
+        "bfcl-527-25",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "gaia_dev-345-26"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 5,
+          "median_ms": 2421,
+          "max_ms": 19217
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 45,
+          "median_ms": 367,
+          "max_ms": 17997
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-26T23:10:31.700319+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    }
+  ]
+}

@@ -1,0 +1,235 @@
+{
+  "experiment": "p5-3-failover",
+  "hash": "4be74dd7b3f5",
+  "source": {
+    "commit": "c907627ee1378190ff7350e9d41a5415972235ba",
+    "uncommitted": [
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s10-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6.meta.json",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9.meta.json"
+    ],
+    "system_sha256": "4191516da9e7d224e057f4b450390f464c20bbfaf876bba07759e9879720a27e"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 10,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-8699f6dcf-mc982",
+      "live_pins_at_kill": {
+        "vllm-8699f6dcf-ksv48": 4,
+        "vllm-8699f6dcf-mc982": 5
+      },
+      "picker_log_since": "2026-11-27T00:01:16.750023+00:00",
+      "kill_requested_ms": 1795737933080,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "tau2_retail-872-16 step 2: answered by vllm-8699f6dcf-mc982",
+        "hotpotqa-22-19 step 2: answered by vllm-8699f6dcf-mc982",
+        "hotpotqa-22-19 step 2: answered by vllm-8699f6dcf-mc982",
+        "bfcl-675-20 step 2: answered by vllm-8699f6dcf-mc982",
+        "hotpotqa-151-21 step 2: answered by vllm-8699f6dcf-mc982",
+        "hotpotqa-151-21 step 2: answered by vllm-8699f6dcf-mc982",
+        "tau2_retail-861-23 step 3: answered by vllm-8699f6dcf-mc982"
+      ],
+      "on_killed_runs": [
+        "bfcl-675-20",
+        "hotpotqa-151-21",
+        "hotpotqa-22-19",
+        "tau2_retail-861-23",
+        "tau2_retail-872-16"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-675-20",
+        "hotpotqa-151-21",
+        "hotpotqa-22-19",
+        "tau2_retail-861-23",
+        "tau2_retail-872-16"
+      ],
+      "remapped_runs": [
+        "bfcl-675-20",
+        "tau2_retail-861-23",
+        "tau2_retail-872-16"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 5,
+          "median_ms": 7664,
+          "max_ms": 10532
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 45,
+          "median_ms": 39,
+          "max_ms": 19079
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-27T00:15:07.248362+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    },
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-7c66b7957c-pn9gr",
+      "live_pins_at_kill": {
+        "vllm-7c66b7957c-gcxl9": 2,
+        "vllm-7c66b7957c-pn9gr": 7
+      },
+      "picker_log_since": "2026-11-27T00:28:58.289750+00:00",
+      "kill_requested_ms": 1795739596569,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 48,
+      "completion_rate": 0.96,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-497-15 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "gaia_dev-497-15 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "gaia_dev-303-17 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "gaia_dev-303-17 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "hotpotqa-22-19 step 2: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply'); RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')",
+        "hotpotqa-22-19 step 2: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply'); RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')",
+        "bfcl-675-20 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "hotpotqa-151-21 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "hotpotqa-151-21 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "gaia_dev-431-22 step 2: answered by vllm-7c66b7957c-pn9gr",
+        "tau2_retail-861-23 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.27.119/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")"
+      ],
+      "on_killed_runs": [
+        "bfcl-675-20",
+        "gaia_dev-303-17",
+        "gaia_dev-431-22",
+        "gaia_dev-497-15",
+        "hotpotqa-151-21",
+        "hotpotqa-22-19",
+        "tau2_retail-861-23"
+      ],
+      "retries": 0,
+      "failed_by_kill": [
+        "hotpotqa-22-19",
+        "tau2_retail-861-23"
+      ],
+      "affected_runs": [
+        "bfcl-675-20",
+        "gaia_dev-303-17",
+        "gaia_dev-431-22",
+        "gaia_dev-497-15",
+        "hotpotqa-151-21",
+        "hotpotqa-22-19",
+        "tau2_retail-861-23"
+      ],
+      "remapped_runs": [
+        "bfcl-675-20",
+        "gaia_dev-303-17",
+        "gaia_dev-431-22",
+        "gaia_dev-497-15"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 5,
+          "median_ms": 1443,
+          "max_ms": 1816
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 43,
+          "median_ms": 1544,
+          "max_ms": 17461
+        },
+        "unpaired": [
+          "hotpotqa-22-19",
+          "tau2_retail-861-23"
+        ],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    }
+  ]
+}

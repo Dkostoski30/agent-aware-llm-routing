@@ -1,0 +1,201 @@
+{
+  "experiment": "p5-3-failover",
+  "hash": "4be74dd7b3f5",
+  "source": {
+    "commit": "c907627ee1378190ff7350e9d41a5415972235ba",
+    "uncommitted": [
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6-retry-on.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s6.meta.json",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-no-kill.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-off.jsonl.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on-picker.log",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl",
+      "experiments/results/p5-3-failover-4be74dd7b3f5-s9-retry-on.jsonl.log"
+    ],
+    "system_sha256": "4191516da9e7d224e057f4b450390f464c20bbfaf876bba07759e9879720a27e"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 9,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-26T23:24:12.614786+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    },
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-6b88f89-s5pkk",
+      "live_pins_at_kill": {
+        "vllm-6b88f89-khmx4": 1,
+        "vllm-6b88f89-s5pkk": 4
+      },
+      "picker_log_since": "2026-11-26T23:35:57.483795+00:00",
+      "kill_requested_ms": 1795736412398,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-494-20 step 2: answered by vllm-6b88f89-s5pkk",
+        "bfcl-507-22 step 2: answered by vllm-6b88f89-s5pkk",
+        "tau2_telecom-978-25 step 2: answered by vllm-6b88f89-s5pkk",
+        "tau2_telecom-978-25 step 2: answered by vllm-6b88f89-s5pkk",
+        "tau2_airline-787-26 step 2: answered by vllm-6b88f89-s5pkk"
+      ],
+      "on_killed_runs": [
+        "bfcl-507-22",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-507-22",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "remapped_runs": [
+        "bfcl-507-22",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 4,
+          "median_ms": 3122.0,
+          "max_ms": 8735
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 46,
+          "median_ms": 4.5,
+          "max_ms": 32873
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-7f4568f77b-4r92r",
+      "live_pins_at_kill": {
+        "vllm-7f4568f77b-4r92r": 4,
+        "vllm-7f4568f77b-rmlhx": 3
+      },
+      "picker_log_since": "2026-11-26T23:47:43.729642+00:00",
+      "kill_requested_ms": 1795737119574,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-494-20 step 2: answered by vllm-7f4568f77b-4r92r",
+        "hotpotqa-26-23 step 2: answered by vllm-7f4568f77b-4r92r",
+        "gaia_dev-366-27 step 2: answered by vllm-7f4568f77b-4r92r",
+        "bfcl-529-28 step 3: answered by vllm-7f4568f77b-4r92r"
+      ],
+      "on_killed_runs": [
+        "bfcl-529-28",
+        "gaia_dev-366-27",
+        "gaia_dev-494-20",
+        "hotpotqa-26-23"
+      ],
+      "retries": 0,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-529-28",
+        "gaia_dev-366-27",
+        "gaia_dev-494-20",
+        "hotpotqa-26-23"
+      ],
+      "remapped_runs": [
+        "bfcl-529-28",
+        "gaia_dev-494-20"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 4,
+          "median_ms": 2069.0,
+          "max_ms": 7940
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 46,
+          "median_ms": 15.5,
+          "max_ms": 33658
+        },
+        "unpaired": [],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    }
+  ]
+}

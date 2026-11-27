@@ -1,0 +1,13 @@
+seed,variant,retry,kill,verdict,runs,done,completion_rate,failed_by_kill,deadline_runs,calls_on_killed_pod,retries,on_killed_runs,on_killed_median_s,on_killed_max_s,pinned_runs,pinned_median_s,pinned_max_s,others_runs,others_median_s,others_max_s,unpaired_runs,retried_steps,lost_s
+6,retry-off,False,True,control,50,50,1.0,0,0,7,0,5,1.916,5.609,0,,,45,0.391,18.968,0,0,0.0
+6,retry-on,True,True,passed,50,50,1.0,0,0,6,0,5,2.421,19.217,0,,,45,0.367,17.997,0,0,0.0
+6,no-kill,True,False,reference,50,50,1.0,,0,,0,,,,,,,,,,,,
+9,no-kill,True,False,reference,50,50,1.0,,0,,0,,,,,,,,,,,,
+9,retry-off,False,True,control,50,50,1.0,0,0,5,0,4,3.122,8.735,0,,,46,0.0045,32.873,0,0,0.0
+9,retry-on,True,True,passed,50,50,1.0,0,0,4,0,4,2.069,7.94,0,,,46,0.0155,33.658,0,0,0.0
+10,retry-on,True,True,passed,50,50,1.0,0,0,7,0,5,7.664,10.532,0,,,45,0.039,19.079,0,0,0.0
+10,no-kill,True,False,reference,50,50,1.0,,0,,0,,,,,,,,,,,,
+10,retry-off,False,True,control,50,48,0.96,2,0,11,0,5,1.443,1.816,0,,,43,1.544,17.461,2,0,0.0
+13,no-kill,True,False,reference,50,50,1.0,,0,,0,,,,,,,,,,,,
+13,retry-on,True,True,passed,50,50,1.0,0,0,9,0,6,0.4835,9.069,0,,,44,0.0165,18.59,0,0,0.0
+13,retry-off,False,True,control,50,49,0.98,1,0,7,0,4,2.103,8.135,0,,,45,0.01,16.505,1,0,0.0
