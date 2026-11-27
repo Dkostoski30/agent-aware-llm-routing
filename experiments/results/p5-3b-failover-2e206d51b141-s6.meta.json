@@ -1,0 +1,267 @@
+{
+  "experiment": "p5-3b-failover",
+  "hash": "2e206d51b141",
+  "source": {
+    "commit": "f44dadd15b059af7f0a2107178475fb7c7a48e56",
+    "uncommitted": [
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on.jsonl.log"
+    ],
+    "system_sha256": "0be0c2c5a78472b5314a2227bc8b849f1bcd58740db603bed7cbe5682300eef7"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 6,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "stop_container": true,
+  "require_cut": true,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-59bdcb57fb-xrzxr",
+      "live_pins_at_kill": {
+        "vllm-59bdcb57fb-5nrtk": 2,
+        "vllm-59bdcb57fb-xrzxr": 7
+      },
+      "picker_log_since": "2026-11-27T01:58:49.240575+00:00",
+      "kill_requested_ms": 1795744988438,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 43,
+      "completion_rate": 0.86,
+      "deadline_runs": [],
+      "on_killed": [
+        "hotpotqa-145-20 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "hotpotqa-145-20 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-565-21 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-561-22 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-679-24 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-679-24 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-527-25 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-527-25 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-708-27 step 2: answered by vllm-59bdcb57fb-xrzxr",
+        "bfcl-708-27 step 2: answered by vllm-59bdcb57fb-xrzxr",
+        "hotpotqa-25-28 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")"
+      ],
+      "on_killed_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "cut": [
+        "hotpotqa-145-20 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "hotpotqa-145-20 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-565-21 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-561-22 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-679-24 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-679-24 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-527-25 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-527-25 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-708-27 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-708-27 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "hotpotqa-25-28 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")"
+      ],
+      "retries": 0,
+      "failed_by_kill": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "affected_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "remapped_runs": [],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 43,
+          "median_ms": 22,
+          "max_ms": 13060
+        },
+        "unpaired": [
+          "bfcl-527-25",
+          "bfcl-561-22",
+          "bfcl-565-21",
+          "bfcl-679-24",
+          "bfcl-708-27",
+          "hotpotqa-145-20",
+          "hotpotqa-25-28"
+        ],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-5fd7c7dcc7-m9n65",
+      "live_pins_at_kill": {
+        "vllm-5fd7c7dcc7-hqklk": 1,
+        "vllm-5fd7c7dcc7-m9n65": 8
+      },
+      "picker_log_since": "2026-11-27T02:10:57.126983+00:00",
+      "kill_requested_ms": 1795745709960,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-270-19 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "gaia_dev-270-19 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-145-20 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-145-20 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-565-21 step 2: retried 1, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-561-22 step 2: retried 1, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-679-24 step 2: answered by vllm-5fd7c7dcc7-m9n65",
+        "bfcl-527-25 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-527-25 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-708-27 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-708-27 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-25-28 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-25-28 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk"
+      ],
+      "on_killed_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "cut": [
+        "gaia_dev-270-19 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "gaia_dev-270-19 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-145-20 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-145-20 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-565-21 step 2: retried 1, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-561-22 step 2: retried 1, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-679-24 step 3: retried 1, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-527-25 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-527-25 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-708-27 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "bfcl-708-27 step 2: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-25-28 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk",
+        "hotpotqa-25-28 step 3: retried 2, answered by vllm-5fd7c7dcc7-hqklk"
+      ],
+      "retries": 13,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "remapped_runs": [
+        "bfcl-527-25",
+        "bfcl-561-22",
+        "bfcl-565-21",
+        "bfcl-679-24",
+        "bfcl-708-27",
+        "gaia_dev-270-19",
+        "hotpotqa-145-20",
+        "hotpotqa-25-28"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 8,
+          "median_ms": 10250.0,
+          "max_ms": 28360
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 42,
+          "median_ms": 661.5,
+          "max_ms": 12899
+        },
+        "unpaired": [],
+        "retried_steps": 8,
+        "lost_ms": 50399
+      }
+    },
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-27T02:22:57.075197+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    }
+  ]
+}

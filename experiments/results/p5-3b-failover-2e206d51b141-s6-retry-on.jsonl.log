@@ -1,0 +1,66 @@
+replay: 1/50 tau2_retail-867-1 tau2_retail: 21 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 2/50 tau2_telecom-963-2 tau2_telecom: 18 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 3/50 hotpotqa-246-3 hotpotqa: 2 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 4/50 hotpotqa-124-4 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 5/50 hotpotqa-83-9 hotpotqa: 1 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 6/50 gaia_dev-387-15 gaia_dev: 2 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 7/50 hotpotqa-22-5 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 8/50 hotpotqa-42-12 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 9/50 tau2_airline-772-10 tau2_airline: 19 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 10/50 tau2_airline-764-7 tau2_airline: 5 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 11/50 gaia_dev-310-8 gaia_dev: 6 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 12/50 tau2_airline-816-14 tau2_airline: 9 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 13/50 bfcl-522-11 bfcl: 14 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 14/50 bfcl-615-6 bfcl: 14 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 15/50 bfcl-624-13 bfcl: 18 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 16/50 bfcl-514-16 bfcl: 16 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 17/50 gaia_dev-476-17 gaia_dev: 3 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 18/50 tau2_telecom-986-18 tau2_telecom: 13 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+replay: 19/50 hotpotqa-78-23 hotpotqa: 1 calls, pods ['vllm-5fd7c7dcc7-m9n65']
+failover: killing vllm-5fd7c7dcc7-m9n65, live pins {'vllm-5fd7c7dcc7-hqklk': 1, 'vllm-5fd7c7dcc7-m9n65': 8}
+replay: gaia_dev-270-19 step 3: retry 1, attempt sent at 1795745709205: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-708-27 step 2: retry 1, attempt sent at 1795745708925: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: hotpotqa-25-28 step 3: retry 1, attempt sent at 1795745709645: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-708-27 step 2: retry 1, attempt sent at 1795745708925: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-527-25 step 2: retry 1, attempt sent at 1795745708343: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-565-21 step 2: retry 1, attempt sent at 1795745708900: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: gaia_dev-270-19 step 3: retry 1, attempt sent at 1795745709205: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: hotpotqa-25-28 step 3: retry 1, attempt sent at 1795745709645: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-561-22 step 2: retry 1, attempt sent at 1795745709578: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-679-24 step 3: retry 1, attempt sent at 1795745710087: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: bfcl-527-25 step 2: retry 1, attempt sent at 1795745708342: HTTPStatusError("Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503")
+replay: hotpotqa-145-20 step 2: retry 1, attempt sent at 1795745708201: RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')
+replay: hotpotqa-145-20 step 2: retry 1, attempt sent at 1795745708201: RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')
+replay: 20/50 hotpotqa-25-28 hotpotqa: 4 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 21/50 gaia_dev-345-26 gaia_dev: 50 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 22/50 hotpotqa-145-20 hotpotqa: 6 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 23/50 bfcl-708-27 bfcl: 8 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 24/50 bfcl-527-25 bfcl: 11 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 25/50 bfcl-679-24 bfcl: 17 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 26/50 bfcl-561-22 bfcl: 13 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 27/50 bfcl-508-29 bfcl: 10 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 28/50 bfcl-565-21 bfcl: 25 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 29/50 gaia_dev-270-19 gaia_dev: 39 calls, pods ['vllm-5fd7c7dcc7-hqklk', 'vllm-5fd7c7dcc7-m9n65']
+replay: 30/50 hotpotqa-237-30 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 31/50 hotpotqa-31-31 hotpotqa: 2 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 32/50 gaia_dev-486-36 gaia_dev: 1 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 33/50 hotpotqa-80-33 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 34/50 hotpotqa-200-35 hotpotqa: 3 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 35/50 gaia_dev-394-38 gaia_dev: 4 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 36/50 hotpotqa-156-37 hotpotqa: 4 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 37/50 tau2_retail-841-34 tau2_retail: 10 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 38/50 bfcl-631-41 bfcl: 7 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 39/50 tau2_airline-820-32 tau2_airline: 10 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 40/50 bfcl-696-40 bfcl: 18 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 41/50 bfcl-532-39 bfcl: 28 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 42/50 tau2_retail-906-42 tau2_retail: 42 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 43/50 gaia_dev-304-43 gaia_dev: 1 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 44/50 hotpotqa-56-50 hotpotqa: 2 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 45/50 gaia_dev-322-47 gaia_dev: 3 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 46/50 tau2_telecom-941-48 tau2_telecom: 18 calls, pods ['vllm-5fd7c7dcc7-5dgbv']
+replay: 47/50 hotpotqa-225-46 hotpotqa: 5 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 48/50 tau2_retail-844-49 tau2_retail: 12 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 49/50 bfcl-723-45 bfcl: 22 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 50/50 tau2_retail-917-44 tau2_retail: 21 calls, pods ['vllm-5fd7c7dcc7-hqklk']
+replay: 573 calls, 0 failed
+replay: wrote /home/kosto/thesis/experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on.jsonl

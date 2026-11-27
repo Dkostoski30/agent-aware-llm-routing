@@ -1,0 +1,220 @@
+{
+  "experiment": "p5-3b-failover",
+  "hash": "2e206d51b141",
+  "source": {
+    "commit": "f44dadd15b059af7f0a2107178475fb7c7a48e56",
+    "uncommitted": [
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-no-kill.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-off.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6-retry-on.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s6.meta.json",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-no-kill-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-no-kill.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-no-kill.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-off-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-off.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-off.jsonl.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-on-picker.log",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-on.jsonl",
+      "experiments/results/p5-3b-failover-2e206d51b141-s9-retry-on.jsonl.log"
+    ],
+    "system_sha256": "0be0c2c5a78472b5314a2227bc8b849f1bcd58740db603bed7cbe5682300eef7"
+  },
+  "profile": "sim",
+  "profile_sha256": "ba9ecd8fc251934a94e829fc15bbc3b98ab741d426a3a2358306e34f103e6460",
+  "trace": "convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl",
+  "pattern": "burst-fan-out-heavy",
+  "seed": 9,
+  "routing": {
+    "plugin": true,
+    "affinity": true
+  },
+  "kill_after_seconds": 245,
+  "wait_for_calls_seconds": 60,
+  "settle_seconds": 5,
+  "stop_container": true,
+  "require_cut": true,
+  "agent_retry": {
+    "llm_retries": 2,
+    "llm_retry_backoff_seconds": 5
+  },
+  "variants": [
+    {
+      "name": "no-kill",
+      "retry": true,
+      "kill": false,
+      "killed_pod": null,
+      "live_pins_at_kill": null,
+      "picker_log_since": "2026-11-27T02:36:51.919580+00:00",
+      "kill_requested_ms": null,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "reference",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "retries": 0
+    },
+    {
+      "name": "retry-off",
+      "retry": false,
+      "kill": true,
+      "killed_pod": "vllm-699ddb5586-kh52w",
+      "live_pins_at_kill": {
+        "vllm-699ddb5586-dr64d": 1,
+        "vllm-699ddb5586-kh52w": 4
+      },
+      "picker_log_since": "2026-11-27T02:48:42.923789+00:00",
+      "kill_requested_ms": 1795747982323,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": false,
+      "verdict": "control",
+      "runs": 50,
+      "done": 46,
+      "completion_rate": 0.92,
+      "deadline_runs": [],
+      "on_killed": [
+        "gaia_dev-494-20 step 2: answered by vllm-699ddb5586-kh52w",
+        "bfcl-507-22 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "tau2_airline-787-26 step 2: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')",
+        "bfcl-529-28 step 2: answered by vllm-699ddb5586-kh52w",
+        "bfcl-529-28 step 2: answered by vllm-699ddb5586-kh52w"
+      ],
+      "on_killed_runs": [
+        "bfcl-507-22",
+        "bfcl-529-28",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26"
+      ],
+      "cut": [
+        "gaia_dev-494-20 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "gaia_dev-494-20 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\"); HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "bfcl-507-22 step 2: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")",
+        "tau2_airline-787-26 step 2: failed, RemoteProtocolError('the stream ended with neither its token counts nor its [DONE] mark: cut mid-reply')",
+        "bfcl-529-28 step 3: failed, HTTPStatusError(\"Server error '503 Service Unavailable' for url 'http://10.43.98.135/v1/chat/completions'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503\")"
+      ],
+      "retries": 0,
+      "failed_by_kill": [
+        "bfcl-507-22",
+        "bfcl-529-28",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26"
+      ],
+      "affected_runs": [
+        "bfcl-507-22",
+        "bfcl-529-28",
+        "gaia_dev-494-20",
+        "tau2_airline-787-26"
+      ],
+      "remapped_runs": [],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 46,
+          "median_ms": 15.0,
+          "max_ms": 16919
+        },
+        "unpaired": [
+          "bfcl-507-22",
+          "bfcl-529-28",
+          "gaia_dev-494-20",
+          "tau2_airline-787-26"
+        ],
+        "retried_steps": 0,
+        "lost_ms": 0
+      }
+    },
+    {
+      "name": "retry-on",
+      "retry": true,
+      "kill": true,
+      "killed_pod": "vllm-648b5b89bc-gfph2",
+      "live_pins_at_kill": {
+        "vllm-648b5b89bc-gfph2": 3,
+        "vllm-648b5b89bc-q9z8g": 2
+      },
+      "picker_log_since": "2026-11-27T03:00:30.430531+00:00",
+      "kill_requested_ms": 1795748689321,
+      "kill_error": null,
+      "replacement_error": null,
+      "picker_restarts": 0,
+      "passed": true,
+      "verdict": "passed",
+      "runs": 50,
+      "done": 50,
+      "completion_rate": 1.0,
+      "deadline_runs": [],
+      "on_killed": [
+        "bfcl-507-22 step 4: retried 1, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_telecom-978-25 step 3: retried 2, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_telecom-978-25 step 3: retried 2, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_airline-787-26 step 3: retried 1, answered by vllm-648b5b89bc-q9z8g"
+      ],
+      "on_killed_runs": [
+        "bfcl-507-22",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "cut": [
+        "bfcl-507-22 step 4: retried 1, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_telecom-978-25 step 3: retried 2, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_telecom-978-25 step 3: retried 2, answered by vllm-648b5b89bc-q9z8g",
+        "tau2_airline-787-26 step 3: retried 1, answered by vllm-648b5b89bc-q9z8g"
+      ],
+      "retries": 4,
+      "failed_by_kill": [],
+      "affected_runs": [
+        "bfcl-507-22",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "remapped_runs": [
+        "bfcl-507-22",
+        "tau2_airline-787-26",
+        "tau2_telecom-978-25"
+      ],
+      "void": false,
+      "recovery": {
+        "on_killed": {
+          "runs": 3,
+          "median_ms": 11565,
+          "max_ms": 13810
+        },
+        "pinned": {
+          "runs": 0,
+          "median_ms": null,
+          "max_ms": null
+        },
+        "others": {
+          "runs": 47,
+          "median_ms": 3,
+          "max_ms": 15615
+        },
+        "unpaired": [],
+        "retried_steps": 3,
+        "lost_ms": 18256
+      }
+    }
+  ]
+}

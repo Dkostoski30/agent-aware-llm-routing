@@ -13,6 +13,41 @@ Notes: <surprises, decisions, what changed>
 
 ---
 
+### 2026-11-27 · P5.3b · green (with the pod's containers stopped at once, the kill cut 4 to 13 calls per replay; retry-on sent every cut call again and completed 200 of 200 runs, retry-off 178 of 200)
+Command: Claude: card 79, tests first (`loadgen/tests/test_failover.py` +20, mutation-checked on the rule lines; `experiments/tests/test_p5_3b.py` 2; 2,129 Python tests in loadgen, experiments and schemas passed, ruff and mypy on the changed files; the user skipped `make test` and `make lint` for the night) · the user, one block: commits 32c1d2e (P5.3's results) and f44dadd (this card's code), `sudo -v` and its keep-alive, `make down`, `make up PROFILE=sim`, `make failover-check EXPERIMENT=experiments/p5-3b-failover.yaml` (2026-11-27 02:58 to 05:31 local, 12 replays in one go). File hash 2e206d51b141, system hash 0be0c2c5a784 and commit f44dadd at all four seeds, only result files uncommitted. Then Claude, read only: the four `.meta.json`, `p5-3b-failover-2e206d51b141-summary.csv`, the replay lines and logs, P5.3's no-kill replays.
+Result:
+- **Clean apart from the kill:** 12 replays of 50 runs; 0 runs failed on their deadline, no kill or replacement error, the picker restarted 0 times; every no-kill reference 50 of 50 with 0 retries.
+- **The stop cut what the delete had not:** the killed pod answered calls at most 0.41 s after the kill was asked for (the crictl lookups run before the stop), against 3.0 s in P5.3. Most failed attempts were gateway 503s: with the retry on, 25 of the 33 attempts sent again, the other 8 streams cut mid-reply; with it off, 3 of the failed calls were cut streams.
+- **Per seed** (sim, `burst-fan-out-heavy`, 2 pods, affinity on; at 245 s the pod with the most live pins stopped with SIGKILL, then force-deleted):
+
+  | seed | variant | live pins at the kill | calls on the killed pod at the kill | cut by the kill | retries | runs failed by the kill | completion | verdict |
+  |---|---|---|---|---|---|---|---|---|
+  | 6 | retry-off | 7 against 2 | 11 | 11 | 0 | 7 | 43 of 50 | control |
+  | 6 | retry-on | 8 against 1 | 13 | 13 | 13 | 0 | 50 of 50 | **passed** |
+  | 9 | retry-off | 4 against 1 | 5 | 5 | 0 | 4 | 46 of 50 | control |
+  | 9 | retry-on | 3 against 2 | 4 | 4 | 4 | 0 | 50 of 50 | **passed** |
+  | 10 | retry-on | 6 against 2 | 8 | 10 | 10 | 0 | 50 of 50 | **passed** |
+  | 10 | retry-off | 6 against 2 | 9 | 10 | 0 | 6 | 44 of 50 | control |
+  | 13 | retry-on | 5 against 4 | 7 | 7 | 6 | 0 | 50 of 50 | **passed** |
+  | 13 | retry-off | 5 against 4 | 6 | 7 | 0 | 5 | 45 of 50 | control |
+
+  Over the seeds: retry-on 100% at every seed; retry-off mean 89.0% (86-92%). Cut calls beyond those running at the kill were sent to the killed pod during the settle, before the picker learnt of it. Many cut calls needed both retries: the first, 5 s after, got another 503, and the second was answered on the pod left.
+- **The recovery cost** (each run's time less its no-kill time, runs finished in both; seconds, median and max):
+
+  | seed | variant | runs with a call on the killed pod | median, max | the rest | median, max | not finished on one side | steps sent again, time lost |
+  |---|---|---|---|---|---|---|---|
+  | 6 | retry-on | 8 | 10.3, 28.4 | 42 | 0.7, 12.9 | 0 | 8, 50.4 s |
+  | 9 | retry-on | 3 | 11.6, 13.8 | 47 | 0.0, 15.6 | 0 | 3, 18.3 s |
+  | 10 | retry-on | 6 | 9.6, 14.4 | 44 | 0.0, 23.0 | 0 | 6, 35.7 s |
+  | 13 | retry-on | 5 | 8.4, 10.6 | 45 | 0.0, 18.0 | 0 | 5, 31.3 s |
+
+  In retry-off every run hit by the kill failed, so none is paired (7, 4, 6, 5 not finished); its other runs' median 0.0 s, max 13.1-22.8 s. A run whose call the kill cut finished 8.4-11.6 s later at the median: the 5 s backoff once or twice and the call again on a pod left with the load. Simulated times, optimistic (Gate 2, P2.9).
+- **The noise between two replays** (each seed's no-kill here against P5.3's, the same seed and variant a night apart): per run, median 0.0 s, max 2.3, 6.4, 16.4 and 27.6 s at seeds 13, 10, 6, 9; total run time -1.7 to +2.2%. So one run's extra time is read against a noise of tens of seconds; the medians are not.
+Notes:
+- The verdict is the one fixed before the run (card 79): retry-on passes a seed when the kill cut at least one call, the retry sent it again and no run failed by the kill. P5.3 stays red as run.
+- At seed 13 one of `hotpotqa-195-23` step 2's two fanned-out calls was answered by the killed pod and counted cut, as its twin was retried: a fanned-out step's calls share a key in the report (P4.4's rule). The run's verdict does not change with it.
+- The ~3 s window in P5.3 and this stop's ~0.4 s fit the kubelet's grace and the crictl calls' time; neither is checked further.
+
 ### 2026-11-27 · P5.3 · red (the kill hit 4 to 11 calls at every seed, retry-on completed 200 of 200 runs and retry-off 197, but the retry never fired: every call on the killed pod with the retry on was answered by that pod after the kill)
 Command: Claude: card 77, tests first (`loadgen/tests/test_failover.py` +24, `experiments/tests/test_p5_3.py` 5), committed c907627 · the user, laptop idle, Windows' AC standby off: `make test`, `make lint`, `make down`, `make up PROFILE=sim`, `make failover-check EXPERIMENT=experiments/p5-3-failover.yaml` (2026-11-26 23:46 to 2026-11-27 02:18 local, 12 replays in one go). File hash 4be74dd7b3f5, system hash 4191516da9e7 at all four seeds, commit c907627. Then Claude, read only: the four `.meta.json`, `p5-3-failover-4be74dd7b3f5-summary.csv`, the replay lines and logs.
 Result:
