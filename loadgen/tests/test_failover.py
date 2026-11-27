@@ -32,6 +32,7 @@ from load_generator.failover import (
     retry_starts,
     run_failover,
     run_times_ms,
+    summary_row,
     variant_profile,
 )
 from load_generator.record import REPO_ROOT
@@ -908,3 +909,288 @@ def test_a_void_variant_has_no_completion_to_count() -> None:
     """No pod was killed, so no report counted its runs."""
     metas = [{"seed": 6, "variants": [{"name": "retry-on", "killed_pod": None}]}]
     assert completion_over_seeds(metas) == {}
+
+
+# P5.3b (card 79): a kill that stops the pod's containers at once, before the force delete, and a
+# verdict that needs a call the kill cut.
+
+
+def test_a_file_may_stop_the_container_and_require_a_cut(tmp_path: Path) -> None:
+    experiment = load_failover(experiment_file(tmp_path, stop_container=True, require_cut=True))
+    assert (experiment.stop_container, experiment.require_cut) == (True, True)
+    plain = load_failover(experiment_file(tmp_path))
+    assert (plain.stop_container, plain.require_cut) == (False, False)
+
+
+@pytest.mark.parametrize("changes", [{"stop_container": "yes"}, {"require_cut": 1}])
+def test_stop_container_and_require_cut_must_be_true_or_false(
+    tmp_path: Path, changes: dict[str, Any]
+) -> None:
+    with pytest.raises(FailoverError, match="true or false"):
+        load_failover(experiment_file(tmp_path, **changes))
+
+
+class FakeCrictl:
+    """sudo -n k3s crictl's replies, its calls recorded in the cluster's list so their order with
+    kubectl's shows."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calls: list[Any],
+        failing: tuple[str, ...] = (),
+        sandboxes: str = "sandbox-1\n",
+    ):
+        self.calls = calls
+        self.failing = failing
+        self.sandboxes = sandboxes
+        monkeypatch.setattr("load_generator.failover.crictl", self)
+
+    def __call__(self, *args: str) -> str:
+        self.calls.append(("crictl", *args))
+        if args[0] in self.failing:
+            command = ["sudo", "-n", "k3s", "crictl", *args]
+            raise subprocess.CalledProcessError(1, command, stderr="crictl failed")
+        if args[0] == "pods":
+            return self.sandboxes
+        if args[0] == "ps":
+            return "container-1\ncontainer-2\n"
+        return ""
+
+
+def stopping_kill() -> Kill:
+    return Kill(ready=[KEPT, KILLED], since="2026-11-19T11:00:00+00:00", stop_container=True)
+
+
+def test_kill_stops_the_pods_containers_at_once_before_the_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """crictl stop with no timeout sends SIGKILL with no SIGTERM first, so every stream on the pod
+    is cut at the kill; the force delete after it lets the ReplicaSet replace the pod."""
+    cluster = FakeCluster(monkeypatch)
+    FakeCrictl(monkeypatch, cluster.calls)
+    state = stopping_kill()
+    kill_pod(state, wait_for_calls_seconds=1)
+    assert state.pod == KILLED
+    asked = [call for call in cluster.calls if call[0] == "crictl" or call[1] == "delete"]
+    assert asked == [
+        ("crictl", "pods", "--name", f"^{KILLED}$", "--state", "ready", "-q"),
+        ("crictl", "ps", "--pod", "sandbox-1", "--state", "running", "-q"),
+        ("crictl", "stop", "--timeout", "0", "container-1", "container-2"),
+        ("kubectl", "delete", "pod"),
+    ]
+
+
+def test_without_stop_container_the_kill_runs_no_crictl(monkeypatch: pytest.MonkeyPatch) -> None:
+    cluster = FakeCluster(monkeypatch)
+    FakeCrictl(monkeypatch, cluster.calls)
+    kill_pod(Kill(ready=[KEPT, KILLED], since="2026-11-19T11:00:00+00:00"), 1)
+    assert [call for call in cluster.calls if call[0] == "crictl"] == []
+    assert ("kubectl", "delete", "pod") in cluster.calls
+
+
+def test_a_failed_crictl_is_kept_for_the_report_and_nothing_deleted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cluster = FakeCluster(monkeypatch)
+    FakeCrictl(monkeypatch, cluster.calls, failing=("stop",))
+    state = stopping_kill()
+    kill_pod(state, wait_for_calls_seconds=1)
+    assert state.error == "crictl stop failed: crictl failed"
+    assert (state.pod, state.killed_ms) == (None, None)
+    assert ("kubectl", "delete", "pod") not in cluster.calls
+
+
+@pytest.mark.parametrize("sandboxes", ["", "sandbox-1\nsandbox-2\n"], ids=["none", "two"])
+def test_a_pod_without_exactly_one_ready_sandbox_is_not_killed(
+    monkeypatch: pytest.MonkeyPatch, sandboxes: str
+) -> None:
+    cluster = FakeCluster(monkeypatch)
+    FakeCrictl(monkeypatch, cluster.calls, sandboxes=sandboxes)
+    state = stopping_kill()
+    kill_pod(state, wait_for_calls_seconds=1)
+    assert state.error is not None and "sandbox" in state.error
+    assert state.pod is None
+    assert ("kubectl", "delete", "pod") not in cluster.calls
+
+
+def cut_report(lines: list[dict[str, Any]], log: str, retry: bool = True) -> Any:
+    return build_failover_report(
+        lines, log, REMAPPED_PICKER, KILLED, KILLED_MS, SETTLE_MS, retry, require_cut=True
+    )
+
+
+# Run a's step 2 ran on the killed pod at the kill and was answered by it before it died.
+ANSWERED = [
+    call("a", 1, KILLED_MS - 9_000, 2_000, KILLED),
+    call("a", 2, KILLED_MS - 3_000, 3_500, KILLED),
+    call("a", 3, KILLED_MS + 6_000, 2_000, KEPT),
+]
+
+
+def test_with_require_cut_a_kill_whose_calls_all_finished_is_void() -> None:
+    """P5.3's seeds: every call on the killed pod answered by it, so the retry was not tested."""
+    result = cut_report(ANSWERED, "")
+    assert result.on_killed == [f"a step 2: answered by {KILLED}"]
+    assert result.cut == []
+    assert result.void
+    assert result.verdict == "void"
+    assert report_lines("retry-on", result)[-1] == (
+        "retry-on: void, no call on the killed pod was cut by the kill"
+    )
+
+
+def test_without_require_cut_the_same_kill_passes_as_in_p4_4() -> None:
+    result = report(ANSWERED, "")
+    assert result.cut == []
+    assert result.verdict == "passed"
+
+
+def test_with_require_cut_a_cut_call_sent_again_passes() -> None:
+    result = cut_report(SAVED, SAVED_LOG)
+    assert result.cut == [f"a step 2: retried 1, answered by {KEPT}"]
+    assert result.verdict == "passed"
+    assert "  calls on it cut by the kill: 1" in report_lines("retry-on", result)
+
+
+def test_a_cut_call_whose_run_failed_fails_the_retry() -> None:
+    result = cut_report(LOST, LOST_LOG)
+    assert result.cut == ["a step 2: failed, RemoteProtocolError('peer closed connection')"]
+    assert result.verdict == "failed"
+
+
+def test_a_call_sent_to_the_killed_pod_during_the_settle_and_cut_counts() -> None:
+    """Run a is pinned to the killed pod; its step 2, sent 200 ms after the kill before the picker
+    learnt of it, was refused, sent again and answered on the kept pod. It was not running at the
+    kill, so it is cut but not on_killed."""
+    lines = [
+        call("a", 1, KILLED_MS - 9_000, 8_000, KILLED),
+        call("a", 2, KILLED_MS + 5_200, 1_000, KEPT),
+    ]
+    result = cut_report(lines, retried("a", 2, 1, KILLED_MS + 200, "HTTPStatusError('503')"))
+    assert result.on_killed == []
+    assert result.cut == [f"a step 2: retried 1, answered by {KEPT}"]
+    assert result.verdict == "passed"
+
+
+def test_a_call_on_the_killed_pod_that_hit_its_deadline_was_not_cut() -> None:
+    lines = [
+        call("a", 1, KILLED_MS - 9_000, 2_000, KILLED),
+        call("a", 2, KILLED_MS - 3_000, None),
+    ]
+    result = cut_report(lines, failed("a", 2, DEADLINE))
+    assert len(result.on_killed) == 1
+    assert result.cut == []
+    assert result.void
+
+
+def test_a_summary_row_counts_the_cut_calls() -> None:
+    variant = {
+        "name": "retry-on",
+        "retry": True,
+        "kill": True,
+        "verdict": "passed",
+        "failed_by_kill": [],
+        "on_killed": ["a step 2: answered by sim-a", "b step 3: retried 1, answered by sim-b"],
+        "cut": ["b step 3: retried 1, answered by sim-b"],
+    }
+    row = summary_row(6, variant)
+    assert (row["calls_on_killed_pod"], row["cut_calls"]) == (2, 1)
+    # P5.3's .meta.json files have no cut list.
+    p5_3 = {key: value for key, value in variant.items() if key != "cut"}
+    assert "cut_calls" not in summary_row(6, p5_3)
+
+
+def test_main_stops_the_container_and_judges_by_the_cut_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = SeedsCluster(monkeypatch, replay_seconds=0.2)
+    FakeCrictl(monkeypatch, cluster.calls)
+    path = seeds_main(tmp_path, monkeypatch)
+    seeds_file(tmp_path, kill_after_seconds=0.01, stop_container=True, require_cut=True)
+    main()
+    digest = load_failover_seeds(path)[0].hash
+    results = tmp_path / "experiments" / "results"
+    meta = json.loads((results / f"failover-{digest}-s6.meta.json").read_text())
+    assert (meta["stop_container"], meta["require_cut"]) == (True, True)
+    by_name = {variant["name"]: variant for variant in meta["variants"]}
+    assert by_name["retry-on"]["cut"] == [f"a step 2: retried 1, answered by {KEPT}"]
+    assert by_name["retry-on"]["verdict"] == "passed"
+    # The check before anything runs, then three crictl calls for each of 4 kills.
+    assert cluster.calls[0] == ("crictl", "version")
+    assert sum(call[:2] == ("crictl", "stop") for call in cluster.calls) == 4
+    summary = (results / f"failover-{digest}-summary.csv").read_text().splitlines()
+    header = summary[0].split(",")
+    assert summary[1].split(",")[header.index("cut_calls")] == "1"
+
+
+def test_main_refuses_to_stop_containers_without_sudo_before_anything_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = SeedsCluster(monkeypatch, replay_seconds=0.2)
+    FakeCrictl(monkeypatch, cluster.calls, failing=("version",))
+    seeds_main(tmp_path, monkeypatch)
+    seeds_file(tmp_path, kill_after_seconds=0.01, stop_container=True)
+    with pytest.raises(FailoverError, match="sudo -v"):
+        main()
+    assert cluster.calls == [("crictl", "version")]
+
+
+def test_main_without_stop_container_asks_no_sudo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = SeedsCluster(monkeypatch, replay_seconds=0.2)
+    FakeCrictl(monkeypatch, cluster.calls)
+    seeds_main(tmp_path, monkeypatch)
+    main()
+    assert [call for call in cluster.calls if call[0] == "crictl"] == []
+
+
+def test_a_call_retried_on_the_kept_pod_was_not_cut_by_the_kill() -> None:
+    """Run b stays on the kept pod; its step 2, running there at the kill, got a 503 and was sent
+    again. Nothing on the killed pod was cut."""
+    lines = [
+        *ANSWERED,
+        call("b", 1, KILLED_MS - 8_000, 2_000, KEPT),
+        call("b", 2, KILLED_MS + 4_000, 1_000, KEPT),
+    ]
+    result = cut_report(lines, retried("b", 2, 1, KILLED_MS - 1_000, "HTTPStatusError('503')"))
+    assert result.cut == []
+    assert result.void
+
+
+class AnsweredCluster(FakeCluster):
+    """Every call on the killed pod answered by it before it died, as at P5.3's seeds."""
+
+    def replay(self, profile: dict[str, Any], *args: Any) -> list[dict[str, Any]]:
+        self.calls.append(("replay",))
+        self.profiles.append(profile)
+        with self.killed:
+            self.killed.wait_for(lambda: self.kills >= self.wanted, self.replay_seconds)
+        shift = self.killed_ms - KILLED_MS
+        return [
+            {
+                **line,
+                "ts_start": line["ts_start"] + shift,
+                "gap_before_ms": 0 if line["step"] == 1 else 1_000,
+            }
+            for line in ANSWERED
+        ]
+
+
+def test_main_judges_a_kill_that_cut_nothing_void_when_the_file_requires_a_cut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cluster = AnsweredCluster(monkeypatch, replay_seconds=0.2)
+    FakeCrictl(monkeypatch, cluster.calls)
+    path = seeds_main(tmp_path, monkeypatch)
+    seeds_file(tmp_path, kill_after_seconds=0.01, stop_container=True, require_cut=True)
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+    assert exit_info.value.code == 1
+    digest = load_failover_seeds(path)[0].hash
+    results = tmp_path / "experiments" / "results"
+    meta = json.loads((results / f"failover-{digest}-s6.meta.json").read_text())
+    by_name = {variant["name"]: variant for variant in meta["variants"]}
+    assert len(by_name["retry-on"]["on_killed"]) == 1
+    assert (by_name["retry-on"]["cut"], by_name["retry-on"]["verdict"]) == ([], "void")

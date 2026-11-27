@@ -413,7 +413,9 @@ drain-check:
 # variant and a .meta.json in experiments/results/, stamped with the file's hash. Needs make up with the file's profile;
 # it puts the profile's routing back after. A file may list seeds, each its own run with its own order and .meta.json,
 # and a variant with no kill, which the kill variants' runs are paired with for their recovery cost (P5.3); a seed
-# finished before is skipped, and every seed's numbers go into <name>-<hash>-summary.csv.
+# finished before is skipped, and every seed's numbers go into <name>-<hash>-summary.csv. A file with stop_container
+# stops the pod's containers at once before the delete, through sudo -n (run sudo -v first), and one with require_cut
+# judges the retry only on calls the kill cut (P5.3b).
 failover-check:
 	@if [ -z "$(EXPERIMENT)" ]; then echo "usage: make failover-check EXPERIMENT=experiments/failover.yaml"; exit 2; fi
 	PYTHONPATH=agent:loadgen uv run --locked python -m load_generator.failover $(EXPERIMENT)

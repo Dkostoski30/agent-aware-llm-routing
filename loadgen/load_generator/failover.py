@@ -31,6 +31,15 @@ rest, whose difference is the noise and the one pod lost. After the last seed, e
 numbers go into <name>-<hash>-summary.csv, and each variant's completion over the seeds is
 printed.
 
+In P5.3 every call on the killed pod with the retry on finished in the seconds the kubelet leaves
+it, so the retry was never tested (docs/task-cards/79-P5.3b-failover-cut.md). A file may then set
+stop_container: the kill first stops the pod's running containers with crictl and no timeout,
+which sends SIGKILL with no SIGTERM before it, so every stream on the pod is cut at the kill, and
+then force-deletes the pod as before. containerd's socket is root's, so this runs through sudo -n,
+checked before anything runs. And require_cut: the verdict then needs a call the kill cut, a call
+on the killed pod, running at the kill or sent during the settle, with an attempt that failed for
+a reason but its deadline; a kill that cut none is void.
+
 Usage: python -m load_generator.failover EXPERIMENT
 """
 
@@ -122,6 +131,23 @@ def kubectl_failure(error: subprocess.CalledProcessError) -> str:
     return f"kubectl {error.cmd[1]} failed: {message}"
 
 
+# k3s's crictl, through sudo with no prompt: containerd's socket is root's (P5.3b).
+CRICTL = ("sudo", "-n", "k3s", "crictl")
+
+
+def crictl(*args: str) -> str:
+    """crictl's output, its message kept on the error as kubectl's."""
+    return subprocess.run([*CRICTL, *args], capture_output=True, text=True, check=True).stdout
+
+
+def command_failure(error: subprocess.CalledProcessError) -> str:
+    """kubectl's or crictl's failure, named by the tool and its verb."""
+    if tuple(error.cmd[: len(CRICTL)]) != CRICTL:
+        return kubectl_failure(error)
+    message = (error.stderr or "").strip() or f"exit {error.returncode}"
+    return f"crictl {error.cmd[len(CRICTL)]} failed: {message}"
+
+
 @dataclass(frozen=True)
 class FailoverVariant:
     name: str
@@ -150,6 +176,10 @@ class FailoverExperiment:
     # What its results are named: <name>-<hash> for a file of one seed, as P4.4's, and
     # <name>-<hash>-s<seed> for each seed of a file of seeds.
     stem: str
+    # The kill stops the pod's containers at once before the delete, and the verdict needs a call
+    # the kill cut (P5.3b). Off in P4.4's and P5.3's files.
+    stop_container: bool = False
+    require_cut: bool = False
 
 
 def _variants(sections: Sequence[Mapping[str, Any]]) -> list[FailoverVariant]:
@@ -191,6 +221,9 @@ def _experiment(
     for key in ("wait_for_calls_seconds", "settle_seconds"):
         if spec[key] < 0:
             raise FailoverError(f"{key} must not be negative")
+    for key in ("stop_container", "require_cut"):
+        if not isinstance(spec.get(key, False), bool):
+            raise FailoverError(f"{key} must be true or false")
     trace = (path.parent / spec["trace"]).resolve()
     if not trace.exists():
         raise FailoverError(f"no trace {spec['trace']}")
@@ -207,6 +240,8 @@ def _experiment(
         settle_seconds=spec["settle_seconds"],
         variants=variants,
         stem=stem,
+        stop_container=spec.get("stop_container", False),
+        require_cut=spec.get("require_cut", False),
     )
 
 
@@ -314,6 +349,11 @@ class FailoverReport:
     on_killed: list[str]
     # The runs of those calls, each once.
     on_killed_runs: list[str]
+    # "<run> step <n>: <outcome>" for each call the kill cut: on the killed pod, running at the
+    # kill or sent during the settle, with an attempt that failed for a reason but its deadline.
+    cut: list[str]
+    # The verdict needs a cut call (P5.3b); else one running on the killed pod will do (P4.4).
+    require_cut: bool
     # Retries printed during the variant, for any reason.
     retries: int
     # Runs with a call running at the kill or sent during the settle that failed for a reason other
@@ -330,7 +370,7 @@ class FailoverReport:
 
     @property
     def void(self) -> bool:
-        return not self.on_killed
+        return not (self.cut if self.require_cut else self.on_killed)
 
     @property
     def passed(self) -> bool:
@@ -480,6 +520,7 @@ def build_failover_report(
     killed_ms: int,
     settle_ms: int,
     retry: bool,
+    require_cut: bool = False,
 ) -> FailoverReport:
     """A call is placed by when its first attempt was sent, and its end is its last attempt's."""
     reasons = failure_reasons(log)
@@ -488,6 +529,7 @@ def build_failover_report(
     picks = picked_before(picker, killed_ms)
     on_killed = []
     on_killed_runs = set()
+    cut = []
     by_kill = set()
     for line in lines:
         key = (line["run_id"], line["step"])
@@ -500,16 +542,20 @@ def build_failover_report(
         texts = reasons.get(key, [NO_REASON])
         failed = "duration_ms" not in line
         in_window = group in (RUNNING_AT_DELETE, SENT_DURING_SETTLE)
-        if in_window and failed and any(text != DEADLINE_REASON for text in texts):
+        not_deadline = any(text != DEADLINE_REASON for text in texts)
+        if in_window and failed and not_deadline:
             by_kill.add(line["run_id"])
         # The line names the pod that answered, which is the one the call ran on unless it was
         # sent again or got no reply.
         unnamed = attempts or failed
         pod = picks.get(key, pins.get(line["run_id"])) if unnamed else line.get("pod")
+        said = f"{line['run_id']} step {line['step']}: {_outcome(line, len(attempts), texts)}"
         if group == RUNNING_AT_DELETE and pod == killed_pod:
-            outcome = _outcome(line, len(attempts), texts)
-            on_killed.append(f"{line['run_id']} step {line['step']}: {outcome}")
+            on_killed.append(said)
             on_killed_runs.add(line["run_id"])
+        # A retried attempt failed for a reason the retry covers, which the deadline is not.
+        if in_window and pod == killed_pod and (attempts or (failed and not_deadline)):
+            cut.append(said)
     runs, done, deadline_runs = completion(lines, reasons)
     going_on = {
         line["run_id"] for line in lines if group_of(line, killed_ms, settle_ms) != FINISHED_BEFORE
@@ -530,6 +576,8 @@ def build_failover_report(
         deadline_runs=deadline_runs,
         on_killed=on_killed,
         on_killed_runs=sorted(on_killed_runs),
+        cut=cut,
+        require_cut=require_cut,
         retries=sum(len(attempts) for attempts in starts.values()),
         failed_by_kill=sorted(by_kill),
         affected=affected,
@@ -546,6 +594,8 @@ def report_lines(variant: str, report: FailoverReport) -> list[str]:
         f"  killed pod {report.killed_pod}",
         f"  calls running on it at the kill: {len(report.on_killed)}",
         *(f"    {text}" for text in report.on_killed),
+        f"  calls on it cut by the kill: {len(report.cut)}",
+        *(f"    {text}" for text in report.cut),
         f"  retries: {report.retries}",
         f"  runs failed on their deadline only: {len(report.deadline_runs)} {report.deadline_runs}",
         f"  runs pinned to it at the kill: {len(report.affected)} {report.affected}; "
@@ -554,7 +604,11 @@ def report_lines(variant: str, report: FailoverReport) -> list[str]:
     said = {
         "control": f"control, {completion}, {by_kill}",
         "passed": f"passed, {completion}",
-        "void": "void, no call was running on the killed pod at the kill",
+        "void": (
+            "void, no call on the killed pod was cut by the kill"
+            if report.require_cut
+            else "void, no call was running on the killed pod at the kill"
+        ),
         "failed": f"failed, {completion}, {by_kill}",
     }
     lines.append(f"{variant}: {said[report.verdict]}")
@@ -592,6 +646,8 @@ class Kill:
     # The Ready pods at the start, and where the picker's log of the replay starts.
     ready: list[str]
     since: str
+    # Stop the pod's containers at once before the delete (P5.3b).
+    stop_container: bool = False
     # Set as the timer's thread starts, so a replay that ended before the kill is told apart.
     started: bool = False
     # The pod killed, each Ready pod's live pins then, and when the delete was asked for, on the
@@ -599,8 +655,18 @@ class Kill:
     pod: str | None = None
     pins: dict[str, int] | None = None
     killed_ms: int | None = None
-    # kubectl's message when the log read or the delete failed.
+    # kubectl's or crictl's message when the log read, the stop or the delete failed.
     error: str | None = None
+
+
+def stop_containers(pod: str) -> None:
+    """The pod's running containers stopped with no timeout: containerd then sends SIGKILL with no
+    SIGTERM first. The pod is found by its ready sandbox, which must be the one."""
+    sandboxes = crictl("pods", "--name", f"^{pod}$", "--state", "ready", "-q").split()
+    if len(sandboxes) != 1:
+        raise FailoverError(f"{pod} has {len(sandboxes)} ready sandboxes in crictl, not 1")
+    containers = crictl("ps", "--pod", sandboxes[0], "--state", "running", "-q").split()
+    crictl("stop", "--timeout", "0", *containers)
 
 
 def kill_pod(state: Kill, wait_for_calls_seconds: float) -> None:
@@ -625,9 +691,15 @@ def kill_pod(state: Kill, wait_for_calls_seconds: float) -> None:
         state.pins = choose_pod(pins, state.ready)[1]
         print(f"failover: killing {pod}, live pins {state.pins}", flush=True)
         killed_ms = _now_ms()
+        if state.stop_container:
+            stop_containers(pod)
         kubectl("delete", "pod", pod, "--grace-period=0", "--force", "--wait=false")
     except subprocess.CalledProcessError as error:
-        state.error = kubectl_failure(error)
+        state.error = command_failure(error)
+        print(f"failover: {state.error}", flush=True)
+        return
+    except FailoverError as error:
+        state.error = str(error)
         print(f"failover: {state.error}", flush=True)
         return
     state.pod, state.killed_ms = pod, killed_ms
@@ -675,7 +747,7 @@ def run_variant(
     restarts = current_picker_restarts()
     # After set-routing.sh, as P3.4's: live_pins compares each line's own timestamp with this.
     since = datetime.now(UTC).isoformat()
-    state = Kill(ready, since)
+    state = Kill(ready, since, experiment.stop_container)
     # The no-kill variant's timer kills nothing and is never started.
     timer = threading.Timer(
         experiment.kill_after_seconds, kill_pod, (state, experiment.wait_for_calls_seconds)
@@ -806,6 +878,7 @@ def variant_summary(
             deadline_runs=report.deadline_runs,
             on_killed=report.on_killed,
             on_killed_runs=report.on_killed_runs,
+            cut=report.cut,
             retries=report.retries,
             failed_by_kill=report.failed_by_kill,
             affected_runs=report.affected,
@@ -824,7 +897,7 @@ def _on(flag: bool) -> str:
 
 
 def variant_report(
-    seed: int, result: VariantResult, settle_ms: int
+    seed: int, result: VariantResult, settle_ms: int, require_cut: bool = False
 ) -> FailoverReport | NoKillReport | None:
     """Printed as it is made. None for a kill variant whose kill did not happen."""
     variant, kill = result.variant, result.kill
@@ -846,7 +919,14 @@ def variant_report(
         print(f"{variant.name}: void, no pod held a live pin, so none was killed")
         return None
     report = build_failover_report(
-        result.lines, log, result.picker, kill.pod, kill.killed_ms, settle_ms, variant.retry
+        result.lines,
+        log,
+        result.picker,
+        kill.pod,
+        kill.killed_ms,
+        settle_ms,
+        variant.retry,
+        require_cut,
     )
     for line in report_lines(variant.name, report):
         print(line)
@@ -862,7 +942,10 @@ def run_seed(
     """One seed's variants, its report and its .meta.json, which is returned."""
     settle_ms = round(experiment.settle_seconds * 1000)
     done = run_failover(experiment, profile, results)
-    reports = [variant_report(experiment.seed, result, settle_ms) for result in done]
+    reports = [
+        variant_report(experiment.seed, result, settle_ms, experiment.require_cut)
+        for result in done
+    ]
     references = [result for result in done if not result.variant.kill]
     reference_times = (
         run_times_ms(references[0].lines, log_path(references[0].out).read_text())
@@ -898,6 +981,8 @@ def run_seed(
         "kill_after_seconds": experiment.kill_after_seconds,
         "wait_for_calls_seconds": experiment.wait_for_calls_seconds,
         "settle_seconds": experiment.settle_seconds,
+        "stop_container": experiment.stop_container,
+        "require_cut": experiment.require_cut,
         "agent_retry": {
             "llm_retries": profile["agent"]["llm_retries"],
             "llm_retry_backoff_seconds": profile["agent"]["llm_retry_backoff_seconds"],
@@ -927,6 +1012,7 @@ SUMMARY_FIELDS = (
     "failed_by_kill",
     "deadline_runs",
     "calls_on_killed_pod",
+    "cut_calls",
     "retries",
     "on_killed_runs",
     "on_killed_median_s",
@@ -964,6 +1050,9 @@ def summary_row(seed: int, variant: Mapping[str, Any]) -> dict[str, Any]:
     if "failed_by_kill" in variant:
         row["failed_by_kill"] = len(variant["failed_by_kill"])
         row["calls_on_killed_pod"] = len(variant["on_killed"])
+    # P5.3's .meta.json files have none.
+    if "cut" in variant:
+        row["cut_calls"] = len(variant["cut"])
     recovery = variant.get("recovery")
     if recovery is not None:
         for group in ("on_killed", "pinned", "others"):
@@ -1028,6 +1117,14 @@ def main() -> None:
             f"results of this file exist for every seed, delete them to run it again: "
             f"{sorted(results.glob(f'{first.name}-{first.hash}*'))}"
         )
+    if first.stop_container:
+        try:
+            crictl("version")
+        except subprocess.CalledProcessError as error:
+            raise FailoverError(
+                f"the kill stops the pod's containers through sudo, run sudo -v first: "
+                f"{command_failure(error)}"
+            ) from error
     metas = []
     for experiment in experiments:
         if experiment.seed in finished:

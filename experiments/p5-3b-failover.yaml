@@ -1,0 +1,44 @@
+# P5.3b: E3 again, P5.3's file with a kill that cuts every call on the pod at once
+# (docs/task-cards/79-P5.3b-failover-cut.md). In P5.3 the force-deleted pod answered every call
+# running on it with the retry on, in the ~3 s the kubelet leaves it, so the retry was never tested
+# (experiments/log.md, 2026-11-27). Run with make failover-check EXPERIMENT=experiments/p5-3b-failover.yaml
+# after make down and make up PROFILE=sim, with sudo -v first and its keep-alive running, the laptop
+# idle and Windows' AC standby off. Results carry this file's hash (D11).
+profile: sim
+# As P5.3 (decided 2026-11-26): simulated pods only; the simulated times are optimistic (Gate 2, P2.9).
+routing:
+  plugin: true
+  affinity: true
+# P5's squares' trace and load (cards 74-76), as P5.3.
+trace: results/traces/convert-apb-ca5fc26bbb1d-cd81f326aece.jsonl
+pattern: burst-fan-out-heavy
+# As P5.3: 5 s into the second burst at 240 s, at every seed (a test holds it).
+kill_after_seconds: 245
+# P4.4's, as P5.3.
+wait_for_calls_seconds: 60
+settle_seconds: 5
+# The pod's containers are stopped with no timeout, SIGKILL with no SIGTERM, then the pod is
+# force-deleted as in P5.3, so the ReplicaSet replaces it (decided 2026-11-27).
+stop_container: true
+# retry-on passes a seed only if the kill cut a call on the killed pod, the retry sent it again and
+# no run failed by the kill; a seed that cut none is void (decided 2026-11-27, before the run).
+require_cut: true
+# As P5.3 (decided 2026-11-27): the control, the retry, and the no-kill reference for the cost.
+variants:
+  - name: retry-off
+    retry: false
+  - name: retry-on
+    retry: true
+  - name: no-kill
+    retry: true
+    kill: false
+# P5.3's seeds and orders, so each seed's no-kill replay can be set beside P5.3's (a test holds it).
+seeds:
+  - seed: 6
+    order: [retry-off, retry-on, no-kill]
+  - seed: 9
+    order: [no-kill, retry-off, retry-on]
+  - seed: 10
+    order: [retry-on, no-kill, retry-off]
+  - seed: 13
+    order: [no-kill, retry-on, retry-off]
