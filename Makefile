@@ -1,4 +1,4 @@
-.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare experiment-series square-compare warmup-report autoscale-compare autoscale-square pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite
+.PHONY: test lint docker-gpu k3s gpu-check vllm-run chat-check vllm-pair vllm-stop concurrency-check prefix-check vllm-deploy sim-deploy service-check gateway-check priority-check picker-image agent-deploy agent-check agent-forward app-forward demo-runner reset-app ui up down grafana smoke record convert replay replay-compare experiment experiment-graph experiment-compare experiment-series square-compare warmup-report autoscale-compare autoscale-square pressure context-check pod-removed drain-check failover-check failover-live calibrate cuda-graphs go-no-go finetune-spike lora-check finetune-data heldout finetune task-suite demo-browser demo-rehearsal
 
 # Python tests always exist (schemas/tests); Go tests run once the gateway module exists, the training tests once the
 # training environment is installed (uv sync --locked --project training, P1.7). The UI specs run once, without
@@ -259,6 +259,21 @@ go-no-go:
 # make up PROFILE=demo; 30 runs, about 30-45 min.
 task-suite:
 	uv run --locked python experiments/task_suite.py experiments/task-suite.yaml
+
+# The Chromium the demo rehearsal drives (P5.4), once per machine: the browser and, through sudo apt, its libraries.
+demo-browser:
+	bash infra/install-browser.sh
+
+# P5.4: the demo rehearsal (experiments/demo-rehearsal.yaml): a headless Chromium does the presenter's part in the UI
+# twice in a row and checks what the audience sees. PART=practical after make up PROFILE=demo, PART=infrastructure after
+# make up PROFILE=real, each with make app-forward, make ui PROFILE=<the same> and, on real, make demo-runner in their
+# own terminals (docs/demo-runbook.md); it refuses to start without them. HEADED=1 shows the window. Each round's
+# screenshots, video and round.json go to experiments/results/demo-rehearsal-<hash>-<part>-<time>/. PYTHONPATH as make
+# experiment's: it reuses the experiment's GPU blocker check and source stamp.
+demo-rehearsal:
+	@if [ -z "$(PART)" ]; then echo "usage: make demo-rehearsal PART=practical|infrastructure [HEADED=1]"; exit 2; fi
+	PYTHONPATH=agent:loadgen uv run --locked python experiments/demo_rehearsal.py experiments/demo-rehearsal.yaml \
+		--part $(PART) $(if $(HEADED),--headed)
 
 # LoRA training steps of the base model at each length in experiments/finetune-train.yaml: template check, peak VRAM,
 # s/step; saves the spike's adapter (P1.7 step 1). Needs the cluster down (make down); the training environment is

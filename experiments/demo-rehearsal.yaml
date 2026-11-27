@@ -1,0 +1,89 @@
+# P5.4: the demo rehearsal (docs/task-cards/78-P5.4-demo-rehearsal.md). A headless Chromium does what the presenter does
+# in the UI, each part on its own profile, and checks what the audience would see. Run with make demo-rehearsal
+# PART=practical after make up PROFILE=demo, PART=infrastructure after make up PROFILE=real, with make app-forward,
+# make ui PROFILE=<the same> and, on real, make demo-runner in their own terminals (docs/demo-runbook.md).
+# The UI as make ui serves it; the browser opens it as the presenter's would.
+ui_url: http://localhost:4200
+# Each part's rounds back to back, each in a new browser session with a new user: "twice in a row" (PLAN.md P5.4). The
+# part is green only when every round passes; a failed round ends the part.
+rounds: 2
+# How long the page has, once a step ended, to stop every working horse (the UI's spinner); one still trotting after it
+# is a stuck spinner and fails the round (the user, 2026-11-27). The panel reads the cluster and the demo runner every
+# monitoring.scrape_interval_seconds (5 s in both profiles) and a run's end comes by SSE, so 15 s is three reads.
+settle_seconds: 15
+# Visible text that fails a round (the user, 2026-11-27): raw errors (a stack trace, an exception's name, raw JSON, a
+# value the UI did not format, an HTTP status) and the UI's own failure captions, each a Python regex matched per line
+# of the page's visible text. A role=alert element and a failure notice (.ag-notice--fail) fail it too.
+raw_errors:
+  - Traceback
+  - '\b[A-Z]\w*(Error|Exception)\b'
+  - '\[object Object\]'
+  - '\bundefined\b'
+  - '\bNaN\b'
+  - '\bnull\b'
+  - '"detail"'
+  - '\{"'
+  - '\bHTTP \d{3}\b'
+  - '\bstatus code\b'
+  - '\bHttp failure\b'
+  - EngineCore
+  - did not answer
+  - could not be read
+  - did not start
+  - is not running
+  - refused
+  - nowhere to go
+  - '\bcalls? lost\b'
+  - Replay failed
+  - The run failed
+
+# The practical demo: chats on the demo model, as the presenter types them. A chat attaches its scenario's files (as
+# experiments/task-suite.yaml has them) with its first message; a turn is a suite question by id, or a question of its
+# own in go_no_go's form. pick is what step 1 must choose for every turn of the chat (D13).
+practical:
+  profile: demo
+  suite: task-suite.yaml
+  chats:
+    - files_of: csv
+      pick: csv
+      turns:
+        - suite: group-total
+        # A follow-up that names no file and no region total before it: the chat's earlier CSV and turns go into the
+        # run request (D13, P4.8), so only the history answers it.
+        - question:
+            id: south-total-follow-up
+            text: And what is the total revenue of the South region?
+            expected_calls: [{tool: group_by}]
+            expected: {kind: aggregate, agg: sum, value: revenue, group: {by: region, equals: South}}
+    - files_of: contracts
+      pick: contracts
+      turns:
+        - suite: termination-diff
+    - files_of: support
+      pick: support
+      turns:
+        - suite: status-1043
+    # No file; the answer must be the profile's agent.out_of_scope_reply word for word, with no tool call.
+    - pick: out_of_scope
+      turns:
+        - question:
+            id: poem
+            text: Write a short poem about the sea.
+            expected_calls: []
+            expected: {kind: fixed_reply}
+
+# The infrastructure demo: the cluster panel's Start and Kill (P4.6a) on the real profile's two pods (D8).
+infrastructure:
+  profile: real
+  # A name in config/real.yaml's app.demo_controls.patterns: steady is the row's 20 tasks (P4.6), at 0.05 runs per
+  # second, so they arrive over the first ~400 s.
+  pattern: steady
+  # From Start to Kill: both pods hold runs by then (20 s apart, 3-4 calls each), and the replay has 5-6 min left to
+  # fail over in. P4.6a's kill at ~22 s found the first call only.
+  kill_after_seconds: 60
+  # From Start to the replay's end: P4.6a's steady replay took 9.6 min on eager pods, compiled ones are faster (P4.13b);
+  # twice that, so only a replay that is stuck runs out.
+  replay_timeout_seconds: 1200
+  # From the kill to its replacement Ready, and before a round to both pods Ready: a compiled real pod is Ready in
+  # ~140 s with the compile cache (P4.13b), and up to 254 s without; twice the longer.
+  ready_timeout_seconds: 510

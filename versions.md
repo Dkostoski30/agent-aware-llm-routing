@@ -56,6 +56,7 @@ apt packages come from Ubuntu 24.04 and are recorded here, not pinned: Ubuntu dr
 | types-PyYAML | 6.0.12.20260906 | uv.lock (P1.3a-1: stubs for mypy strict) |
 | anyio | 4.15.1 | uv.lock (P1.3a-1: its pytest plugin runs the async agent tests; also a dependency of httpx) |
 | pytest | 9.1.1 | uv.lock |
+| playwright (Python) | 1.65.1 | uv.lock (P5.4: the demo rehearsal drives the UI; 2026-11-11, the newest release at least two weeks old on 2026-11-27, 1.65.2 was 13 days old). It pins its browser: Chromium 158.0.8127.18 (Chrome for Testing and Headless Shell, revision 1254), downloaded to `~/.cache/ms-playwright` with its apt libraries by `make demo-browser` |
 
 ## Python runtime packages
 

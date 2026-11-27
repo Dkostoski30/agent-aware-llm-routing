@@ -20,3 +20,7 @@ graphify-out/
 
 # Claude Code worktrees: local checkouts, not part of the repo
 .claude/worktrees/
+
+# The demo rehearsal's session videos (P5.4): megabytes per round, made again by make demo-rehearsal; its screenshots
+# and round.json are committed.
+experiments/results/demo-rehearsal-*/round-*/video.webm

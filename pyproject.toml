@@ -22,6 +22,8 @@ dev = [
     # FastAPI's TestClient runs on it (the app tests, P2.10a); the agent's pin, already in uv.lock.
     "httpx==0.28.1",
     "mypy==2.4.0",
+    # The demo rehearsal drives the UI in Chromium (P5.4); make demo-browser downloads the browser it pins.
+    "playwright==1.65.1",
     "pre-commit==4.6.2",
     "pytest==9.1.1",
     "ruff==0.17.0",

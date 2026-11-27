@@ -66,7 +66,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -1306,6 +1306,28 @@ def service_state(done: subprocess.CompletedProcess[str]) -> str | None:
     return state.group(1)
 
 
+def check_gpu_blockers(blockers: Iterable[Mapping[str, str]]) -> None:
+    """Each of a GPU profile's host.gpu_blockers: its service is stopped or not installed, and its
+    process is not running (P4.13d). Both, as the squares' run blocks checked: a stopped service
+    does not end a process it started. Also the demo rehearsal's check (P5.4)."""
+    for blocker in blockers:
+        service, process = blocker["service"], blocker["process"]
+        state = service_state(_windows_tool(["sc.exe", "query", service]))
+        if state not in (None, SERVICE_STOPPED):
+            raise ExperimentError(
+                f"{service} is {state}, and its {process} holds memory on the GPU beside the "
+                f"pods (P4.13d); stop it as admin first: sc.exe stop {service}"
+            )
+        listed = _windows_tool(
+            ["tasklist.exe", "/FI", f"IMAGENAME eq {process}", "/FO", "CSV", "/NH"]
+        )
+        if process_listed(listed, process):
+            raise ExperimentError(
+                f"{process} is running and holds memory on the GPU beside the pods (P4.13d); "
+                f"end it as admin first: taskkill.exe /F /IM {process}"
+            )
+
+
 def process_listed(done: subprocess.CompletedProcess[str], process: str) -> bool:
     """Whether tasklist.exe's CSV lines name the process; Windows' names ignore case. Its line for
     no match is not quoted, so it reads as no row of that name."""
@@ -1532,26 +1554,8 @@ class LiveCluster:
             )
 
     def check_gpu_blockers(self) -> None:
-        """Each of the GPU profile's host.gpu_blockers: its service is stopped or not installed,
-        and its process is not running (P4.13d). Both, as the squares' run blocks checked: a
-        stopped service does not end a process it started."""
         real = next(name for name in self.experiment.profiles() if name != SIM_PROFILE)
-        for blocker in self.profiles[real]["host"]["gpu_blockers"]:
-            service, process = blocker["service"], blocker["process"]
-            state = service_state(_windows_tool(["sc.exe", "query", service]))
-            if state not in (None, SERVICE_STOPPED):
-                raise ExperimentError(
-                    f"{service} is {state}, and its {process} holds memory on the GPU beside the "
-                    f"pods (P4.13d); stop it as admin first: sc.exe stop {service}"
-                )
-            listed = _windows_tool(
-                ["tasklist.exe", "/FI", f"IMAGENAME eq {process}", "/FO", "CSV", "/NH"]
-            )
-            if process_listed(listed, process):
-                raise ExperimentError(
-                    f"{process} is running and holds memory on the GPU beside the pods (P4.13d); "
-                    f"end it as admin first: taskkill.exe /F /IM {process}"
-                )
+        check_gpu_blockers(self.profiles[real]["host"]["gpu_blockers"])
 
     def _gpu_interval(self) -> int:
         """As often as Prometheus reads the pods, so a sample lines up with a queue reading."""
