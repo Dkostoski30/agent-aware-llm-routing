@@ -124,6 +124,7 @@ def test_the_file_loads_two_rounds_and_both_parts() -> None:
     assert REHEARSAL.infrastructure.kill_after_seconds == 60
     assert REHEARSAL.infrastructure.replay_timeout_seconds == 1200
     assert REHEARSAL.infrastructure.ready_timeout_seconds == 510
+    assert REHEARSAL.infrastructure.pod_gone_seconds == 5
 
 
 def test_the_hash_is_the_files_first_12_hex_digits() -> None:
@@ -784,6 +785,7 @@ class FakePanelPage(Quiet):
         replace_seconds: float = 150,
         ending: dict[str, Any] | None = None,
         runner_error: str | None = None,
+        panel_lag: float = 1,
     ) -> None:
         super().__init__()
         self.clock = clock
@@ -792,6 +794,8 @@ class FakePanelPage(Quiet):
         self.replace_seconds = replace_seconds
         self.ending = ending if ending is not None else _demo(killed=None)
         self.runner_error = runner_error
+        # How long the panel still lists a killed pod after the press.
+        self.panel_lag = panel_lag
         self.events: list[str] = []
         self.started: float | None = None
         self.killed: tuple[str, float] | None = None
@@ -826,6 +830,11 @@ class FakePanelPage(Quiet):
         self.cluster.changes.append((self.clock.now + self.replace_seconds, [*rest, "vllm-new"]))
         return pod
 
+    def pods_shown(self) -> list[str]:
+        if self.killed is not None and self.clock.now - self.killed[1] < self.panel_lag:
+            return [self.killed[0], *self.cluster.pods]
+        return list(self.cluster.pods)
+
     def screenshot(self, name: str) -> None:
         self.events.append(f"screenshot {name}")
 
@@ -849,6 +858,7 @@ def test_an_infrastructure_round_that_goes_right_passes() -> None:
     assert step["killed"] == "vllm-a"
     assert step["kill_at_s"] == 60
     assert step["replaced_after_s"] == 150
+    assert step["gone_from_panel_after_s"] == 1
     assert step["replay"]["runs_finished"] == 20
     assert cluster.pods == ["vllm-b", "vllm-new"]
 
@@ -895,6 +905,24 @@ def test_a_runner_that_does_not_answer_fails_the_round_with_its_caption() -> Non
     page = FakePanelPage(clock, cluster, runner_error="The demo runner is not running")
     result = _infrastructure(page, cluster, clock)
     assert result.failures == ["the demo buttons cannot be used: The demo runner is not running"]
+
+
+def test_a_killed_pod_the_panel_still_lists_after_pod_gone_seconds_fails_the_round() -> None:
+    """What the user saw on 2026-11-27 (card 80): the panel trailing a kill by up to ~10 s."""
+    clock = Clock()
+    cluster = FakeCluster(clock, ["vllm-a", "vllm-b"])
+    page = FakePanelPage(clock, cluster, panel_lag=10)
+    result = _infrastructure(page, cluster, clock)
+    assert result.failures == ["the panel without vllm-a not shown after 5 s"]
+
+
+def test_a_killed_pod_gone_from_the_panel_within_pod_gone_seconds_passes() -> None:
+    clock = Clock()
+    cluster = FakeCluster(clock, ["vllm-a", "vllm-b"])
+    page = FakePanelPage(clock, cluster, panel_lag=5)
+    result = _infrastructure(page, cluster, clock)
+    assert result.passed
+    assert result.steps[0]["gone_from_panel_after_s"] == 5
 
 
 def test_a_replay_that_never_ends_fails_at_its_timeout() -> None:

@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 from app_backend.app import SESSION_COOKIE, create_app
-from app_backend.cluster import ClusterReader
+from app_backend.cluster import ClusterReader, PodLister
 from app_backend.config import AppConfig, ScryptParams
 from app_backend.runtime import RuntimeClient
 from fastapi.testclient import TestClient
@@ -27,10 +27,14 @@ def no_prometheus() -> ClusterReader:
     """Only GET /cluster asks Prometheus (test_cluster.py); a query here would fail the test."""
 
     def refuse(request: httpx.Request) -> httpx.Response:
-        raise AssertionError(f"asked Prometheus: {request.url}")
+        raise AssertionError(f"asked Prometheus or Kubernetes: {request.url}")
 
     return ClusterReader(
-        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://prometheus")
+        httpx.Client(transport=httpx.MockTransport(refuse), base_url="http://prometheus"),
+        PodLister(
+            httpx.Client(transport=httpx.MockTransport(refuse), base_url="https://kubernetes"),
+            lambda: "token",
+        ),
     )
 
 

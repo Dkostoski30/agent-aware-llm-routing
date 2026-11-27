@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 from app_backend.app import create_app
-from app_backend.cluster import ClusterReader
+from app_backend.cluster import ClusterReader, PodLister
 from app_backend.config import AppConfig, DemoPattern, ScryptParams
 from app_backend.demo import RUNNER_DOWN, TOKEN_REFUSED, DemoControls, RunnerClient
 from app_backend.runtime import RuntimeClient
@@ -85,7 +85,11 @@ def build_client(tmp_path: Path, demo: DemoControls | None) -> TestClient:
         httpx.AsyncClient(transport=refusing("the runtime"), base_url="http://agent"),
     )
     prometheus = ClusterReader(
-        httpx.Client(transport=refusing("Prometheus"), base_url="http://prometheus")
+        httpx.Client(transport=refusing("Prometheus"), base_url="http://prometheus"),
+        PodLister(
+            httpx.Client(transport=refusing("Kubernetes"), base_url="https://kubernetes"),
+            lambda: "token",
+        ),
     )
     app = create_app(make_config(), tmp_path / "app.db", runtime, prometheus, lambda: 1000.0, demo)
     client = TestClient(app, base_url="https://testserver")

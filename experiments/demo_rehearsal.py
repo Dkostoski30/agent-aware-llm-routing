@@ -71,6 +71,8 @@ VIEWPORT: ViewportSize = {"width": 1440, "height": 900}
 # answer section (ui/answer.ts), its failure notices ag-notice--fail (bundle.css).
 WORKING_HORSE = 'svg.ag-horse[data-state="working"]'
 ANSWER = ".ag-answer p"
+# A pod card's name in the cluster panel (ui/src/app/cluster/pod-card.ts).
+POD_NAME = ".ag-pod-name"
 ALERT = '[role="alert"]'
 FAIL_NOTICE = ".ag-notice--fail"
 # The vLLM Deployment's pods (infra/charts/vllm), the ones Kill may delete.
@@ -133,6 +135,8 @@ class Infrastructure:
     kill_after_seconds: float
     replay_timeout_seconds: float
     ready_timeout_seconds: float
+    # From the kill to the panel no longer listing the pod (card 80).
+    pod_gone_seconds: float
 
 
 @dataclass(frozen=True)
@@ -242,6 +246,7 @@ def _infrastructure(spec: Mapping[str, Any], config_dir: Path) -> Infrastructure
         kill_after_seconds=spec["kill_after_seconds"],
         replay_timeout_seconds=spec["replay_timeout_seconds"],
         ready_timeout_seconds=spec["ready_timeout_seconds"],
+        pod_gone_seconds=spec["pod_gone_seconds"],
     )
 
 
@@ -423,6 +428,9 @@ class PanelPage(Page, Protocol):
     # Presses Kill on the pod the panel offers; that pod's name.
     def kill(self) -> str: ...
 
+    # The pods the panel's cards name.
+    def pods_shown(self) -> list[str]: ...
+
 
 class Cluster(Protocol):
     # The vLLM pods Ready and not terminating.
@@ -586,6 +594,13 @@ def infrastructure_round(
         )
         killed = page.kill()
         killed_at = clock()
+        waiter.until(
+            lambda: True if killed not in page.pods_shown() else None,
+            infra.pod_gone_seconds,
+            f"the panel without {killed}",
+            since=killed_at,
+        )
+        gone_after = clock() - killed_at
         page.screenshot("killed")
         replaced_at: list[float] = []
 
@@ -611,6 +626,7 @@ def infrastructure_round(
                 "pattern": infra.pattern,
                 "killed": killed,
                 "kill_at_s": round(killed_at - started, 1),
+                "gone_from_panel_after_s": round(gone_after, 1),
                 "replaced_after_s": round(replaced_at[0] - killed_at, 1),
                 "replay": end["runner"]["replay"],
                 "last_kill": end["runner"]["last_kill"],
@@ -719,6 +735,10 @@ class BrowserPage:
         with self._step(f"start {pattern}"):
             self._page.get_by_role("radio", name=pattern, exact=True).click()
             self._page.get_by_role("button", name=re.compile(r"Start \d+ tasks")).click()
+
+    def pods_shown(self) -> list[str]:
+        with self._step("read the pods"):
+            return [name.strip() for name in self._page.locator(POD_NAME).all_inner_texts()]
 
     def kill(self) -> str:
         with self._step("kill"):

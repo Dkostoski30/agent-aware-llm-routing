@@ -186,6 +186,32 @@ describe('DemoControls', () => {
     expect(kill().disabled).toBe(false);
   });
 
+  it('tells the panel once a Start or a Kill press is answered, so it reads the cluster again (card 80)', () => {
+    let pressed = 0;
+    fixture.componentInstance.pressed.subscribe(() => pressed++);
+    answer();
+    press(start());
+    const replay = http.expectOne(DEMO_REPLAY_API);
+    expect(pressed).toBe(0);
+    replay.flush({ replay: RUNNING, last_kill: null });
+    fixture.detectChanges();
+    expect(pressed).toBe(1);
+    press(kill());
+    const killed = http.expectOne(DEMO_KILL_API);
+    expect(pressed).toBe(1);
+    killed.flush({ replay: RUNNING, last_kill: { pod: READY.name, at: '2026-11-20T21:07:41Z' } });
+    expect(pressed).toBe(2);
+  });
+
+  it('tells the panel nothing when a press is refused: the cluster did not change', () => {
+    let pressed = 0;
+    fixture.componentInstance.pressed.subscribe(() => pressed++);
+    answer();
+    press(kill());
+    http.expectOne(DEMO_KILL_API).flush({ detail: 'no other vLLM pod is Ready' }, { status: 409, statusText: 'Conflict' });
+    expect(pressed).toBe(0);
+  });
+
   it('kills the first pod on offer when none was chosen', () => {
     answer();
     press(kill());

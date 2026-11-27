@@ -12,6 +12,7 @@ import logging
 import os
 import secrets
 import sqlite3
+import ssl
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
@@ -24,7 +25,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app_backend import chats, cluster, db, demo, logs
-from app_backend.cluster import ClusterReader
+from app_backend.cluster import ClusterReader, PodLister
 from app_backend.config import AppConfig, load_config, load_demo_config
 from app_backend.demo import DemoControls, RunnerClient
 from app_backend.passwords import hash_password, verify_password
@@ -32,6 +33,9 @@ from app_backend.runtime import RuntimeClient
 
 # The port P2.10b's Service targets.
 PORT = 8080
+# Where Kubernetes mounts a pod's ServiceAccount: its token and the cluster's CA, which the app
+# lists the vLLM pods with (card 80, infra/manifests/app.yaml).
+SERVICE_ACCOUNT = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 SESSION_COOKIE = "session"
 # 32 random bytes (256 bits) cannot be guessed, so a plain sha256 of the token is enough in the
 # database; a slow hash like scrypt only matters for passwords people choose.
@@ -224,8 +228,8 @@ def create_app(
 
 def from_env() -> FastAPI:
     """The app as P2.10b's Deployment runs it: the profile, the database file, the agent
-    runtime's URL, Prometheus's URL and, on a profile with the demo buttons, the demo runner's URL
-    and token from the environment."""
+    runtime's URL, Prometheus's and the Kubernetes API's URLs and, on a profile with the demo
+    buttons, the demo runner's URL and token from the environment."""
     profile = Path(os.environ["THESIS_CONFIG"])
     config = load_config(profile)
     agent_url = os.environ["AGENT_URL"]
@@ -239,6 +243,12 @@ def from_env() -> FastAPI:
     prometheus = httpx.Client(
         base_url=os.environ["PROMETHEUS_URL"], timeout=config.cluster_poll_seconds
     )
+    kubernetes = httpx.Client(
+        base_url=os.environ["KUBERNETES_URL"],
+        timeout=config.cluster_poll_seconds,
+        verify=ssl.create_default_context(cafile=SERVICE_ACCOUNT / "ca.crt"),
+    )
+    pods = PodLister(kubernetes, lambda: (SERVICE_ACCOUNT / "token").read_text().strip())
     demo_config = load_demo_config(profile)
     demo_controls = None
     if demo_config.enabled:
@@ -252,7 +262,7 @@ def from_env() -> FastAPI:
         config,
         Path(os.environ["THESIS_APP_DB"]),
         RuntimeClient(http, events_http),
-        ClusterReader(prometheus),
+        ClusterReader(prometheus, pods),
         demo_controls=demo_controls,
     )
 

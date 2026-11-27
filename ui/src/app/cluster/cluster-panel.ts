@@ -38,7 +38,7 @@ import { RemainingWork } from './remaining-work';
     </div>
     @if (view(); as view) {
       @if (!lost()) {
-        <app-demo-controls [pods]="view.pods" />
+        <app-demo-controls [pods]="view.pods" (pressed)="readNow()" />
       }
     }
   `,
@@ -73,6 +73,14 @@ export class ClusterPanel {
       }
     });
     inject(DestroyRef).onDestroy(() => this.stop());
+  }
+
+  /** Right after a demo press the runner answered (card 80): the read in flight may have left before the press, so it
+   * is dropped with the timer, and the interval starts again from this read's answer. */
+  protected readNow(): void {
+    this.request?.unsubscribe();
+    clearTimeout(this.timer);
+    this.read();
   }
 
   private read(): void {

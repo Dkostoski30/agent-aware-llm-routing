@@ -1,16 +1,20 @@
 """GET /cluster (P3.11): the vLLM pods, their queues, the cluster's remaining work and its cache
 pressure (P4.11), for the UI's cluster panel, as schemas/cluster.v1.json.
 
-Read from Prometheus with instant queries, the queue ones word for word the Grafana panels', so
-the panel and Grafana differ by at most one scrape. Prometheus has no login, so it is reached only
-inside the cluster, and the browser asks the app backend instead. The pod list comes from
-kube-state-metrics, so a pod shows before its first vLLM scrape and leaves when Kubernetes drops it.
+The numbers are Prometheus instant queries, the queue ones word for word the Grafana panels', so
+the panel and Grafana differ by at most one scrape. The pod list is the Kubernetes API's, read with
+the app pod's ServiceAccount (infra/manifests/app.yaml: list pods in default, nothing else), so a
+pod shows as soon as it is created, before its first vLLM scrape, and leaves as soon as Kubernetes
+drops it: a kill shows on the panel's next read, not a kube-state-metrics scrape later, which left
+the panel up to ~10 s behind a kill (card 80). Neither server has a login the browser could use,
+so the browser asks the app backend.
 
 Sync httpx, like the runtime client: the endpoint runs in FastAPI's threadpool. from_env builds the
-client on PROMETHEUS_URL; tests build it on an httpx.MockTransport.
+clients on PROMETHEUS_URL and KUBERNETES_URL; tests build them on httpx.MockTransport.
 """
 
 import logging
+from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -23,13 +27,10 @@ from app_backend.config import AppConfig
 
 PodState = Literal["ready", "starting", "draining", "failed"]
 
-# Pods of the vllm Deployment (real and sim charts alike): vllm-<ReplicaSet hash>-<suffix>.
-# PromQL regexes match the whole label, so the picker's vllm-pool-epp-<hash>-<suffix> does not.
-VLLM_PODS = 'namespace="default",pod=~"vllm-[a-z0-9]+-[a-z0-9]+"'
-# kube-state-metrics keeps a series per phase, 1 for the pod's current one.
-PHASE_QUERY = f"kube_pod_status_phase{{{VLLM_PODS}}} == 1"
-READY_QUERY = f'kube_pod_status_ready{{{VLLM_PODS},condition="true"}} == 1'
-DELETING_QUERY = f"kube_pod_deletion_timestamp{{{VLLM_PODS}}}"
+# The vllm Deployment's pods (real and sim charts alike), as make demo-runner's Kill finds them; the
+# picker's pods carry another name label.
+PODS_PATH = "/api/v1/namespaces/default/pods"
+VLLM_SELECTOR = "app.kubernetes.io/name=vllm"
 # The Grafana queue panel's query (infra/charts/*/dashboards/vllm.json), and its running twin.
 WAITING_QUERY = "sum by (pod) (vllm:num_requests_waiting)"
 RUNNING_QUERY = "sum by (pod) (vllm:num_requests_running)"
@@ -39,12 +40,31 @@ ACTIVE_QUERY = "sum(thesis_active_runs)"
 # replayer's alike.
 CONTEXT_QUERY = "sum(thesis_context_tokens)"
 PROMETHEUS_DOWN = "Prometheus did not answer"
+KUBERNETES_DOWN = "Kubernetes did not answer"
 
 logger = logging.getLogger(__name__)
 
 
-class PrometheusUnavailable(Exception):
-    """No answer to use: the connection failed, timed out, or Prometheus answered 5xx."""
+class ClusterUnavailable(Exception):
+    """No answer to use: the connection failed, timed out, or the server answered 5xx. detail is
+    what the UI is told."""
+
+    def __init__(self, detail: str, error: str) -> None:
+        super().__init__(error)
+        self.detail = detail
+
+
+def _get(http: httpx.Client, detail: str, path: str, **kwargs: Any) -> httpx.Response:
+    """A GET whose outage raises ClusterUnavailable. A 4xx is a request this module got wrong, or
+    a ServiceAccount without its Role, so it raises as a bug rather than an outage."""
+    try:
+        response = http.get(path, **kwargs)
+    except httpx.HTTPError as error:
+        raise ClusterUnavailable(detail, f"{path}: {error!r}") from error
+    if response.is_server_error:
+        raise ClusterUnavailable(detail, f"{path}: {response.status_code}")
+    response.raise_for_status()
+    return response
 
 
 class Pod(BaseModel):
@@ -87,20 +107,45 @@ def cache_pressure(
     return context_tokens / (ready_pods * kv_cache_tokens)
 
 
-class ClusterReader:
-    def __init__(self, http: httpx.Client) -> None:
+class PodLister:
+    """The vLLM pods as the Kubernetes API lists them, each with D14's state. token is read for
+    every request, since the kubelet replaces the ServiceAccount token in its file before it
+    expires."""
+
+    def __init__(self, http: httpx.Client, token: Callable[[], str]) -> None:
         self._http = http
+        self._token = token
+
+    def pods(self) -> dict[str, PodState]:
+        response = _get(
+            self._http,
+            KUBERNETES_DOWN,
+            PODS_PATH,
+            params={"labelSelector": VLLM_SELECTOR},
+            headers={"Authorization": f"Bearer {self._token()}"},
+        )
+        states: dict[str, PodState] = {}
+        for item in response.json()["items"]:
+            status = item["status"]
+            # A pod not yet scheduled has no conditions.
+            ready = any(
+                c["type"] == "Ready" and c["status"] == "True" for c in status.get("conditions", [])
+            )
+            deleting = "deletionTimestamp" in item["metadata"]
+            states[item["metadata"]["name"]] = pod_state(
+                status["phase"], ready=ready, deleting=deleting
+            )
+        return states
+
+
+class ClusterReader:
+    def __init__(self, http: httpx.Client, kubernetes: PodLister) -> None:
+        self._http = http
+        self._kubernetes = kubernetes
 
     def _instant(self, query: str) -> list[tuple[dict[str, str], float]]:
-        """One instant query's vector as (labels, value) pairs. A 4xx is a query this module got
-        wrong, so it raises as a bug rather than a Prometheus outage."""
-        try:
-            response = self._http.get("/api/v1/query", params={"query": query})
-        except httpx.HTTPError as error:
-            raise PrometheusUnavailable(f"{query}: {error!r}") from error
-        if response.is_server_error:
-            raise PrometheusUnavailable(f"{query}: {response.status_code}")
-        response.raise_for_status()
+        """One instant query's vector as (labels, value) pairs."""
+        response = _get(self._http, PROMETHEUS_DOWN, "/api/v1/query", params={"query": query})
         return [
             (sample["metric"], float(sample["value"][1]))
             for sample in response.json()["data"]["result"]
@@ -119,19 +164,13 @@ class ClusterReader:
         return sum(value for _, value in vector) if vector else None
 
     def read(self, config: AppConfig) -> Cluster:
-        phases = {labels["pod"]: labels["phase"] for labels, _ in self._instant(PHASE_QUERY)}
-        ready = self._by_pod(READY_QUERY)
-        deleting = self._by_pod(DELETING_QUERY)
+        states = self._kubernetes.pods()
         waiting = self._by_pod(WAITING_QUERY)
         running = self._by_pod(RUNNING_QUERY)
+        # A pod's vLLM series outlive it by a scrape; Kubernetes's list decides which pods show.
         pods = [
-            Pod(
-                name=name,
-                state=pod_state(phases[name], ready=name in ready, deleting=name in deleting),
-                queue=waiting.get(name),
-                running=running.get(name),
-            )
-            for name in sorted(phases)
+            Pod(name=name, state=states[name], queue=waiting.get(name), running=running.get(name))
+            for name in sorted(states)
         ]
         # The pods shown as ready, so a draining one, still Ready to Kubernetes but sent nothing
         # new by the picker, holds no share of the cache (decided 2026-11-20).
@@ -156,15 +195,21 @@ def router(reader: ClusterReader, config: AppConfig, use_user_id: Any) -> APIRou
 
     @cluster.get("/cluster", response_model=Cluster)
     def read_cluster(_: UserId) -> Cluster | JSONResponse:
-        """503 when Prometheus cannot answer, with the poll interval, so the UI says the numbers
-        are missing instead of showing zeros, and still knows when to ask again."""
+        """503 when Prometheus or Kubernetes cannot answer, with the poll interval, so the UI says
+        the numbers are missing instead of showing zeros, and still knows when to ask again."""
         try:
             return reader.read(config)
-        except PrometheusUnavailable as error:
-            logs.log(logger, logging.WARNING, "prometheus unavailable", error=str(error))
+        except ClusterUnavailable as error:
+            logs.log(
+                logger,
+                logging.WARNING,
+                "cluster unavailable",
+                detail=error.detail,
+                error=str(error),
+            )
             return JSONResponse(
                 status_code=503,
-                content={"detail": PROMETHEUS_DOWN, "poll_seconds": config.cluster_poll_seconds},
+                content={"detail": error.detail, "poll_seconds": config.cluster_poll_seconds},
             )
 
     return cluster

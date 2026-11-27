@@ -1,5 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { Icon } from '../ui/icon';
 import { ClusterPod } from './cluster';
@@ -110,6 +110,10 @@ const NO_ANSWER = 'The app backend did not answer.';
 })
 export class DemoControls {
   readonly pods = input.required<ClusterPod[]>();
+  // A press the runner took, once it answered: the cluster changed, so the panel reads it again rather than wait for
+  // its next read, up to a poll interval later (card 80). The kill's answer comes after the delete, so that read no
+  // longer lists the pod. A refused press changed nothing and says nothing.
+  readonly pressed = output();
   private readonly http = inject(HttpClient);
   protected readonly view = signal<DemoView | null>(null);
   protected readonly chosenPattern = signal<string | null>(null);
@@ -190,6 +194,7 @@ export class DemoControls {
           this.killing.set(null);
           this.refusal.set(null);
           this.view.update((view) => view && { ...view, runner, runner_error: null });
+          this.pressed.emit();
         },
         error: (error: HttpErrorResponse) => {
           this.pressing.set(false);

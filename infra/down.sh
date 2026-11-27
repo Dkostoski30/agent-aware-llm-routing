@@ -28,9 +28,10 @@ uninstall_release() {
 
 if systemctl is-active --quiet k3s; then
   # Reverse order of make up: the app backend first (infra/deploy-app.sh), by name and not with -f app.yaml, so its
-  # claim app-data and the users and chats on it stay (P2.10b); make reset-app is what removes them.
-  kubectl delete deployment/app service/app configmap/app-config --ignore-not-found --wait \
-    --timeout "$UNINSTALL_TIMEOUT"
+  # claim app-data and the users and chats on it stay (P2.10b); make reset-app is what removes them. Its access to
+  # Kubernetes goes with it (card 80).
+  kubectl delete deployment/app service/app configmap/app-config serviceaccount/app role/app-pods rolebinding/app-pods \
+    --ignore-not-found --wait --timeout "$UNINSTALL_TIMEOUT"
   # With it, the demo runner's address and token (P4.6a); the next make up makes a new token, so a make demo-runner
   # still running then must be restarted, and the panel says so.
   kubectl delete -f "$REPO_ROOT/infra/manifests/demo-runner.yaml" --ignore-not-found --wait \

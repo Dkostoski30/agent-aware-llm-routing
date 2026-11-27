@@ -1,7 +1,8 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, output } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Auth } from '../auth/auth';
 import clusterSchema from '../../../../schemas/cluster.v1.json';
 import { CLUSTER_API, ClusterPod, ClusterView } from './cluster';
@@ -13,6 +14,7 @@ import { DemoControls } from './demo-controls';
 @Component({ selector: 'app-demo-controls', template: '<i class="demo-stub">{{ names() }}</i>' })
 class DemoControlsStub {
   readonly pods = input.required<ClusterPod[]>();
+  readonly pressed = output();
   protected readonly names = computed(() => this.pods().map((pod) => pod.name).join(','));
 }
 
@@ -135,6 +137,35 @@ describe('ClusterPanel', () => {
     vi.advanceTimersByTime(1);
     answer({ ...VIEW, remaining_work: 2 });
     expect(steps()).toBe('2');
+  });
+
+  const pressDemo = () => {
+    fixture.debugElement.query(By.directive(DemoControlsStub)).componentInstance.pressed.emit();
+    fixture.detectChanges();
+  };
+
+  it('reads again at once when a demo press is answered, then keeps its interval (card 80)', () => {
+    logIn();
+    answer();
+    vi.advanceTimersByTime(1_000);
+    pressDemo();
+    answer({ ...VIEW, pods: [STARTING] });
+    expect(pods().map((pod) => pod[0])).toEqual([STARTING.name]);
+    vi.advanceTimersByTime(4_999);
+    http.expectNone(CLUSTER_API);
+    vi.advanceTimersByTime(1);
+    answer();
+  });
+
+  it('drops a read in flight when a press is answered: it may have left before the kill', () => {
+    logIn();
+    answer();
+    vi.advanceTimersByTime(5_000);
+    const stale = http.expectOne(CLUSTER_API);
+    pressDemo();
+    expect(stale.cancelled).toBe(true);
+    answer({ ...VIEW, pods: [STARTING] });
+    expect(pods().map((pod) => pod[0])).toEqual([STARTING.name]);
   });
 
   it('says the numbers are missing on a 503 instead of showing zeros, and asks again', () => {

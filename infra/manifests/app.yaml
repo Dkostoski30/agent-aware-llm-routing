@@ -1,6 +1,6 @@
 # The app backend (D7, P2.10b): users, sessions, chats, messages and attachments in one SQLite file on a volume.
-# infra/down.sh deletes the Deployment and the Service by name but never the claim, so the data survives make down;
-# make reset-app is the only thing that removes it.
+# infra/down.sh deletes the Deployment, the Service and the app's access to Kubernetes by name but never the claim, so
+# the data survives make down; make reset-app is the only thing that removes it.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -36,6 +36,8 @@ spec:
       annotations:
         thesis/config-hash: set-by-deploy-app
     spec:
+      # Lists the vLLM pods for the cluster panel (card 80), with the Role below.
+      serviceAccountName: app
       containers:
         - name: app
           image: set-by-deploy-app
@@ -52,6 +54,10 @@ spec:
             # KEDA objects use too; GET /cluster reads the cluster panel's numbers there (P3.11).
             - name: PROMETHEUS_URL
               value: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+            # The Kubernetes API's in-cluster Service; GET /cluster lists the vLLM pods there, so a kill shows on the
+            # panel's next read rather than a kube-state-metrics scrape later (card 80).
+            - name: KUBERNETES_URL
+              value: https://kubernetes.default.svc
             # The host's demo runner (infra/manifests/demo-runner.yaml) and its token, which the app sends with each
             # call; read only on a profile with app.demo_controls.enabled (P4.6a). infra/deploy-app.sh makes the Secret.
             - name: DEMO_RUNNER_URL
@@ -94,3 +100,35 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+# The app pod's identity towards the Kubernetes API (card 80): it may list the pods of default and nothing else, which
+# is all GET /cluster reads; Kill stays with make demo-runner on the host (P4.6a).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-pods
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-pods
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: app-pods
+subjects:
+  - kind: ServiceAccount
+    name: app
+    namespace: default

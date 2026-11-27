@@ -87,3 +87,7 @@ infrastructure:
   # From the kill to its replacement Ready, and before a round to both pods Ready: a compiled real pod is Ready in
   # ~140 s with the compile cache (P4.13b), and up to 254 s without; twice the longer.
   ready_timeout_seconds: 510
+  # From the kill to the panel no longer listing the pod: the panel reads the pods from Kubernetes again as soon as the
+  # Kill press is answered, after the delete (card 80); 5 s is the panel's own read interval, so the press is
+  # answered and read within one.
+  pod_gone_seconds: 5
